@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>neoracer_ros2_driver</name>
+  <version>0.0.1</version>
+  <description>Backend ROS2 driver for neoracer v1 with support for OSRbot software stack in collaboration with Seeed Studio</description>
+  <maintainer email="chrisclai02@gmail.com">chrisclai</maintainer>
+  <license>CERN Open Hardware Licence Version 2 - Strongly Reciprocal</license>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <depend>ackermann_msgs</depend>
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
