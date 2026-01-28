@@ -39,7 +39,7 @@ class ControllerNode(Node):
         super().__init__('controller_node')
 
         # ===== DECLARE PARAMETERS =====
-        self.port_name = '/dev/ttyACM0'
+        self.port_name = '/dev/ttyACM1'
         self.baud_rate = 115200
         self.max_steering_angle_deg = 30 # in degrees, physical limitation of the vehicle
         self.wheelbase = 0.285 # in meters, physical limitation of the vehicle
@@ -96,7 +96,7 @@ class ControllerNode(Node):
                         try:
                             data, tag = controller_lib.parse_serial_data(line)
                             if data is not None:
-                                pub_imu(data) if tag == 'i' else pub_odom(data)
+                                self.pub_imu(data) if tag == 'i' else self.pub_odom(data) if tag == 'o' else None
                         except (ValueError, IndexError) as e:
                             self.get_logger().warn(f"Unable to parse message: [{line}], reason: {e}")
                 except serial.SerialException:
@@ -169,22 +169,22 @@ class ControllerNode(Node):
         angle = msg.drive.steering_angle
 
         # Map steering angle from abstract [-1, 1] to real [-30 deg, 30 deg] value via linear transform
-        steering_angle_deg = self.max_steering_angle_deg * angle /2
+        steering_angle_deg = self.max_steering_angle_deg * angle
 
-        # Does speed need to be mapped? Unsure, but assume range is from [-1 to 1] for now
-        speed = speed * 4
+        # Speed is a value from -6m/s to 6m/s, map based on max_speed param
+        speed = speed * 6.0 # TODO param this later
 
         # Build command, ESP32 controller board expects key [v] to represent a drive command
         command = f"v {speed:.3f} {steering_angle_deg:.2f}\n"
 
         # Call dibs on serial thread to send command out to vehicle
-        if self.last_drive_cmd != command:
-            with self.serial_lock:
-                try:
-                    self.serial.write(command.encode('utf-8'))
-                    self.get_logger().info(f"[DEBUG] Sent command to controller board: {command.strip()}")
-                except serial.SerialException as e:
-                    self.get_logger().error(f"[ERROR] Could not send message [{command}] out to controller board: {e}")
+        #if self.last_drive_cmd != command:
+        with self.serial_lock:
+            try:
+                self.serial.write(command.encode('utf-8'))
+                self.get_logger().info(f"[DEBUG] Sent command to controller board: {command.strip()}")
+            except serial.SerialException as e:
+                self.get_logger().error(f"[ERROR] Could not send message [{command}] out to controller board: {e}")
         
         self.last_drive_cmd = command
         self.last_cmd_time = self.get_clock().now() # track last commanded time to watch out for stale packets

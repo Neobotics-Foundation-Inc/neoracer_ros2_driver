@@ -4,6 +4,8 @@ controller_lib.py
 Helper functions for controller.py
 """
 
+import math
+
 def parse_serial_data(line:str):
     """
     Parse the line data coming from the serial port in accordance to the following encoding rules:
