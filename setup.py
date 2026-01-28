@@ -27,6 +27,7 @@ setup(
     entry_points={
         'console_scripts': [
             'camera = neoracer_ros2_driver.camera:main',
+            'controller = neoracer_ros2_driver.controller:main',
         ],
     },
 )

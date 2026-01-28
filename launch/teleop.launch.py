@@ -12,7 +12,22 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     return launch.LaunchDescription([
-        
+
+        # Launch ESP32 Controller Node
+        # Contains: IMU, Odom, Motor Control
+        Node(
+            package='neoracer_ros2_driver',
+            executable='controller',
+            name='controller_node'
+        ),
+
+        # Launch Joystick Node
+        Node(
+	    package='joy',
+        executable='joy_node',
+        name='joy_node',
+	    ),
+
         # Launch Camera Node
         Node(
 	        package='neoracer_ros2_driver',
