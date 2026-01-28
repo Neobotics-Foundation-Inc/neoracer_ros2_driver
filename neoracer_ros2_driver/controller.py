@@ -182,7 +182,7 @@ class ControllerNode(Node):
         with self.serial_lock:
             try:
                 self.serial.write(command.encode('utf-8'))
-                self.get_logger().info(f"[DEBUG] Sent command to controller board: {command.strip()}")
+                # self.get_logger().info(f"[DEBUG] Sent command to controller board: {command.strip()}")
             except serial.SerialException as e:
                 self.get_logger().error(f"[ERROR] Could not send message [{command}] out to controller board: {e}")
         
