@@ -61,7 +61,14 @@ alias rqt_image_view="ros2 run rqt_image_view rqt_image_view"
 alias rqt_runtime_monitor="ros2 run rqt_runtime_monitor rqt_runtime_monitor"
 ```
 
-4. Set up Jupyter Lab as an autostart service
+4. Set up the following additional directories:
+
+```sh
+mkdir ~/data
+mkdir ~/jupyter_ws
+```
+
+5. Set up Jupyter Lab as an autostart service
 
 ```sh
 sudo ufw allow 8888 # firewall
@@ -99,14 +106,14 @@ sudo systemctl start jupyterlab.service
 sudo journalctl -u jupyterlab.service -f # to debug service
 ```
 
-5. Set up joystick driver
+6. Set up joystick driver
 
 ```sh
 sudo git clone https://github.com/paroj/xpad.git /usr/src/xpad-0.4 
 sudo dkms install -m xpad -v 0.4
 ```
 
-6. Clone and build the ROS2 driver
+7. Clone and build the ROS2 driver
 
 ```sh
 cd ~/osracer_ws/src # or ~/ros2_ws depending on stack
