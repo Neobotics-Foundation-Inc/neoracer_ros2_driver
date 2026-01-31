@@ -169,7 +169,7 @@ sudo apt update && sudo apt upgrade -y
 
 ## 5 | Licensing
 
-Hardware design files in this repository are licensed under **CERN-OHL-S-2.0** (CERN Open Hardware Licence Version 2 – Strongly Reciprocal).
+All files in this repository are licensed under **GPLv3** (GNU GENERAL PUBLIC LICENSE Version 3).
 
 Source Location: https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver
 
