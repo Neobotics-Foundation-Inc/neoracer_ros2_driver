@@ -40,7 +40,8 @@ sudo apt install ros-humble-joy ros-humble-joy-linux ros-humble-teleop-twist-joy
 sudo apt install vim tmux screen terminator -y
 sudo apt install ufw -y
 sudo apt install joystick -y
-sudo apt install -y dkms git build-essential nvidia-l4t-kernel-headers -y
+sudo apt install dkms git build-essential nvidia-l4t-kernel-headers -y
+sudo apt install python3-pip -y
 ```
 
 2. Install the following pip dependencies:
@@ -98,7 +99,7 @@ WantedBy=multi-user.target
 Reload, enable, and start the service
 
 ```sh
-sudo loginctl enable-linger jetson   
+sudo loginctl enable-linger $USER   
 sudo systemctl daemon-reload
 sudo systemctl enable jupyterlab.service
 sudo systemctl start jupyterlab.service
