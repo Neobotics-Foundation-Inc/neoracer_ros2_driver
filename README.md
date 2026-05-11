@@ -10,6 +10,7 @@ Backend ROS2 driver for neoracer v1 with support for OSRbot software stack in co
 3. [Usage](#3--usage)
 4. [Troubleshooting](#4--troubleshooting)
 5. [Licensing](#5--licensing)
+6. [Citation](#6--citation)
 
 ---
 
@@ -175,3 +176,21 @@ All files in this repository are licensed under **GPLv3** (GNU GENERAL PUBLIC LI
 Source Location: https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver
 
 Warranty disclaimer: provided **as-is**, without any express or implied warranty.
+
+---
+
+## 6 | Citation
+
+If you use the **NeoRacer ROS2 driver** in published research, please cite this repository. GitHub renders a "Cite this repository" button from the [`CITATION.cff`](CITATION.cff) at the repo root that produces BibTeX/APA automatically.
+
+BibTeX:
+
+```bibtex
+@software{neobotics_neoracer_ros2_driver_2026,
+  author       = {Lai, Chris and Bandyopadhyay, Koneshka},
+  title        = {{NeoRacer ROS2 Driver}: Hardware Interface for the {NeoRacer V1} Autonomous Racing Platform},
+  year         = {2026},
+  url          = {https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver},
+  note         = {Neobotics Foundation Inc.}
+}
+```
