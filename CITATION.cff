@@ -1,12 +1,12 @@
 cff-version: 1.2.0
 message: "If you use the NeoRacer ROS2 driver in your research, please cite it as below."
 title: "NeoRacer ROS2 Driver: Hardware Interface for the NeoRacer V1 Autonomous Racing Platform"
+abstract: "ROS2 hardware interface driver for the NeoRacer V1 autonomous racing platform, developed by Neobotics Foundation Inc. in collaboration with Seeed Studio."
 authors:
   - family-names: Lai
     given-names: Chris
   - family-names: Bandyopadhyay
     given-names: Koneshka
-  - name: "Neobotics Foundation Inc."
 type: software
 url: "https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver"
 repository-code: "https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver"
