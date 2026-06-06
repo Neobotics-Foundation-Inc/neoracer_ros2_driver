@@ -1,0 +1,30 @@
+[Unit]
+Description=Neoracer JupyterLab (port 8888)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+ExecStart=/bin/bash -c '\
+    LOG_DIR="$(readlink -f /home/racecar/logs/latest 2>/dev/null || echo /home/racecar/logs)"; \
+    mkdir -p "$LOG_DIR"; \
+    exec /home/racecar/.local/bin/jupyter lab \
+        --ip=0.0.0.0 \
+        --port=8888 \
+        --no-browser \
+        --notebook-dir=/home/racecar/jupyter_ws \
+        --ServerApp.token="" \
+        --ServerApp.password="" \
+        2>&1 | tee -a "$LOG_DIR/jupyter.log"'
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/racecar
+Environment=PYTHONPATH=/opt/ros/humble/lib/python3.10/site-packages:/home/racecar/ros2_ws/install/neoracer_ros2_driver/lib/python3.10/site-packages
+Environment=AMENT_PREFIX_PATH=/home/racecar/ros2_ws/install/neoracer_ros2_driver:/opt/ros/humble
+Environment=LD_LIBRARY_PATH=/opt/ros/humble/lib/aarch64-linux-gnu:/opt/ros/humble/lib
+WorkingDirectory=/home/racecar/jupyter_ws
+
+[Install]
+WantedBy=multi-user.target
