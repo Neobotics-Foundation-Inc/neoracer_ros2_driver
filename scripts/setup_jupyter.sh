@@ -70,7 +70,7 @@ if [ ! -d "$JUPYTER_WS" ]; then
 # Neoracer Jupyter Workspace
 
 JupyterLab serves this directory at http://<robot>:8888 when
-racecar-jupyter.service is running.
+neoracer-jupyter.service is running.
 
 Start a notebook and `import rclpy` - the systemd unit pre-sets
 PYTHONPATH/AMENT_PREFIX_PATH/LD_LIBRARY_PATH so ROS2 messages and the

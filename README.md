@@ -160,8 +160,8 @@ The `racecar` shell tool (sourced into `~/.bashrc`):
 | `racecar cleanup [--force]` | list/kill orphaned processes + FastRTPS SHM |
 
 **Services** (auto-start on boot once installed via `racecar service install`):
-`racecar-teleop`, `racecar-watchdog`, `racecar-dashboard` (web status, port
-**8080**), `racecar-jupyter` (JupyterLab, port **8888**).
+`neoracer-teleop`, `neoracer-watchdog`, `neoracer-dashboard` (web status, port
+**8080**), `neoracer-jupyter` (JupyterLab, port **8888**).
 
 ```sh
 racecar service start              # starts teleop; watchdog follows
