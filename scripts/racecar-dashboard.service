@@ -1,0 +1,19 @@
+[Unit]
+Description=Neoracer Web Dashboard (port 8080)
+After=racecar-teleop.service
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+ExecStart=/bin/bash -c '\
+    source /opt/ros/humble/setup.bash && \
+    source /home/racecar/ros2_ws/install/setup.bash && \
+    exec python3 /home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/dashboard.py'
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/racecar
+WorkingDirectory=/home/racecar/ros2_ws
+
+[Install]
+WantedBy=multi-user.target

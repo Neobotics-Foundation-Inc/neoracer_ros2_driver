@@ -1,0 +1,23 @@
+# Neoracer — stable device symlinks
+# Installed to /etc/udev/rules.d/ by scripts/setup_udev.sh.
+# After install: sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Each device lists the VID:PIDs seen across fleet hardware revisions so one
+# rules file works on every car. Match on VID:PID (never per-unit serial) so
+# the rules are portable.
+
+# ---- ESP32 / OSRbot base board (IMU, odometry, FlySky RC, motor ESC) ----
+# Enumerates as a native USB-CDC port; ID_MM_DEVICE_IGNORE stops ModemManager
+# from probing it (a stray probe can open the port mid-line and drop data).
+KERNEL=="tty*", SUBSYSTEM=="tty", SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", ENV{ID_MM_DEVICE_IGNORE}="1", MODE:="0666", GROUP:="dialout", SYMLINK+="osrbot_base"
+KERNEL=="tty*", SUBSYSTEM=="tty", SUBSYSTEMS=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ENV{ID_MM_DEVICE_IGNORE}="1", MODE:="0666", GROUP:="dialout", SYMLINK+="osrbot_base"
+KERNEL=="tty*", SUBSYSTEM=="tty", SUBSYSTEMS=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", ENV{ID_MM_DEVICE_IGNORE}="1", MODE:="0666", GROUP:="dialout", SYMLINK+="osrbot_base"
+
+# ---- 8x8 LED dot-matrix display (USB-UART) ----
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="c550", MODE="0666", GROUP="dialout", SYMLINK+="osrbot_led_matrix"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="0002", MODE="0666", GROUP="dialout", SYMLINK+="osrbot_led_matrix"
+
+# ---- Forward USB camera (gscam-compatible MJPG webcam) ----
+KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTRS{idVendor}=="1bcf", ATTRS{idProduct}=="2cd1", ATTR{index}=="0", MODE:="0666", GROUP:="dialout", SYMLINK+="osrbot_usb_cam"
+KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTRS{idVendor}=="2993", ATTRS{idProduct}=="0858", ATTR{index}=="0", MODE:="0666", GROUP:="dialout", SYMLINK+="osrbot_usb_cam"
+KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTRS{idVendor}=="05a3", ATTRS{idProduct}=="9230", ATTR{index}=="0", MODE:="0666", GROUP:="dialout", SYMLINK+="osrbot_usb_cam"

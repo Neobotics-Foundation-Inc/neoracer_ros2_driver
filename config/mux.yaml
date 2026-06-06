@@ -1,0 +1,21 @@
+mux_node:
+  ros__parameters:
+    gamepad_enable_button: 4   # LB -> manual
+    autonomy_enable_button: 5  # RB -> /drive passthrough
+
+    # Publish zero if /joy goes stale (controller disconnect).
+    joystick_timeout_sec: 0.5
+
+    # Publish zero if the active source goes stale (upstream node crash).
+    command_timeout_sec: 0.5
+
+    # Fixed rate keeps the Maestro fed and gives the watchdog a steady signal.
+    publish_rate_hz: 50.0
+
+    # Arming gate: at boot, wait this long AND require a centered Joy frame
+    # before bumpers can leave IDLE. Defends against stuck-stick-at-power-on.
+    startup_grace_sec: 1.0
+    arm_axis_threshold: 0.2
+    # Xbox-mode triggers (LT/RT) rest at +1.0, not 0.0 - exclude from the
+    # centered check or the mux never arms on EasySMX-in-Xbox-360-mode.
+    arm_ignore_axes: [2, 5]
