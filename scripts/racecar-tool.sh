@@ -76,7 +76,7 @@ racecar() {
         watchdog)
             # Run the watchdog in the foreground. Restarts dead nodes via
             # their individual launch files; logs to ~/logs/latest/watchdog.log.
-            # When `racecar-watchdog.service` is installed, prefer
+            # When `neoracer-watchdog.service` is installed, prefer
             # `racecar service start watchdog`.
             python3 "$pkg_dir/scripts/watchdog.py" "$@"
             ;;
@@ -84,32 +84,32 @@ racecar() {
         service)
             local action="${1:-status}"
             shift || true
-            local -a units=("racecar-teleop" "racecar-watchdog"
-                            "racecar-dashboard" "racecar-jupyter")
+            local -a units=("neoracer-teleop" "neoracer-watchdog"
+                            "neoracer-dashboard" "neoracer-jupyter")
             case "$action" in
                 install)
                     bash "$pkg_dir/scripts/setup_services.sh"
                     ;;
                 start)
                     if [[ -n "$1" ]]; then
-                        sudo systemctl start "racecar-$1"
+                        sudo systemctl start "neoracer-$1"
                     else
                         # Start teleop; BindsTo pulls watchdog with it.
-                        sudo systemctl start racecar-teleop
+                        sudo systemctl start neoracer-teleop
                     fi
                     ;;
                 stop)
                     if [[ -n "$1" ]]; then
-                        sudo systemctl stop "racecar-$1"
+                        sudo systemctl stop "neoracer-$1"
                     else
-                        sudo systemctl stop racecar-teleop
+                        sudo systemctl stop neoracer-teleop
                     fi
                     ;;
                 restart)
                     if [[ -n "$1" ]]; then
-                        sudo systemctl restart "racecar-$1"
+                        sudo systemctl restart "neoracer-$1"
                     else
-                        sudo systemctl restart racecar-teleop
+                        sudo systemctl restart neoracer-teleop
                     fi
                     ;;
                 enable|disable)
@@ -119,7 +119,7 @@ racecar() {
                     ;;
                 logs)
                     local unit="${1:-teleop}"
-                    sudo journalctl -u "racecar-$unit" -f
+                    sudo journalctl -u "neoracer-$unit" -f
                     ;;
                 status|"")
                     for u in "${units[@]}"; do
@@ -136,12 +136,12 @@ racecar() {
 usage: racecar service <action> [unit]
 actions:
   install        Drop unit files in /etc/systemd/system/ + daemon-reload + enable
-  start [name]   Start racecar-<name>; default = teleop (watchdog follows via BindsTo)
-  stop [name]    Stop racecar-<name>; default = teleop
-  restart [name] Restart racecar-<name>; default = teleop
-  enable         Enable all racecar-* units (auto-start on boot)
-  disable        Disable all racecar-* units
-  logs [name]    journalctl -u racecar-<name> -f; default = teleop
+  start [name]   Start neoracer-<name>; default = teleop (watchdog follows via BindsTo)
+  stop [name]    Stop neoracer-<name>; default = teleop
+  restart [name] Restart neoracer-<name>; default = teleop
+  enable         Enable all neoracer-* units (auto-start on boot)
+  disable        Disable all neoracer-* units
+  logs [name]    journalctl -u neoracer-<name> -f; default = teleop
   status         active/enabled snapshot for all units (default)
 units: teleop, watchdog, dashboard, jupyter
 __RC_SVC_HELP__
@@ -619,7 +619,7 @@ Commands:
                           stop [name]          default: teleop
                           restart [name]       default: teleop
                           enable|disable       all units
-                          logs [name]          journalctl -f for racecar-<name>
+                          logs [name]          journalctl -f for neoracer-<name>
                           status               active/enabled summary (default)
                         Units: teleop, watchdog, dashboard, jupyter
     library <action>    Manage racecar_student.pth in user site-packages.

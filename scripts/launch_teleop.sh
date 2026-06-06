@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./scripts/launch_teleop.sh [extra launch args...]
-#   systemctl start racecar-teleop   (calls this script)
+#   systemctl start neoracer-teleop   (calls this script)
 
 set -eo pipefail
 

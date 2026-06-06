@@ -6,21 +6,21 @@
 # only update files that changed.
 #
 # Services installed:
-#   racecar-teleop.service    - full stack via launch_teleop.sh
-#   racecar-watchdog.service  - BindsTo=teleop, restart-on-failure supervisor
-#   racecar-dashboard.service - web status page (port 8080, after Phase 4E)
-#   racecar-jupyter.service   - JupyterLab (port 8888)
+#   neoracer-teleop.service    - full stack via launch_teleop.sh
+#   neoracer-watchdog.service  - BindsTo=teleop, restart-on-failure supervisor
+#   neoracer-dashboard.service - web status page (port 8080, after Phase 4E)
+#   neoracer-jupyter.service   - JupyterLab (port 8888)
 #
-# After install: `sudo systemctl start racecar-teleop` or reboot.
+# After install: `sudo systemctl start neoracer-teleop` or reboot.
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SERVICES=(
-    racecar-teleop.service
-    racecar-watchdog.service
-    racecar-dashboard.service
-    racecar-jupyter.service
+    neoracer-teleop.service
+    neoracer-watchdog.service
+    neoracer-dashboard.service
+    neoracer-jupyter.service
 )
 
 changed=0
@@ -45,6 +45,14 @@ if [[ $changed -eq 1 ]]; then
     echo "  systemctl daemon-reload"
 fi
 
+# Retire the legacy jupyterlab.service if present: neoracer-jupyter.service
+# replaces it, and both bind port 8888, so leaving the old one enabled would
+# double-bind on boot.
+if systemctl list-unit-files 2>/dev/null | grep -q '^jupyterlab\.service'; then
+    echo "  retiring legacy jupyterlab.service (replaced by neoracer-jupyter)"
+    sudo systemctl disable --now jupyterlab.service 2>/dev/null || true
+fi
+
 # Enable so they auto-start on boot. `enable` is idempotent - no-op if
 # already enabled. We deliberately don't `start` here; the user controls
 # when the stack first comes up (avoids surprise launch during install).
@@ -59,5 +67,5 @@ done
 
 echo
 echo "Services installed and enabled. To start now:"
-echo "  sudo systemctl start racecar-teleop"
+echo "  sudo systemctl start neoracer-teleop"
 echo "Or reboot to bring everything up automatically."

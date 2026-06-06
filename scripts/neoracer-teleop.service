@@ -3,9 +3,9 @@ Description=Neoracer Teleop (control + sensors + ML + display)
 After=network-online.target
 Wants=network-online.target
 # Pull watchdog along when teleop starts; BindsTo in watchdog stops it when
-# teleop stops. Wants=racecar-watchdog is a "best-effort start" - teleop
+# teleop stops. Wants=neoracer-watchdog is a "best-effort start" - teleop
 # still comes up if watchdog fails for some reason.
-Wants=racecar-watchdog.service
+Wants=neoracer-watchdog.service
 
 [Service]
 Type=exec
