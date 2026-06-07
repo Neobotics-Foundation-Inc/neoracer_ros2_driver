@@ -1,0 +1,7 @@
+throttle_node:
+  ros__parameters:
+    # Single source of truth for top speed. Fractions of full PWM swing.
+    # Defaults preserve v1 top speed (PWM 6510 fwd / 5280 rev / +/-2500 steer offset).
+    max_speed_forward: 0.5
+    max_speed_backward: 0.6
+    max_steering: 0.625

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neoracer Dashboard</title>
+<style>
+  :root { --bg: #1a1a2e; --card: #16213e; --green: #0f0; --yellow: #ff0; --red: #f44; --text: #e0e0e0; --muted: #888; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); padding: 1rem; }
+  h1 { color: #7ec8e3; margin-bottom: 0.5rem; font-size: 1.4rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .card { background: var(--card); border-radius: 8px; padding: 1rem; border-left: 4px solid var(--muted); }
+  .card.healthy { border-left-color: var(--green); }
+  .card.stale   { border-left-color: var(--yellow); }
+  .card.dead    { border-left-color: var(--red); }
+  .card h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+  .indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .indicator.healthy { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .indicator.stale   { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+  .indicator.dead    { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+  th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #2a2a4a; font-size: 0.85rem; }
+  th { color: #7ec8e3; }
+  .hz { font-weight: bold; }
+  .hz.ok    { color: var(--green); }
+  .hz.stale { color: var(--yellow); }
+  .hz.dead  { color: var(--red); }
+  .log-box { background: #0d1117; border-radius: 6px; padding: 0.8rem; font-size: 0.78rem; max-height: 200px; overflow-y: auto; white-space: pre-wrap; color: var(--muted); }
+  .section-title { color: #7ec8e3; font-size: 1rem; margin-bottom: 0.5rem; }
+  #error-banner { display: none; background: #4a1010; color: var(--red); padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Neoracer &mdash; System Dashboard</h1>
+<div class="meta">
+  <span id="timestamp">Loading...</span> &bull;
+  <span id="log-dir"></span>
+</div>
+<div id="error-banner"></div>
+
+<div class="section-title">Nodes</div>
+<div class="grid" id="nodes"></div>
+
+<div class="section-title">System Health</div>
+<div class="grid" id="system-health"></div>
+
+<div class="section-title">Topic Rates</div>
+<table>
+  <thead><tr><th>Topic</th><th>Rate</th><th>Status</th></tr></thead>
+  <tbody id="rates"></tbody>
+</table>
+
+<div class="section-title">Watchdog Log</div>
+<div class="log-box" id="watchdog-log">No watchdog events yet.</div>
+
+<script>
+function update() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('error-banner').style.display = 'none';
+      document.getElementById('timestamp').textContent = data.timestamp;
+      document.getElementById('log-dir').textContent = data.log_dir;
+
+      // Nodes
+      let nh = '';
+      for (const [key, n] of Object.entries(data.nodes)) {
+        nh += `<div class="card ${n.status}">
+          <h2><span class="indicator ${n.status}"></span>${n.label}</h2>
+          <div style="color:var(--muted);font-size:0.8rem">${n.topic}</div>
+          <div style="margin-top:0.3rem">${n.alive ? 'Publishing' : 'NOT DETECTED'}</div>
+        </div>`;
+      }
+      document.getElementById('nodes').innerHTML = nh;
+
+      // System Health (Jetson thermals, etc.)
+      let sh = '';
+      for (const [key, item] of Object.entries(data.system_health || {})) {
+        sh += `<div class="card ${item.status}">
+          <h2><span class="indicator ${item.status}"></span>${item.label}</h2>
+          <div style="margin-top:0.3rem">${item.detail}</div>
+        </div>`;
+      }
+      document.getElementById('system-health').innerHTML = sh;
+
+      // Rates
+      let rh = '';
+      for (const [topic, info] of Object.entries(data.rates)) {
+        const hz = info.hz !== null ? info.hz.toFixed(1) + ' Hz' : '-';
+        const cls = info.hz === null ? 'dead' : (info.stale ? 'stale' : 'ok');
+        const label = info.hz === null ? 'NO DATA' : (info.stale ? 'STALE' : 'OK');
+        rh += `<tr><td>${topic}</td><td class="hz ${cls}">${hz}</td><td class="hz ${cls}">${label}</td></tr>`;
+      }
+      document.getElementById('rates').innerHTML = rh;
+
+      // Watchdog log
+      const wl = data.watchdog_log;
+      document.getElementById('watchdog-log').textContent = wl.length ? wl.join('\n') : 'No watchdog events yet.';
+    })
+    .catch(err => {
+      const banner = document.getElementById('error-banner');
+      banner.textContent = 'Failed to fetch status: ' + err;
+      banner.style.display = 'block';
+    });
+}
+
+update();
+setInterval(update, 3000);
+</script>
+</body>
+</html>

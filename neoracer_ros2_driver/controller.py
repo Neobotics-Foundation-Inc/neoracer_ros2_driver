@@ -1,93 +1,144 @@
 #!/usr/bin/env python3
 
 """
-controller.py
+ESP32 serial bridge for the Seeed OSRbot board on the Neoracer.
 
-Controller node to interface with custom Seeed OSRbot ESP32 firmware over serial.
-Subscribes to the drive node from autonomy script (message type: ackermann_msgs/Drive),
-converts commands to driver-specific serial protocol, and sends them to the ESP32.
-Publishes IMU and odometry data as ROS2 topics after receiving from ESP32 board.
+A single node that owns the USB-serial link to the ESP32, which carries the
+IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
 
-Dependencies:
-- pyserial (as serial)
-- controller_lib.py
+- subscribes to ``/motor`` (ackermann_msgs/AckermannDriveStamped, normalized
+  [-1, 1]) from the throttle node and writes the firmware drive command
+  ``v <speed_mps> <steer_deg>``,
+- publishes ``/imu`` (sensor_msgs/Imu) and ``/odom`` (nav_msgs/Odometry) parsed
+  from the board, and
+- publishes ``/joy`` (sensor_msgs/Joy) synthesized from the FlySky RC channels,
+  so the same software pipeline (gamepad -> mux -> throttle) and the student
+  controller API both work without a USB gamepad.
 
+The exact FlySky channel order depends on the transmitter mixer and is exposed
+entirely as ROS parameters (see config/controller.yaml) for on-car tuning.
+
+Dependencies: pyserial (``serial``), controller_lib.
 """
 
 # ===== IMPORT ROS2 CORE ======
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-"""
-qos_profile_sensor_data settings
-- Reliability: BEST_EFFORT (attempt to deliver message but does not retry if lost, minimal latency)
-- History: KEEP_LAST (always storre the most recent messages, depth = 5 default)
-- Durability: VOLATILE (does not persist messages if disconnect)
-"""
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 # ===== IMPORT ROS2 MESSAGE TYPES =====
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, Joy, MagneticField
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 
 # ===== IMPORT OTHER DEPENDENCIES ======
-import serial, math, threading, time
+import serial
+import threading
+import time
 from . import controller_lib
 
+_INT_ARRAY = ParameterDescriptor(type=ParameterType.PARAMETER_INTEGER_ARRAY)
+
+
 class ControllerNode(Node):
+    """ROS2 node bridging the ESP32 serial firmware to the ROS graph."""
+
     def __init__(self):
         super().__init__('controller_node')
 
         # ===== DECLARE PARAMETERS =====
-        self.port_name = '/dev/ttyACM1'
-        self.baud_rate = 115200
-        self.max_steering_angle_deg = 30 # in degrees, physical limitation of the vehicle
-        self.wheelbase = 0.285 # in meters, physical limitation of the vehicle
+        # Serial link. /dev/osrbot_base is a stable udev symlink to the ESP32.
+        # Baud is irrelevant for the native USB-CDC port but kept for clarity.
+        self.port_name = self.declare_parameter('port_name', '/dev/osrbot_base').value
+        self.baud_rate = self.declare_parameter('baud_rate', 115200).value
 
-        self.imu_frame = 'imu_link'
-        self.odom_frame = 'odom'
-        self.base_frame = 'base_footprint'
+        # Drive command mapping (normalized /motor -> firmware m/s + degrees).
+        self.max_speed_mps = self.declare_parameter('max_speed_mps', 6.0).value
+        self.max_steering_angle_deg = self.declare_parameter(
+            'max_steering_angle_deg', 30.0).value
+        self.steering_trim_deg = self.declare_parameter('steering_trim_deg', 0.0).value
+
+        # Frames.
+        self.imu_frame = self.declare_parameter('imu_frame', 'imu_link').value
+        self.odom_frame = self.declare_parameter('odom_frame', 'odom').value
+        self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
+
+        # Optional magnetometer publication (the student library does not use it).
+        self.publish_mag = self.declare_parameter('publish_mag', False).value
+        self.publish_joy = self.declare_parameter('publish_joy', True).value
+
+        # FlySky RC -> Joy mapping (all tunable on-hardware; see config/controller.yaml).
+        self._joy_cfg = self._declare_joy_params()
 
         # ===== INITIALIZE SERIAL PORT =====
         try:
             self.serial = serial.Serial(self.port_name, self.baud_rate, timeout=0.1)
             self.get_logger().info(f"[DEBUG] Connected to: {self.port_name}")
         except serial.SerialException as e:
-            self.get_logger().fatal(f"[ERROR] Could not connect to device '{self.port_name}': {e}")
+            self.get_logger().fatal(
+                f"[ERROR] Could not connect to device '{self.port_name}': {e}")
             rclpy.shutdown()
             return
 
         # ===== SET UP SUBSCRIBERS =====
-        self.ackermann_cmd_sub = self.create_subscription(
-            AckermannDriveStamped,
-            '/drive',
-            self.ackermann_callback,
+        # /motor is the throttle node output (normalized, BEST_EFFORT).
+        self.motor_sub = self.create_subscription(
+            AckermannDriveStamped, '/motor', self.motor_callback,
             qos_profile_sensor_data)
 
         # ===== SET UP PUBLISHERS =====
-        self.imu_pub = self.create_publisher(
-            Imu,
-            '/imu',
-            qos_profile_sensor_data)
+        self.imu_pub = self.create_publisher(Imu, '/imu', qos_profile_sensor_data)
+        self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile_sensor_data)
+        # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
+        # connects; BEST_EFFORT pipeline subscribers accept a reliable publisher.
+        self.joy_pub = self.create_publisher(Joy, '/joy', 10) if self.publish_joy else None
+        self.mag_pub = (
+            self.create_publisher(MagneticField, '/mag', qos_profile_sensor_data)
+            if self.publish_mag else None)
 
-        self.odom_pub = self.create_publisher(
-            Odometry,
-            '/odom',
-            qos_profile_sensor_data)
-
-        # ===== INITIALIZE THREADING =====
+        # ===== STATE + SERIAL READ THREAD =====
         self.last_cmd_time = self.get_clock().now()
-        self.last_drive_cmd = ""
-        self.serial_lock = threading.Lock() # gets called to prevent both pub/sub node from using this resource
-
-        self.read_thread = threading.Thread(target=self.read_serial_loop, daemon=True) # daemon=True, exit thread if program ends
+        self.serial_lock = threading.Lock()
+        self.read_thread = threading.Thread(target=self.read_serial_loop, daemon=True)
         self.read_thread.start()
 
-        self.get_logger().info("[DEBUG] Controller node finished initializing.. starting main loop")
+        self.get_logger().info("[DEBUG] Controller node initialized; entering main loop")
+
+    def _declare_joy_params(self):
+        """Declare the FlySky->Joy mapping parameters and return them as a dict."""
+        p = self.declare_parameter
+        cfg = {
+            'rc_min': p('rc_min', 1000).value,
+            'rc_center': p('rc_center', 1500).value,
+            'rc_max': p('rc_max', 2000).value,
+            'rc_deadband': p('rc_deadband', 0.05).value,
+            'rc_failsafe_below': p('rc_failsafe_below', 500).value,
+            'num_axes': p('joy_num_axes', 6).value,
+            'num_buttons': p('joy_num_buttons', 11).value,
+            'trigger_axes': list(p('joy_trigger_axes', [2, 5]).value),
+            'throttle_axis': p('throttle_axis', 1).value,
+            'throttle_channel': p('throttle_channel', 2).value,
+            'throttle_sign': p('throttle_sign', 1).value,
+            'steering_axis': p('steering_axis', 3).value,
+            'steering_channel': p('steering_channel', 0).value,
+            'steering_sign': p('steering_sign', 1).value,
+            'mode_channel': p('mode_channel', 4).value,
+            'mode_mid_thresh': p('mode_mid_thresh', -0.5).value,
+            'mode_high_thresh': p('mode_high_thresh', 0.5).value,
+            'mode_idle_button': p('mode_idle_button', -1).value,
+            'mode_manual_button': p('mode_manual_button', 4).value,
+            'mode_autonomy_button': p('mode_autonomy_button', 5).value,
+            'aux_button_channels': list(
+                p('aux_button_channels', [], _INT_ARRAY).value or []),
+            'aux_button_indices': list(
+                p('aux_button_indices', [], _INT_ARRAY).value or []),
+            'aux_button_thresh': p('aux_button_thresh', 0.5).value,
+        }
+        return cfg
 
     def read_serial_loop(self):
-        """Read incoming serial messages and publish to sensor topics"""
-        buffer = ""
+        """Read incoming serial lines and fan them out to the sensor topics."""
         while rclpy.ok():
             if self.serial.in_waiting > 0:
                 try:
@@ -95,103 +146,117 @@ class ControllerNode(Node):
                     if line:
                         try:
                             data, tag = controller_lib.parse_serial_data(line)
-                            if data is not None:
-                                self.pub_imu(data) if tag == 'i' else self.pub_odom(data) if tag == 'o' else None
+                            self._dispatch(data, tag)
                         except (ValueError, IndexError) as e:
-                            self.get_logger().warn(f"Unable to parse message: [{line}], reason: {e}")
+                            self.get_logger().warn(
+                                f"Unable to parse message: [{line}], reason: {e}")
                 except serial.SerialException:
                     self.get_logger().error("Serial Exception Error")
                     break
                 except UnicodeDecodeError as e:
                     self.get_logger().warn(f"Could not decode message: {e}")
             else:
-                time.sleep(0.005) # loop at about a rate of 200Hz
+                time.sleep(0.005)  # ~200 Hz idle poll
+
+    def _dispatch(self, data, tag):
+        """Route a parsed serial record to the matching publisher."""
+        if data is None:
+            return
+        if tag == 'i':
+            self.pub_imu(data)
+        elif tag == 'o':
+            self.pub_odom(data)
+        elif tag == 'r' and self.joy_pub is not None:
+            self.pub_joy(data)
+        elif tag == 'm' and self.mag_pub is not None:
+            self.pub_mag(data)
 
     def pub_imu(self, data):
-        # Format and publish imu data to the /imu topic
+        """Publish an Imu message from a parsed ``i`` record."""
         imu_msg = Imu()
         imu_msg.header.stamp = self.get_clock().now().to_msg()
         imu_msg.header.frame_id = self.imu_frame
 
-        # Orientation (accepts a quat, [x, y, z, w])
         imu_msg.orientation.x = data['q_x']
         imu_msg.orientation.y = data['q_y']
         imu_msg.orientation.z = data['q_z']
         imu_msg.orientation.w = data['q_w']
 
-        # Linear Acceleration (m/s^2)
         imu_msg.linear_acceleration.x = data['a_x']
         imu_msg.linear_acceleration.y = data['a_y']
         imu_msg.linear_acceleration.z = data['a_z']
 
-        # Angular Velocity (rad/s)
         imu_msg.angular_velocity.x = data['g_x']
         imu_msg.angular_velocity.y = data['g_y']
         imu_msg.angular_velocity.z = data['g_z']
 
-        # Publish message
         self.imu_pub.publish(imu_msg)
 
     def pub_odom(self, data):
-        # Format and publich odom data to the /odom topic
+        """Publish an Odometry message from a parsed ``o`` record."""
         odom_msg = Odometry()
         odom_msg.header.stamp = self.get_clock().now().to_msg()
         odom_msg.header.frame_id = self.odom_frame
         odom_msg.child_frame_id = self.base_frame
 
-        # Position [x, y, z] (m)
         odom_msg.pose.pose.position.x = data['p_x']
         odom_msg.pose.pose.position.y = data['p_y']
         odom_msg.pose.pose.position.z = data['p_z']
 
-        # Orientation (quat, [x, y, z, w])
         q = controller_lib.quaternion_from_euler(0, 0, data['yaw'])
         odom_msg.pose.pose.orientation.x = q[0]
         odom_msg.pose.pose.orientation.y = q[1]
         odom_msg.pose.pose.orientation.z = q[2]
         odom_msg.pose.pose.orientation.w = q[3]
 
-        # Linear Velocity [x, y, z] (m/s)
         odom_msg.twist.twist.linear.x = data['v_x']
         odom_msg.twist.twist.linear.y = data['v_y']
         odom_msg.twist.twist.linear.z = data['v_z']
-
-        # Angular Velocity (not given by ESP32, so set to default value of 0)
         odom_msg.twist.twist.angular.x = 0.0
         odom_msg.twist.twist.angular.y = 0.0
         odom_msg.twist.twist.angular.z = 0.0
 
         self.odom_pub.publish(odom_msg)
 
-    def ackermann_callback(self, msg: AckermannDriveStamped):
-        """Read Ackermann message (speed/angle), map to values that the board expects, then send command via serial."""
-        speed = msg.drive.speed
-        angle = msg.drive.steering_angle
+    def pub_joy(self, data):
+        """Publish a Joy message synthesized from a parsed ``r`` (FlySky) record."""
+        axes, buttons = controller_lib.rc_to_joy(data['channels'], self._joy_cfg)
+        joy_msg = Joy()
+        joy_msg.header.stamp = self.get_clock().now().to_msg()
+        joy_msg.axes = [float(a) for a in axes]
+        joy_msg.buttons = [int(b) for b in buttons]
+        self.joy_pub.publish(joy_msg)
 
-        # Map steering angle from abstract [-1, 1] to real [-30 deg, 30 deg] value via linear transform
-        steering_angle_deg = self.max_steering_angle_deg * angle
+    def pub_mag(self, data):
+        """Publish a MagneticField message (Gauss -> Tesla) from an ``m`` record."""
+        mag_msg = MagneticField()
+        mag_msg.header.stamp = self.get_clock().now().to_msg()
+        mag_msg.header.frame_id = self.imu_frame
+        mag_msg.magnetic_field.x = data['mag_x'] * 1e-4
+        mag_msg.magnetic_field.y = data['mag_y'] * 1e-4
+        mag_msg.magnetic_field.z = data['mag_z'] * 1e-4
+        self.mag_pub.publish(mag_msg)
 
-        # Speed is a value from -6m/s to 6m/s, map based on max_speed param
-        speed = speed * 6.0 # TODO param this later
+    def motor_callback(self, msg: AckermannDriveStamped):
+        """Map a normalized ``/motor`` command to the firmware ``v`` command."""
+        command = controller_lib.motor_to_command(
+            msg.drive.speed, msg.drive.steering_angle,
+            self.max_speed_mps, self.max_steering_angle_deg, self.steering_trim_deg)
 
-        # Build command, ESP32 controller board expects key [v] to represent a drive command
-        command = f"v {speed:.3f} {steering_angle_deg:.2f}\n"
-
-        # Call dibs on serial thread to send command out to vehicle
-        #if self.last_drive_cmd != command:
         with self.serial_lock:
             try:
                 self.serial.write(command.encode('utf-8'))
-                # self.get_logger().info(f"[DEBUG] Sent command to controller board: {command.strip()}")
             except serial.SerialException as e:
-                self.get_logger().error(f"[ERROR] Could not send message [{command}] out to controller board: {e}")
-        
-        self.last_drive_cmd = command
-        self.last_cmd_time = self.get_clock().now() # track last commanded time to watch out for stale packets
+                self.get_logger().error(
+                    f"[ERROR] Could not send [{command.strip()}]: {e}")
+
+        self.last_cmd_time = self.get_clock().now()
+
 
 # ===== INITIALIZE SYSTEM - DO NOT MODIFY ======
 
 def main(args=None):
+    """Spin the controller node until shutdown."""
     rclpy.init(args=args)
     node = ControllerNode()
 
@@ -201,7 +266,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
+
 
 if __name__ == '__main__':
     main()

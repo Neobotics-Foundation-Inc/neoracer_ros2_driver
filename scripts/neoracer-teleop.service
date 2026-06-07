@@ -1,0 +1,23 @@
+[Unit]
+Description=Neoracer Teleop (control + sensors + ML + display)
+After=network-online.target
+Wants=network-online.target
+# Pull watchdog along when teleop starts; BindsTo in watchdog stops it when
+# teleop stops. Wants=neoracer-watchdog is a "best-effort start" - teleop
+# still comes up if watchdog fails for some reason.
+Wants=neoracer-watchdog.service
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+ExecStart=/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/launch_teleop.sh
+Restart=on-failure
+RestartSec=10
+Environment=HOME=/home/racecar
+WorkingDirectory=/home/racecar/ros2_ws
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

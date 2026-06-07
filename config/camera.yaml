@@ -1,0 +1,10 @@
+camera_node:
+  ros__parameters:
+    # Stable udev symlink to the USB camera; falls back to scanning /dev/video*.
+    video_device: "/dev/osrbot_usb_cam"
+    image_width: 640
+    image_height: 480
+    framerate: 30.0
+    jpeg_quality: 80          # 0-100; higher = better image, larger frames
+    frame_id: "camera_link"
+    scan_max_index: 10
