@@ -1,0 +1,67 @@
+controller_node:
+  ros__parameters:
+    # ---- ESP32 serial link ----
+    # /dev/osrbot_base is the stable udev symlink to the Seeed OSRbot ESP32.
+    # The board enumerates as a native USB-CDC port, so baud_rate is ignored.
+    port_name: "/dev/osrbot_base"
+    baud_rate: 115200
+
+    # ---- Drive command mapping (normalized /motor -> firmware "v <m/s> <deg>") ----
+    # speed_mps  = clamp(/motor.speed, -1, 1)        * max_speed_mps
+    # steer_deg  = clamp(/motor.steering_angle,-1,1) * max_steering_angle_deg + steering_trim_deg
+    max_speed_mps: 6.0          # m/s at full normalized throttle (tune on-car)
+    max_steering_angle_deg: 30.0
+    steering_trim_deg: 0.0      # +deg corrects a drift; calibrate per vehicle
+
+    # ---- Frames ----
+    imu_frame: "imu_link"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+
+    # ---- Optional publications ----
+    publish_mag: false          # firmware emits "m"; student library ignores it
+    publish_joy: true           # synthesize /joy from the FlySky "r" channels
+
+    # ================= FlySky RC -> /joy mapping =================
+    # The ESP32 "r" line carries 10 RC channels (ints; -1 == transmitter off).
+    # Channel ORDER depends on the FlySky transmitter mixer, so the indices below
+    # are a starting point - confirm them on-car with `ros2 topic echo /joy` while
+    # moving each stick/switch, then adjust. Indices are 0-based into "r".
+    #
+    # Pulse-width calibration (microseconds):
+    rc_min: 1000
+    rc_center: 1500
+    rc_max: 2000
+    rc_deadband: 0.05           # normalized; |value| below this snaps to 0
+    rc_failsafe_below: 500      # any channel below this is treated as no-signal -> neutral
+
+    # Joy frame shape. Triggers (axes 2 & 5) rest at +1.0 to match the Xbox
+    # convention the student library and the mux arming check assume.
+    joy_num_axes: 6
+    joy_num_buttons: 11
+    joy_trigger_axes: [2, 5]
+
+    # Driving sticks. axes[1]=throttle and axes[3]=steering match gamepad_node
+    # defaults and the student library's left-stick-Y / right-stick-X reads.
+    throttle_axis: 1
+    throttle_channel: 2         # FlySky ch3 (e.g. left stick Y) - VERIFY on-car
+    throttle_sign: 1
+    steering_axis: 3
+    steering_channel: 0         # FlySky ch1 (e.g. right stick X) - VERIFY on-car
+    steering_sign: 1
+
+    # 3-position mode switch -> manual / autonomy enable buttons (mux reads 4 & 5).
+    # below mid_thresh => idle, between => manual (button 4 / LB),
+    # at/above high_thresh => autonomy (button 5 / RB).
+    mode_channel: 4             # FlySky ch5 (an aux switch) - VERIFY on-car
+    mode_mid_thresh: -0.5
+    mode_high_thresh: 0.5
+    mode_idle_button: -1        # -1 = set no button when switch is low
+    mode_manual_button: 4
+    mode_autonomy_button: 5
+
+    # Generic extra 2-position switches -> arbitrary Joy buttons (parallel lists).
+    # Leave empty unless you need to surface more FlySky switches to the student API.
+    aux_button_channels: []
+    aux_button_indices: []
+    aux_button_thresh: 0.5

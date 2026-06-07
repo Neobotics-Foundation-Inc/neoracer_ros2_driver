@@ -1,0 +1,21 @@
+[Unit]
+Description=Neoracer Node Watchdog (restart-on-failure supervisor)
+After=neoracer-teleop.service
+BindsTo=neoracer-teleop.service
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+ExecStartPre=/bin/sleep 15
+ExecStart=/bin/bash -c '\
+    source /opt/ros/humble/setup.bash && \
+    source /home/racecar/ros2_ws/install/setup.bash && \
+    exec python3 /home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/watchdog.py'
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/racecar
+WorkingDirectory=/home/racecar/ros2_ws
+
+[Install]
+WantedBy=multi-user.target
