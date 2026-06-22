@@ -36,6 +36,7 @@ setup(
             'mux_node = neoracer_ros2_driver.mux_node:main',
             'throttle_node = neoracer_ros2_driver.throttle_node:main',
             'led_matrix = neoracer_ros2_driver.led_matrix_node:main',
+            'odom_tf_node = neoracer_ros2_driver.odom_tf_node:main',
         ],
     },
 )

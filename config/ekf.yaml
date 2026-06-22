@@ -1,0 +1,43 @@
+ekf_filter_node:
+  ros__parameters:
+    # High-rate fused odom->base_footprint for slam_toolbox + Nav2.
+    # Fuses the 20 Hz wheel /odom (pose + forward velocity) with the
+    # 168 Hz IMU gyro (yaw-rate). Each state comes from a single source
+    # (yaw from odom, yaw-rate from imu), so the driver's zero covariances
+    # never cause two-source overconfidence. Output at 50 Hz -- well above
+    # the 30 Hz scan, a 20 ms cycle the Orin Nano meets under 168 Hz IMU.
+    frequency: 50.0
+    sensor_timeout: 0.1
+    two_d_mode: true
+    publish_tf: true
+    publish_acceleration: false
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom
+
+    # Wheel odometry: x, y, yaw (pose) + vx (forward speed).
+    odom0: /odom
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, false,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # IMU: yaw-rate only (gyro z). Orientation/accel left out — the
+    # magnetometer-aided yaw is unreliable indoors near the motors, and
+    # SLAM's map->odom corrects the slow gyro drift.
+    imu0: /imu
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 10
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: true
