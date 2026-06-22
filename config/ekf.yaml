@@ -10,6 +10,7 @@ ekf_filter_node:
     sensor_timeout: 0.1
     two_d_mode: true
     publish_tf: true
+    transform_time_offset: 0.05    # post-date odom->base_footprint past the ~15-27ms scan-vs-TF gap (kills RViz future-extrap + slam_toolbox queue drops)
     publish_acceleration: false
 
     map_frame: map
