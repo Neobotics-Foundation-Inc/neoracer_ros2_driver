@@ -59,6 +59,12 @@ class MuxNode(Node):
         self.declare_parameter('startup_grace_sec', 1.0)
         self.declare_parameter('arm_axis_threshold', 0.2)
         self.declare_parameter('arm_ignore_axes', [2, 5])
+        # THIS car gates autonomy with a HARDWARE PCB switch (SWC) that never
+        # reaches ROS. So the mux must not gate autonomy itself - it just forwards
+        # /drive; the PCB switch physically decides if it moves the car. ON by
+        # default because that is this car's design; set false only for a USB
+        # gamepad with real buttons.
+        self.declare_parameter('autonomy_passthrough', True)
 
         self._gamepad_btn = self.get_parameter('gamepad_enable_button').value
         self._auto_btn = self.get_parameter('autonomy_enable_button').value
@@ -125,6 +131,16 @@ class MuxNode(Node):
     def _publish(self):
         now = time.monotonic()
         out = AckermannDriveStamped()
+
+        if self.get_parameter('autonomy_passthrough').value:
+            # Forward /drive when fresh; ignore /joy entirely. Software always
+            # offers the command, the PCB SWC switch is the physical gate. Stale
+            # /drive (lab stopped) -> zeros via cmd_timeout, so it self-safes.
+            if (self._latest_auto is not None
+                    and (now - self._auto_stamp) <= self._cmd_timeout):
+                out = self._latest_auto
+            self._pub.publish(out)
+            return
 
         joy = self._latest_joy
         if joy is None or (now - self._joy_stamp) > self._joy_timeout:
