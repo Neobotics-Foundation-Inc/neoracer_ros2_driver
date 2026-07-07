@@ -11,7 +11,7 @@ controller_node:
     # steer_deg  = clamp(/motor.steering_angle,-1,1) * max_steering_angle_deg + steering_trim_deg
     max_speed_mps: 6.0          # m/s at full normalized throttle (tune on-car)
     max_steering_angle_deg: 30.0
-    steering_trim_deg: 0.0      # +deg corrects a drift; calibrate per vehicle
+    steering_trim_deg: 0.0      # positive steers left; measure it with lab_trim_cal.py
 
     # ---- Frames ----
     imu_frame: "imu_link"

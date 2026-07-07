@@ -34,11 +34,33 @@ from ackermann_msgs.msg import AckermannDriveStamped
 
 # ===== IMPORT OTHER DEPENDENCIES ======
 import serial
+import sys
 import threading
 import time
 from . import controller_lib
 
 _INT_ARRAY = ParameterDescriptor(type=ParameterType.PARAMETER_INTEGER_ARRAY)
+
+
+def declare_float_param(node: Node, name: str, default: float) -> float:
+    """Declare a double parameter that tolerates integer YAML values.
+
+    A hand-edited ``steering_trim_deg: -5`` arrives from the YAML as an int,
+    and a strictly-typed double parameter kills the node at startup over the
+    missing ``.0``. Declare dynamically typed and cast instead; fall back to
+    the default (loudly) if the value is not a number at all.
+    """
+    value = node.declare_parameter(
+        name, default, ParameterDescriptor(dynamic_typing=True)
+    ).value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        node.get_logger().error(
+            f"parameter '{name}' must be a number, got {value!r}; "
+            f"using the default {default}"
+        )
+        return float(default)
 
 
 class ControllerNode(Node):
@@ -54,10 +76,10 @@ class ControllerNode(Node):
         self.baud_rate = self.declare_parameter('baud_rate', 115200).value
 
         # Drive command mapping (normalized /motor -> firmware m/s + degrees).
-        self.max_speed_mps = self.declare_parameter('max_speed_mps', 6.0).value
-        self.max_steering_angle_deg = self.declare_parameter(
-            'max_steering_angle_deg', 30.0).value
-        self.steering_trim_deg = self.declare_parameter('steering_trim_deg', 0.0).value
+        self.max_speed_mps = declare_float_param(self, 'max_speed_mps', 6.0)
+        self.max_steering_angle_deg = declare_float_param(
+            self, 'max_steering_angle_deg', 30.0)
+        self.steering_trim_deg = declare_float_param(self, 'steering_trim_deg', 0.0)
 
         # Frames.
         self.imu_frame = self.declare_parameter('imu_frame', 'imu_link').value
@@ -258,7 +280,17 @@ class ControllerNode(Node):
 def main(args=None):
     """Spin the controller node until shutdown."""
     rclpy.init(args=args)
-    node = ControllerNode()
+    try:
+        node = ControllerNode()
+    except Exception as exc:
+        print(
+            f"[controller_node] failed to start: {exc}\n"
+            "Check config/controller.yaml. A common cause is a float parameter "
+            "written as an integer: use -5.0, not -5.",
+            file=sys.stderr,
+        )
+        rclpy.try_shutdown()
+        raise
 
     try:
         rclpy.spin(node)
