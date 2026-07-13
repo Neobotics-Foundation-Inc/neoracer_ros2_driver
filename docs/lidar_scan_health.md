@@ -23,6 +23,20 @@ includes the sensor's live state. Check it first:
 journalctl -u neoracer-teleop -b | grep scan-watchdog
 ```
 
+## Do not trust a bare topic echo
+
+`ros2 topic echo /scan` truncates arrays to their first 128 values, and index 0
+points straight backwards into the always-blank rear crop. A perfectly healthy
+scan therefore prints a wall of `.inf` and then `'...'` - anyone eyeballing the
+echo will report "all inf" on a working lidar. Count instead of looking:
+
+```
+ros2 topic echo /scan --once --full-length | grep -c -- '- \.inf'
+```
+
+Roughly 460 is healthy (rear crop + out of range); 1440 is blind. RViz with
+Fixed Frame `laser` is the honest visual check.
+
 ## The 60-second check
 
 ```
