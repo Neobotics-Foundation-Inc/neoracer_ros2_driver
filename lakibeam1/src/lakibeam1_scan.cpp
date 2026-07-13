@@ -17,6 +17,8 @@
 #include <cstring>
 #include <iostream>
 #include <math.h>
+#include <cmath>
+#include <chrono>
 #include "../include/data_type.h"
 #include "../include/remote.h"
 
@@ -31,7 +33,7 @@ public:
 		get_parameters();
 		scan_pub = create_publisher<sensor_msgs::msg::LaserScan>(output_topic, 1000);
 		info();
-		// scan_config();
+		wait_sensor_and_config();
 		create_socket();
 		scan_publish();
 	}
@@ -91,6 +93,47 @@ protected:
 		sensor_config(sensorip, "/api/v1/sensor/scan_range/stop", scan_range_stop);		
 		RCLCPP_INFO(get_logger(),"scan_config1");
 
+	};
+	// The sensor runs its own OS and its http side comes up ~65s after power-on,
+	// while this node starts ~40s in; a blind push would silently fail and the
+	// sensor would keep whatever state its flash holds. Wait up to 60s. This is
+	// the only path that can heal a persisted laser-off state, which produces no
+	// packets at all, so the deferred retry in the publish loop never sees it.
+	void wait_sensor_and_config()
+	{
+		for (int attempt = 1; attempt <= 60; attempt++)
+		{
+			if (sensor_http_ready(sensorip))
+			{
+				RCLCPP_INFO(get_logger(),"sensor http ready (attempt %d), pushing config", attempt);
+				scan_config();
+				config_pushed = true;
+				return;
+			}
+			if (attempt % 10 == 0)
+			{
+				RCLCPP_WARN(get_logger(),"sensor http at %s not ready yet (attempt %d/60)", sensorip.c_str(), attempt);
+			}
+			rclcpp::sleep_for(std::chrono::seconds(1));
+		}
+		RCLCPP_ERROR(get_logger(),"sensor http at %s unreachable after 60s; config not pushed, will retry while scans flow", sensorip.c_str());
+	};
+	// Packets arriving prove the sensor is up, so if the boot window was missed
+	// the push converges here.
+	void deferred_config_push()
+	{
+		double now_s = rclcpp::Clock().now().seconds();
+		if (last_config_retry >= 0 && now_s - last_config_retry < 10.0)
+		{
+			return;
+		}
+		last_config_retry = now_s;
+		if (sensor_http_ready(sensorip))
+		{
+			RCLCPP_INFO(get_logger(),"sensor http ready (deferred), pushing config");
+			scan_config();
+			config_pushed = true;
+		}
 	};
 	int create_socket()
     {
@@ -227,12 +270,66 @@ protected:
 
 				scan_pub->publish(scan);
 				//RCLCPP_INFO(get_logger(), "New topic %s published, total data points: %d", output_topic.c_str(), num_readings);
+				scan_watchdog(scan);
+				if (!config_pushed)
+				{
+					deferred_config_push();
+				}
 				scan_vec.clear();
 				scan_vec_ready = 0;
 			}
 		}
 		close(sockfd);
 	}
+
+	// Packets flowing while (nearly) every range is inf means zero-distance
+	// returns: sagging battery, full-view obstruction inside min range, or a
+	// degenerate scan window. Measured on hardware: laser_enable=false stops the
+	// motor and the stream entirely (topic goes silent instead), and a degenerate
+	// window still leaves one live bin at the boundary angle, so blind means <=5
+	// finite returns, not exactly zero. Healthy indoor scans carry hundreds.
+	void scan_watchdog(const sensor_msgs::msg::LaserScan &scan)
+	{
+		int finite_cnt = 0;
+		for (size_t k = 0; k < scan.ranges.size(); k++)
+		{
+			if (std::isfinite(scan.ranges[k]))
+			{
+				finite_cnt++;
+				if (finite_cnt > 5)
+				{
+					break;
+				}
+			}
+		}
+		bool blind = finite_cnt <= 5;
+		double now_s = rclcpp::Clock().now().seconds();
+		if (blind)
+		{
+			if (blind_since < 0)
+			{
+				blind_since = now_s;
+			}
+			else if (now_s - blind_since >= 3.0 && (last_blind_alert < 0 || now_s - last_blind_alert >= 30.0))
+			{
+				std::string state = sensor_overview_json(sensorip);
+				RCLCPP_ERROR(get_logger(),
+					"[scan-watchdog] only %d of %zu ranges finite for %.1fs; packets flowing with zero-distance returns (low battery, full-view obstruction inside min range, or degenerate scan window); sensor: %s",
+					finite_cnt, scan.ranges.size(), now_s - blind_since,
+					state.empty() ? "http unreachable" : state.c_str());
+				last_blind_alert = now_s;
+			}
+		}
+		else if (blind_since >= 0)
+		{
+			if (last_blind_alert >= 0)
+			{
+				RCLCPP_INFO(get_logger(),"[scan-watchdog] ranges recovered after %.1fs blind", now_s - blind_since);
+			}
+			blind_since = -1;
+			last_blind_alert = -1;
+		}
+	};
 
 private:
     string hostip, sensorip, port, frame_id, output_topic,scanfreq,filter,laser_enable,scan_range_start,scan_range_stop;
@@ -244,6 +341,8 @@ private:
 	int i = 0, j = 12, points_cnt;
 	int sockfd;
 	unsigned int last_timestamp_;
+	double blind_since = -1, last_blind_alert = -1, last_config_retry = -1;
+	bool config_pushed = false;
     std::vector <bm_response_scan_t> scan_vec;
 };
 

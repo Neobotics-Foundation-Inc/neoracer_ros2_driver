@@ -8,6 +8,8 @@
 #include <iostream>
 int sensor_config(std::string sensor_ipaddr, std::string parameter, std::string value);
 int get_telemetry_data(std::string sensor_ipaddr);
+bool sensor_http_ready(std::string sensor_ipaddr);
+std::string sensor_overview_json(std::string sensor_ipaddr);
 
 
 #endif
