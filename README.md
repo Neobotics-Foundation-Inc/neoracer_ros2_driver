@@ -20,4 +20,26 @@ colcon build --symlink-install
 sudo systemctl restart neoracer-teleop
 ```
 
+## Checking lidar health (the watchdog)
+
+The lidar driver watches its own output: when a scan streams with (nearly) every
+range inf for 3 s, it logs `[scan-watchdog]` at ERROR and attaches the sensor's
+live state JSON - laser on/off, motor rpm, scan window - so the log names the
+culprit. On any "lidar looks dead" report, check this first:
+
+```
+journalctl -u neoracer-teleop -b | grep scan-watchdog
+```
+
+Empty output means the scan never went blind this boot. Add `-f` to watch live
+while driving. A recovery is logged at INFO with the total blind duration.
+
+A bare `ros2 topic echo /scan` is NOT evidence of a dead lidar: echo truncates
+arrays to their first 128 values, which sit entirely inside the always-blank
+rear crop, so a healthy scan prints a wall of `.inf`. Count instead of looking,
+or use RViz with Fixed Frame `laser`. Full symptom table, the 60-second decision
+test, and the boot-time config push behavior: `docs/lidar_scan_health.md`.
+
+## Repo layout
+
 `docs/` holds the operational checklists. `scripts/` holds car setup tooling.
