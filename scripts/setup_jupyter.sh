@@ -7,10 +7,17 @@ USER_NAME="${SUDO_USER:-$USER}"
 USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 JUPYTER_WS="$USER_HOME/jupyter_ws"
 
-# PEP 668 -> per-user install. jupyterlab pulls jupyter_server, ipykernel,
-# tornado, et al; ~100 MB total on disk.
+# Per-user install. --break-system-packages only exists in pip >= 23.0.1 and
+# is only needed on PEP 668 images (Pi-OS bookworm/noble, where this script
+# came from); Jammy's pip 22.0.2 errors on it. Probe instead of assuming.
+PIP_FLAGS=(--user)
+if pip3 install --help 2>/dev/null | grep -q -- '--break-system-packages'; then
+    PIP_FLAGS+=(--break-system-packages)
+fi
+
+# jupyterlab pulls jupyter_server, ipykernel, tornado, et al; ~100 MB on disk.
 if ! command -v "$USER_HOME/.local/bin/jupyter" >/dev/null 2>&1; then
-    pip3 install --user --break-system-packages jupyterlab
+    pip3 install "${PIP_FLAGS[@]}" jupyterlab
 fi
 
 # Student-library runtime deps for the v2 racecar-neo library / labs:
@@ -60,7 +67,7 @@ if '${mod}' == 'matplotlib-inline':
     fi
 done
 if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
-    pip3 install --user --break-system-packages "${MISSING_DEPS[@]}"
+    pip3 install "${PIP_FLAGS[@]}" "${MISSING_DEPS[@]}"
 fi
 
 # Notebook root. Empty unless we ship example notebooks later.
