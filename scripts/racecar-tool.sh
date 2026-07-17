@@ -27,6 +27,66 @@ racecar() {
             source "$ws/install/setup.bash"
             ;;
 
+        ws)
+            # Switch the *current shell* between the neoracer workspace and
+            # the vendor stack preinstalled in ~/osracer_ws. Both carry a
+            # `lakibeam1` package, so only one can be active per shell; this
+            # rebuilds the ROS environment from the base distro plus the
+            # chosen overlay. Nothing on disk changes - open a new shell (or
+            # switch back) to get the other workspace.
+            local target="${1:-status}"
+            local vendor_ws="$HOME/osracer_ws"
+            case "$target" in
+                neoracer|osracer)
+                    local overlay
+                    if [[ "$target" == "neoracer" ]]; then
+                        overlay="$ws/install/setup.bash"
+                    else
+                        overlay="$vendor_ws/install/setup.bash"
+                    fi
+                    if [[ ! -f "$overlay" ]]; then
+                        echo "racecar ws: $overlay not found" >&2
+                        return 1
+                    fi
+                    # Drop overlay state; keep non-workspace entries of the
+                    # mixed vars (CUDA paths etc. survive the switch).
+                    unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH
+                    local var val
+                    for var in PATH PYTHONPATH LD_LIBRARY_PATH; do
+                        val="${!var:-}"
+                        [[ -n "$val" ]] || continue
+                        val=$(printf '%s' "$val" | tr ':' '\n' \
+                              | grep -vE '/(osracer_ws|ros2_ws)(/|$)' | paste -sd: -) || true
+                        if [[ -n "$val" ]]; then export "$var=$val"; else unset "$var"; fi
+                    done
+                    # shellcheck disable=SC1091
+                    source /opt/ros/humble/setup.bash
+                    # shellcheck disable=SC1090
+                    source "$overlay"
+                    export RACECAR_WS="$target"
+                    echo "This shell now uses the $target workspace ($overlay)."
+                    ;;
+                status)
+                    if [[ -n "${RACECAR_WS:-}" ]]; then
+                        echo "active workspace: $RACECAR_WS (set by racecar ws)"
+                    elif [[ ":${AMENT_PREFIX_PATH:-}:" == *"/osracer_ws/"* ]]; then
+                        echo "active workspace: osracer (vendor, via inherited environment)"
+                    elif [[ ":${AMENT_PREFIX_PATH:-}:" == *"/ros2_ws/"* ]]; then
+                        echo "active workspace: neoracer (default from .bashrc)"
+                    else
+                        echo "active workspace: none (base ROS only)"
+                    fi
+                    echo "AMENT_PREFIX_PATH:"
+                    printf '%s' "${AMENT_PREFIX_PATH:-}" | tr ':' '\n' | sed 's/^/  /'
+                    echo
+                    ;;
+                *)
+                    echo "usage: racecar ws [neoracer|osracer|status]" >&2
+                    return 2
+                    ;;
+            esac
+            ;;
+
         teleop)
             # Use the launch wrapper so we get a timestamped log dir at
             # ~/logs/<ts>/ and a fresh FastRTPS SHM sweep. Extra args (e.g.
@@ -591,6 +651,11 @@ Commands:
     build               Build neoracer_ros2_driver (--symlink-install) and source overlay.
     test                Run the package test suite with verbose results.
     source              Source the workspace overlay into the current shell.
+    ws [name]           Switch this shell between workspaces: neoracer or
+                        osracer (the vendor stack preinstalled in ~/osracer_ws).
+                        Both carry a lakibeam1 package, so one is active per
+                        shell; new shells default to neoracer. `racecar ws`
+                        shows the active workspace.
     cd                  Change directory to the neoracer_ros2_driver package root.
     teleop              Launch the full teleop stack via launch_teleop.sh wrapper
                         (timestamped ~/logs/<ts>/ + FastRTPS SHM cleanup).
@@ -658,7 +723,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source cd teleop launch clear udev watchdog service setup library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test source ws cd teleop launch clear udev watchdog service setup library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -670,6 +735,9 @@ _racecar_complete() {
                 names=$(cd "$launch_dir" && ls *.launch.py 2>/dev/null | sed 's/\.launch\.py$//')
                 COMPREPLY=( $(compgen -W "$names" -- "$cur") )
             fi
+            ;;
+        ws)
+            COMPREPLY=( $(compgen -W "neoracer osracer status" -- "$cur") )
             ;;
         clear)
             COMPREPLY=( $(compgen -W "--led" -- "$cur") )

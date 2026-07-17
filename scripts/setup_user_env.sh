@@ -23,19 +23,57 @@ done
 
 BASHRC="$USER_HOME/.bashrc"
 
-# Block 1: ROS2 + workspace overlay sourcing.
-SOURCE_MARKER="# Neoracer - ROS2 + workspace overlay"
+# Block 1: default-workspace reset, append-only. The stock image's .bashrc
+# sources the vendor stack in ~/osracer_ws (which ships its own lakibeam1);
+# we deliberately do NOT edit or comment any existing line - we can't know
+# what's in a factory .bashrc, and commenting lines can orphan an if/fi or
+# kill unrelated exports on compound lines. Instead this block is appended
+# at the end, runs after whatever came before, and resets the ROS env to
+# base Humble + the neoracer overlay. `racecar ws osracer` flips a shell to
+# the vendor stack; deleting this block restores factory behavior exactly.
+SOURCE_MARKER="# Neoracer - default workspace"
 if grep -qF "$SOURCE_MARKER" "$BASHRC" 2>/dev/null; then
-    echo "  $BASHRC already sources ROS2"
+    echo "  $BASHRC already has the default-workspace block"
 else
-    cat >> "$BASHRC" <<EOF
+    cat >> "$BASHRC" <<'EOF'
 
-$SOURCE_MARKER
+# Neoracer - default workspace
+# Appended by setup_user_env.sh; keep after any workspace sourcing above.
+# Resets the ROS environment to the neoracer overlay no matter what earlier
+# lines (e.g. the factory ~/osracer_ws sourcing) set up. Switch a shell with
+# `racecar ws osracer` / `racecar ws neoracer`. Deleting this block restores
+# the previous default; no other line in this file was modified by setup.
+for _rc_var in PATH PYTHONPATH LD_LIBRARY_PATH; do
+    _rc_val="${!_rc_var}"
+    [ -n "$_rc_val" ] || continue
+    case "$_rc_val" in *osracer_ws*|*ros2_ws*) ;; *) continue ;; esac
+    _rc_val=$(printf '%s' "$_rc_val" | tr ':' '\n' | grep -vE '/(osracer_ws|ros2_ws)(/|$)' | paste -sd: -)
+    if [ -n "$_rc_val" ]; then export "$_rc_var=$_rc_val"; else unset "$_rc_var"; fi
+done
+unset _rc_var _rc_val AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH
 source /opt/ros/humble/setup.bash
-[ -f "\$HOME/ros2_ws/install/setup.bash" ] && source "\$HOME/ros2_ws/install/setup.bash"
+[ -f "$HOME/ros2_ws/install/setup.bash" ] && source "$HOME/ros2_ws/install/setup.bash"
+export RACECAR_WS=neoracer
 EOF
-    echo "  added ROS2 sourcing to $BASHRC"
+    echo "  added default-workspace block to $BASHRC"
 fi
+
+# Migrate the pre-reset Block 1 (plain overlay sourcing, superseded by the
+# reset block; harmless but redundant). Shape is exactly 3 lines: marker,
+# humble source, conditional overlay source - all written by earlier setups.
+OLD_SOURCE_MARKER="# Neoracer - ROS2 + workspace overlay"
+if grep -qF "$OLD_SOURCE_MARKER" "$BASHRC" 2>/dev/null; then
+    sed -i "/^${OLD_SOURCE_MARKER}$/,+2d" "$BASHRC"
+    echo "  removed superseded ROS2-sourcing block from $BASHRC"
+fi
+
+# Informational only: vendor references outside .bashrc are left untouched;
+# flag them so a login shell picking the vendor stack back up isn't a mystery.
+for f in "$USER_HOME/.profile" "$USER_HOME/.bash_profile" "$USER_HOME/.bash_login" "$USER_HOME/.bash_aliases"; do
+    if [ -f "$f" ] && grep -q "osracer_ws" "$f" 2>/dev/null; then
+        echo "  NOTE: $f references osracer_ws (left untouched); login shells may still load the vendor env"
+    fi
+done
 
 # Block 2: source the `racecar` shell tool.
 TOOL_MARKER="# Neoracer - shell tool"
