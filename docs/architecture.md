@@ -19,7 +19,7 @@ student-library contract.
 | `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps; `/mux_out` to `/motor` | - |
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera` (JPEG-in-Image) | opencv, numpy |
 | `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/led_matrix/command` to USB-UART 8x8 | pyserial |
-| `lakibeam1` (src/lakibeam1, cloned by setup) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
+| `lakibeam1` (vendored in-repo) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
 
 ## Data pipeline
 

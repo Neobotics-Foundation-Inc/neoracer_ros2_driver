@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install ROS2 Jazzy + the ROS packages the racecar driver depends on.
+# Install ROS2 Humble + the ROS packages the racecar driver depends on.
 set -eo pipefail
 
 # Bootstrap tools needed to add the ROS2 apt repo.

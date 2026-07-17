@@ -12,9 +12,48 @@ car's workspace and build; there are no side-loaded packages.
 
 ## Provisioning a car
 
+Brand-new car (fresh JetPack 6.x / Ubuntu 22.04 image):
+
 ```
-cd ~/ros2_ws/src
+mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
 git clone https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver.git
+# factory images pre-clone a now-superseded sibling lidar driver; remove it
+# (lakibeam1 is vendored inside neoracer_ros2_driver, with local fixes)
+rm -rf ~/ros2_ws/src/lakibeam1 ~/ros2_ws/build/lakibeam1 ~/ros2_ws/install/lakibeam1
+bash neoracer_ros2_driver/scripts/setup_all.sh
+```
+
+Then log out and back in (group changes) and run `racecar teleop`. Wi-Fi AP +
+lidar subnet setup is separate: `racecar setup networking`.
+
+### Coexisting with the vendor workspace
+
+The factory image ships the vendor stack preinstalled in `~/osracer_ws`,
+including its own copy of the `lakibeam1` lidar package. Both workspaces stay
+installed side by side, but a shell can only have one active at a time: with
+both sourced, the duplicate `lakibeam1` shadows and colcon refuses to build
+("underlay override" on `~/osracer_ws/install/lakibeam1`).
+
+- Setup never edits existing `.bashrc` lines (a factory file has unknown
+  contents; commenting lines could orphan an `if`/`fi` or kill unrelated
+  exports). It appends one marked block, `# Neoracer - default workspace`,
+  at the end: it runs after whatever the factory lines set up and resets the
+  environment to the neoracer overlay. Nothing under `~/osracer_ws` is
+  modified.
+- `racecar ws osracer` switches the current shell to the vendor stack;
+  `racecar ws neoracer` switches back; `racecar ws` shows which is active.
+  The switch is per shell and leaves disk state alone.
+- Restore the factory default entirely by deleting the
+  `# Neoracer - default workspace` block from `~/.bashrc`; every factory
+  line is still there, untouched.
+- If the vendor stack autostarts on your image
+  (`systemctl list-unit-files | grep -i osr`), stop it before `racecar teleop`
+  or the two stacks will fight over the serial ports.
+
+Updating an already-provisioned car:
+
+```
+cd ~/ros2_ws/src/neoracer_ros2_driver && git pull
 cd ~/ros2_ws
 colcon build --symlink-install
 sudo systemctl restart neoracer-teleop
