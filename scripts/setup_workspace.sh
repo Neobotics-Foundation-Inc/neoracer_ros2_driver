@@ -16,13 +16,10 @@ mkdir -p "$SRC_DIR"
 # Legacy sibling clone from pre-vendoring setups (factory images ship one).
 # lakibeam1 is vendored inside this repo now (with local fixes), so the
 # sibling collides with it (duplicate package name) and colcon would abort.
-# We don't delete a directory we didn't create - tell the user and stop.
+# It's always a disposable git clone - remove it and its build artifacts.
 if [ -d "$SRC_DIR/lakibeam1" ]; then
-    echo "ERROR: legacy lidar clone found at $SRC_DIR/lakibeam1." >&2
-    echo "lakibeam1 is now vendored inside neoracer_ros2_driver and this copy" >&2
-    echo "collides with it. Remove it and its build artifacts, then re-run setup:" >&2
-    echo "  rm -rf $SRC_DIR/lakibeam1 $WS_DIR/build/lakibeam1 $WS_DIR/install/lakibeam1" >&2
-    exit 1
+    echo "  removing superseded lidar clone $SRC_DIR/lakibeam1 (lakibeam1 is vendored in-repo)"
+    rm -rf "$SRC_DIR/lakibeam1" "$WS_DIR/build/lakibeam1" "$WS_DIR/install/lakibeam1"
 fi
 
 # Lakibeam build dependency: libcurl (the sensor's HTTP config calls).

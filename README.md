@@ -17,11 +17,11 @@ Brand-new car (fresh JetPack 6.x / Ubuntu 22.04 image):
 ```
 # factory images pre-clone this repo; pull it (clone instead on a bare image)
 cd ~/ros2_ws/src/neoracer_ros2_driver && git pull
-# factory images also pre-clone a now-superseded sibling lidar driver; remove
-# it (lakibeam1 is vendored inside neoracer_ros2_driver, with local fixes)
-rm -rf ~/ros2_ws/src/lakibeam1 ~/ros2_ws/build/lakibeam1 ~/ros2_ws/install/lakibeam1
 bash scripts/setup_all.sh
 ```
+
+Setup removes the superseded sibling lidar clone factory images ship at
+`src/lakibeam1` (lakibeam1 is vendored inside this repo, with local fixes).
 
 Then log out and back in (group changes) and run `racecar teleop`. Wi-Fi AP +
 lidar subnet setup is separate: `racecar setup networking`.
