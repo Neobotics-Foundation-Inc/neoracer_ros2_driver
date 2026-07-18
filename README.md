@@ -23,21 +23,30 @@ bash scripts/setup_all.sh
 Setup removes the superseded sibling lidar clone factory images ship at
 `src/lakibeam1` (lakibeam1 is vendored inside this repo, with local fixes).
 
-Then log out and back in (group changes) and run `racecar teleop`. Wi-Fi AP +
-lidar subnet setup is separate: `racecar setup networking`.
+Then log out and back in (group changes) and bring the stack up as the
+service, so it runs headless instead of holding a terminal:
+
+```
+racecar service status   # units enabled by setup, teleop not yet running
+racecar service start    # starts neoracer-teleop (watchdog follows)
+racecar service status   # confirm teleop active; it now also starts on boot
+```
+
+Wi-Fi AP + lidar subnet setup is separate: `racecar setup networking`.
 
 ### Running the stack
 
-`racecar teleop` runs the whole stack in the foreground of your terminal,
-like a dev server: startup logs stream, then it goes quiet and holds the
-terminal while the car is live. That is it working, not hanging. Ctrl+C
-stops it. Verify from a second shell with `ros2 topic hz /scan` or
-`ros2 topic echo /motor` while moving the FlySky sticks (3-position switch
-in manual).
+The systemd service is the normal way to run the car: `racecar service
+start` / `racecar service logs` / `racecar service status` (wrapping
+`neoracer-teleop`), headless and started automatically on every boot once
+enabled. Verify with `ros2 topic hz /scan` or `ros2 topic echo /motor`
+while moving the FlySky sticks (3-position switch in manual).
 
-For deployment the systemd service runs the same stack on boot with no
-terminal: `racecar service start` / `racecar service logs` (or
-`sudo systemctl start neoracer-teleop`, `journalctl -u neoracer-teleop -f`).
+`racecar teleop` runs the same stack in the foreground of your terminal
+for interactive debugging, like a dev server: startup logs stream, then it
+goes quiet and holds the terminal while the car is live. That is it
+working, not hanging. Ctrl+C stops it. Stop the service first - the two
+can't share the serial ports.
 
 ### Coexisting with the vendor workspace
 
