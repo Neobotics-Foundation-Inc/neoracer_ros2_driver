@@ -199,9 +199,12 @@ def _read_max_temp_c():
     """Highest Jetson thermal-zone temperature in C, or None on failure."""
     hottest = None
     for tz in Path('/sys/class/thermal').glob('thermal_zone*'):
+        # The cv*-thermal zones on a powered-down CV engine return EAGAIN,
+        # which Python's buffered reader surfaces as TypeError (raw read
+        # yields None), not OSError.
         try:
             celsius = int((tz / 'temp').read_text().strip()) / 1000.0
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):
             continue
         if celsius <= 0:
             continue
@@ -237,8 +240,10 @@ def _collect_system_health():
 def _monitor_loop() -> None:
     """Background thread that continuously refreshes the cached status snapshot."""
     global _monitor_running
+    # Seed empty and let the first loop pass populate system health inside the
+    # try block; an unguarded call here once killed the whole thread on boot.
     last_system_health = 0.0
-    system_health = _collect_system_health()
+    system_health = {}
     while _monitor_running:
         try:
             # Late-binding subscription attach: new publishers may show up after
