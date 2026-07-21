@@ -7,7 +7,7 @@ car's workspace and build; there are no side-loaded packages.
 
 | Package | What it is |
 |---------|------------|
-| `neoracer_ros2_driver` | Vehicle driver stack: controller, gamepad, mux, throttle, camera, LED matrix, odometry TF. Launch entry point is `teleop.launch.py`. |
+| `neoracer_ros2_driver` | Vehicle driver stack: controller, gamepad, mux, throttle, camera (native MJPG passthrough, 60 fps on `/camera`), LED matrix, odometry TF. Launch entry point is `teleop.launch.py`. |
 | `lakibeam1` | Vendored RichBeam LakiBeam1 lidar driver, publishes `/scan`. Carries local fixes; see `docs/lidar_scan_health.md`. |
 
 ## Provisioning a car
@@ -50,11 +50,16 @@ can't share the serial ports.
 
 ### Coexisting with the vendor workspace
 
-The factory image ships the vendor stack preinstalled in `~/osracer_ws`,
-including its own copy of the `lakibeam1` lidar package. Both workspaces stay
-installed side by side, but a shell can only have one active at a time: with
-both sourced, the duplicate `lakibeam1` shadows and colcon refuses to build
-("underlay override" on `~/osracer_ws/install/lakibeam1`).
+The factory image ships the vendor stack preinstalled in `~/osracer_ws`. It
+shipped its own copy of the `lakibeam1` lidar package, divergent from the one
+vendored here, so which lidar ran depended on overlay order and colcon could
+refuse to build on the duplicate ("underlay override"). Setup reconciles this
+to a single shared lidar: it masks the vendor copy with `COLCON_IGNORE`,
+symlinks this repo's `lakibeam1` into `~/osracer_ws/src`, and rebuilds it there,
+so both workspaces build the one canonical source (the copy with the
+scan-health fixes). Setup also installs the `tf_transformations` /
+`transforms3d` runtime deps the vendor bringup needs but the factory image
+omits. Both workspaces stay usable, one active per shell.
 
 - Setup never edits existing `.bashrc` lines (a factory file has unknown
   contents; commenting lines could orphan an `if`/`fi` or kill unrelated
@@ -76,8 +81,7 @@ Updating an already-provisioned car:
 
 ```
 cd ~/ros2_ws/src/neoracer_ros2_driver && git pull
-cd ~/ros2_ws
-colcon build --symlink-install
+bash scripts/setup_workspace.sh          # rebuild + keep the shared lidar in sync
 sudo systemctl restart neoracer-teleop
 ```
 
@@ -100,6 +104,17 @@ arrays to their first 128 values, which sit entirely inside the always-blank
 rear crop, so a healthy scan prints a wall of `.inf`. Count instead of looking,
 or use RViz with Fixed Frame `laser`. Full symptom table, the 60-second decision
 test, and the boot-time config push behavior: `docs/lidar_scan_health.md`.
+
+## Student library and labs
+
+`setup_all.sh` also installs the student side into `~/jupyter_ws/neoracer-os`:
+the racecar-neo library and the NeoRacer labs, cloned from the Neobotics repos
+(`racecar-neo-library`, branch `neobotics-slam-nav`, and `neoracer-labs`). That
+branch carries `rc.slam` / `rc.nav` and the FlySky auto-start fix: the FlySky RC
+has no START button, so `rc.go()` enters your program without one, unlike the
+upstream MIT library that waits for the Xbox START. JupyterLab serves
+`~/jupyter_ws` on port 8888; `racecar library --list` / `--select` choose which
+library is on the Python path.
 
 ## Repo layout
 
