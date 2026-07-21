@@ -85,3 +85,38 @@ racecar driver are importable.
 EOF
     echo "Created $JUPYTER_WS"
 fi
+
+# ---------------------------------------------------------------------------
+# Student library + labs.
+# ---------------------------------------------------------------------------
+# Two Neobotics repos supply the student side. The racecar-neo library fork is
+# pinned to the neobotics-slam-nav branch, which carries the FlySky auto-start
+# fix (go() enters user program mode without a START button - the FlySky RC has
+# none, unlike the Xbox pad the upstream MIT library assumes) plus rc.slam and
+# rc.nav. The labs come from neoracer-labs. Assemble both into
+# ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
+# library so notebooks can `import racecar_core`. Re-running refreshes both; a
+# fetch failure aborts setup rather than leaving a half-installed library.
+LIB_REPO="https://github.com/Neobotics-Foundation-Inc/racecar-neo-library"
+LIB_BRANCH="neobotics-slam-nav"
+LABS_REPO="https://github.com/Neobotics-Foundation-Inc/neoracer-labs"
+NEO_OS="$JUPYTER_WS/neoracer-os"
+
+echo "Fetching student library ($LIB_BRANCH) + labs..."
+TMP="$(mktemp -d)"
+git clone --depth 1 --branch "$LIB_BRANCH" "$LIB_REPO" "$TMP/lib"
+git clone --depth 1 "$LABS_REPO" "$TMP/labs"
+mkdir -p "$NEO_OS"
+rm -rf "$NEO_OS/library" "$NEO_OS/labs"
+cp -r "$TMP/lib/library" "$NEO_OS/library"
+cp -r "$TMP/labs" "$NEO_OS/labs"
+rm -rf "$NEO_OS/labs/.git"
+rm -rf "$TMP"
+
+# Select this library by writing the same racecar_student.pth that
+# `racecar library --select neoracer-os` manages, so a fresh shell can
+# `import racecar_core` with no extra step.
+SITE="$(python3 -c 'import site; print(site.getusersitepackages())')"
+mkdir -p "$SITE"
+echo "$NEO_OS/library" > "$SITE/racecar_student.pth"
+echo "Student library ready: $NEO_OS/library (selected via $SITE/racecar_student.pth)"
