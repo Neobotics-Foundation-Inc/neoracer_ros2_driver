@@ -8,18 +8,28 @@ in `controller.py`.
 
 ## Inbound (ESP32 -> host), newline-terminated ASCII
 
+Firmware `NEORACER_V1.1` (2026-07) streams one combined state frame; older
+firmware streamed IMU and odometry as separate lines. The driver parses both.
+
 | Prefix | Format | Meaning | Published as |
 |--------|--------|---------|--------------|
-| `i` | `i qx qy qz qw ax ay az gx gy gz` | IMU: quaternion, accel (m/s^2), gyro (rad/s) | `/imu` (sensor_msgs/Imu) |
-| `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) | `/odom` (nav_msgs/Odometry) |
+| `s` | `s px py pz vx vy vz yaw qx qy qz qw ax ay az gx gy gz` | state @ ~200 Hz: odometry + IMU in one frame (V1.1) | `/odom` + `/imu` |
+| `b` | `b volts` | battery voltage @ ~0.5 Hz (V1.1) | ignored (no publisher yet) |
+| `i` | `i qx qy qz qw ax ay az gx gy gz` | IMU: quaternion, accel (m/s^2), gyro (rad/s) (legacy, pre-V1.1) | `/imu` (sensor_msgs/Imu) |
+| `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) (legacy, pre-V1.1) | `/odom` (nav_msgs/Odometry) |
 | `r` | `r c1 c2 ... c10` | FlySky RC channels (ints; `-1` = no signal) | `/joy` (sensor_msgs/Joy) |
 | `m` | `m x y z` | magnetometer (Gauss) | `/mag` (optional, off by default) |
 
+The firmware also emits admin chatter (`FW...`, `DIAG...`, `LINK...`, `link`
+acks, `OK`, `ERROR`); the driver ignores it. Any other unknown prefix is
+logged once per tag - if you see "firmware protocol may be newer than this
+driver", the firmware grew a frame this parser does not know yet.
+
 Example lines (captured live):
 ```
-i -0.0072 -0.0061 0.7560 0.6545 -0.0179 -0.1542 9.8467 0.1297 0.0441 -0.0715
-o 5.411874 7.240749 0.000000 0.000000 0.000000 0.000000 1.482815
-m 0.4330 -0.0040 0.0290
+s 0.0000 0.0000 0.0000 0.0000 0.0000 0.0000 0.0095 -0.0033 0.0020 0.0048 1.0000 -0.0418 -0.0636 9.9448 -0.0007 -0.0008 -0.0047
+b 10.83
+m 0.9402 0.0672 -1.2045
 r -1 -1 -1 -1 -1 -1 -1 -1 -1 -1        # transmitter off -> all channels -1
 ```
 

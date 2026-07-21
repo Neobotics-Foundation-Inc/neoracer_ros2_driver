@@ -41,10 +41,10 @@ def parse_serial_data(line: str):
     """
     Parse one line from the ESP32 and return ``(data, tag)``.
 
-    ``tag`` is one of ``'i'``, ``'o'``, ``'r'``, ``'m'`` and ``data`` is a dict
-    of parsed fields. Returns ``(None, None)`` for blank/unknown lines so the
-    caller can ignore them. Raises ``ValueError``/``IndexError`` on malformed
-    numeric fields, which the caller logs and skips.
+    ``tag`` is one of ``'s'``, ``'i'``, ``'o'``, ``'r'``, ``'m'`` and ``data``
+    is a dict of parsed fields. Returns ``(None, None)`` for blank/unknown
+    lines so the caller can ignore them. Raises ``ValueError``/``IndexError``
+    on malformed numeric fields, which the caller logs and skips.
     """
     data = {}
 
@@ -53,6 +53,38 @@ def parse_serial_data(line: str):
         return None, None
 
     cmd_type = parts[0]
+
+    if cmd_type == 's' and len(parts) == 18:
+        # s px py pz vx vy vz yaw qx qy qz qw ax ay az gx gy gz
+        # NEORACER_V1.1 firmware (2026-07) merges the legacy 'o' and 'i'
+        # frames into one ~200 Hz state frame. Field order verified against
+        # the vendor chassis parser and a live capture.
+        p_x, p_y, p_z = map(float, parts[1:4])
+        v_x, v_y, v_z = map(float, parts[4:7])
+        yaw = float(parts[7])
+        q_x, q_y, q_z, q_w = map(float, parts[8:12])
+        a_x, a_y, a_z = map(float, parts[12:15])
+        g_x, g_y, g_z = map(float, parts[15:18])
+
+        data['p_x'] = p_x
+        data['p_y'] = p_y
+        data['p_z'] = p_z
+        data['v_x'] = v_x
+        data['v_y'] = v_y
+        data['v_z'] = v_z
+        data['yaw'] = yaw
+        data['q_x'] = q_x
+        data['q_y'] = q_y
+        data['q_z'] = q_z
+        data['q_w'] = q_w
+        data['a_x'] = a_x
+        data['a_y'] = a_y
+        data['a_z'] = a_z
+        data['g_x'] = g_x
+        data['g_y'] = g_y
+        data['g_z'] = g_z
+
+        return data, 's'
 
     if cmd_type == 'i' and len(parts) == 11:
         # i qx qy qz qw ax ay az gx gy gz

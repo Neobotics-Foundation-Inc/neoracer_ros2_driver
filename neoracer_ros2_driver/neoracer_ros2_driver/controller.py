@@ -112,6 +112,7 @@ class ControllerNode(Node):
         # ===== SET UP PUBLISHERS =====
         self.imu_pub = self.create_publisher(Imu, '/imu', qos_profile_sensor_data)
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile_sensor_data)
+        self._unknown_tags = set()
         # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
         # connects; BEST_EFFORT pipeline subscribers accept a reliable publisher.
         self.joy_pub = self.create_publisher(Joy, '/joy', 10) if self.publish_joy else None
@@ -159,6 +160,12 @@ class ControllerNode(Node):
         }
         return cfg
 
+    # Firmware lines that are expected but carry nothing we publish: admin
+    # chatter (FW/DIAG/LINK banners, link acks) and the V1.1 battery frame,
+    # which has no /battery publisher yet.
+    _IGNORED_EXACT = frozenset({'b', 'link', 'OK', 'ERROR'})
+    _IGNORED_PREFIXES = ('FW', 'DIAG', 'LINK')
+
     def read_serial_loop(self):
         """Read incoming serial lines and fan them out to the sensor topics."""
         while rclpy.ok():
@@ -168,7 +175,10 @@ class ControllerNode(Node):
                     if line:
                         try:
                             data, tag = controller_lib.parse_serial_data(line)
-                            self._dispatch(data, tag)
+                            if tag is None:
+                                self._note_unknown_line(line)
+                            else:
+                                self._dispatch(data, tag)
                         except (ValueError, IndexError) as e:
                             self.get_logger().warn(
                                 f"Unable to parse message: [{line}], reason: {e}")
@@ -180,11 +190,28 @@ class ControllerNode(Node):
             else:
                 time.sleep(0.005)  # ~200 Hz idle poll
 
+    def _note_unknown_line(self, line):
+        """Warn once per unknown frame tag so a firmware protocol change is
+        visible in the log instead of silently binned (the V1.1 's' frame
+        went unnoticed exactly this way)."""
+        tag = line.split(None, 1)[0]
+        if tag in self._IGNORED_EXACT or tag.startswith(self._IGNORED_PREFIXES):
+            return
+        if tag not in self._unknown_tags:
+            self._unknown_tags.add(tag)
+            self.get_logger().warn(
+                f"Unknown serial frame tag '{tag}' (first line: [{line}]); "
+                "firmware protocol may be newer than this driver")
+
     def _dispatch(self, data, tag):
         """Route a parsed serial record to the matching publisher."""
         if data is None:
             return
-        if tag == 'i':
+        if tag == 's':
+            # V1.1 firmware state frame carries both sensor sets.
+            self.pub_imu(data)
+            self.pub_odom(data)
+        elif tag == 'i':
             self.pub_imu(data)
         elif tag == 'o':
             self.pub_odom(data)
