@@ -98,7 +98,7 @@ fi
 # library so notebooks can `import racecar_core`. Re-running refreshes both; a
 # fetch failure aborts setup rather than leaving a half-installed library.
 LIB_REPO="https://github.com/Neobotics-Foundation-Inc/racecar-neo-library"
-LIB_BRANCH="neobotics-slam-nav"
+LIB_BRANCH="main"
 LABS_REPO="https://github.com/Neobotics-Foundation-Inc/neoracer-labs"
 NEO_OS="$JUPYTER_WS/neoracer-os"
 
