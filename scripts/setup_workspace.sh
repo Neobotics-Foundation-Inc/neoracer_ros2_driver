@@ -75,6 +75,13 @@ if [ -d "$VENDOR_WS/src" ] && [ -d "$CANON_LAKIBEAM" ]; then
     [ -d "$VENDOR_LAKIBEAM" ] && touch "$VENDOR_LAKIBEAM/COLCON_IGNORE"
     ln -sfn "$CANON_LAKIBEAM" "$VENDOR_WS/src/lakibeam1"
     rm -rf "$VENDOR_WS/build/lakibeam1" "$VENDOR_WS/install/lakibeam1"
+    # The vendor lidar launch defaults to the LakiBeam ethernet IP
+    # (192.168.198.2), but the car connects the lidar over USB-C, where it is
+    # 192.168.8.2 (matching neoracer's setup_networking). Without this the
+    # shared driver's config push can't reach the sensor, so the lidar takes
+    # ~2 min to start and runs on stale persisted config.
+    OSR_LIDAR_LAUNCH="$VENDOR_WS/src/osracer/osracer_bringup/launch/lidar.launch.py"
+    [ -f "$OSR_LIDAR_LAUNCH" ] && sed -i 's/192\.168\.198\.2/192.168.8.2/g' "$OSR_LIDAR_LAUNCH"
     # Runtime deps the vendor bringup needs that the factory image omits.
     sudo apt-get install -y -qq ros-humble-tf-transformations python3-transforms3d || true
     # Build with base ROS only so our ros2_ws install is not an underlay that
