@@ -41,8 +41,8 @@ def parse_serial_data(line: str):
     """
     Parse one line from the ESP32 and return ``(data, tag)``.
 
-    ``tag`` is one of ``'s'``, ``'i'``, ``'o'``, ``'r'``, ``'m'`` and ``data``
-    is a dict of parsed fields. Returns ``(None, None)`` for blank/unknown
+    ``tag`` is one of ``'s'``, ``'i'``, ``'o'``, ``'r'``, ``'m'``, ``'b'`` and
+    ``data`` is a dict of parsed fields. Returns ``(None, None)`` for blank/unknown
     lines so the caller can ignore them. Raises ``ValueError``/``IndexError``
     on malformed numeric fields, which the caller logs and skips.
     """
@@ -130,6 +130,11 @@ def parse_serial_data(line: str):
         # m x y z   (magnetometer, Gauss)
         data['mag_x'], data['mag_y'], data['mag_z'] = map(float, parts[1:4])
         return data, 'm'
+
+    if cmd_type == 'b' and len(parts) == 2:
+        # b volts   (pack voltage, ~0.5 Hz, V1.1 firmware)
+        data['voltage'] = float(parts[1])
+        return data, 'b'
 
     return None, None
 

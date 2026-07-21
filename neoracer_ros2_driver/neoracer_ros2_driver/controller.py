@@ -28,7 +28,7 @@ from rclpy.qos import qos_profile_sensor_data
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 # ===== IMPORT ROS2 MESSAGE TYPES =====
-from sensor_msgs.msg import Imu, Joy, MagneticField
+from sensor_msgs.msg import BatteryState, Imu, Joy, MagneticField
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 
@@ -112,6 +112,8 @@ class ControllerNode(Node):
         # ===== SET UP PUBLISHERS =====
         self.imu_pub = self.create_publisher(Imu, '/imu', qos_profile_sensor_data)
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile_sensor_data)
+        self.battery_pub = self.create_publisher(
+            BatteryState, '/battery', qos_profile_sensor_data)
         self._unknown_tags = set()
         # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
         # connects; BEST_EFFORT pipeline subscribers accept a reliable publisher.
@@ -161,10 +163,14 @@ class ControllerNode(Node):
         return cfg
 
     # Firmware lines that are expected but carry nothing we publish: admin
-    # chatter (FW/DIAG/LINK banners, link acks) and the V1.1 battery frame,
-    # which has no /battery publisher yet.
-    _IGNORED_EXACT = frozenset({'b', 'link', 'OK', 'ERROR'})
+    # chatter (FW/DIAG/LINK banners, link acks).
+    _IGNORED_EXACT = frozenset({'link', 'OK', 'ERROR'})
     _IGNORED_PREFIXES = ('FW', 'DIAG', 'LINK')
+
+    # 3S LiPo bounds for the reported charge fraction (matches the vendor
+    # stack's battery_voltage_min/max).
+    _BATTERY_V_MIN = 10.8
+    _BATTERY_V_MAX = 12.6
 
     def read_serial_loop(self):
         """Read incoming serial lines and fan them out to the sensor topics."""
@@ -219,6 +225,21 @@ class ControllerNode(Node):
             self.pub_joy(data)
         elif tag == 'm' and self.mag_pub is not None:
             self.pub_mag(data)
+        elif tag == 'b':
+            self.pub_battery(data)
+
+    def pub_battery(self, data):
+        """Publish the pack voltage from the firmware's battery frame."""
+        msg = BatteryState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        volts = data['voltage']
+        msg.voltage = volts
+        span = self._BATTERY_V_MAX - self._BATTERY_V_MIN
+        msg.percentage = min(1.0, max(0.0, (volts - self._BATTERY_V_MIN) / span))
+        msg.present = True
+        msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
+        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        self.battery_pub.publish(msg)
 
     def pub_imu(self, data):
         """Publish an Imu message from a parsed ``i`` record."""

@@ -14,6 +14,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from sensor_msgs.msg import BatteryState
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,9 @@ class _RateSampler(Node):
         self._qos = qos
         self._topics = list(topics)
         self._subs: dict = {}
+        # Latest battery reading as (volts, monotonic stamp); None until the
+        # first /battery message (pre-V1.1 firmware never sends one).
+        self._battery = None
 
     def _record(self, topic: str):
         now = time.monotonic()
@@ -110,6 +114,9 @@ class _RateSampler(Node):
     def attach_subscriptions(self):
         """Resolve each topic's type and create a subscription. Re-runnable; idempotent."""
         names_types = dict(self.get_topic_names_and_types())
+        if '/battery' not in self._subs and '/battery' in names_types:
+            self._subs['/battery'] = self.create_subscription(
+                BatteryState, '/battery', self._battery_cb, self._qos)
         for topic in self._topics:
             if topic in self._subs:
                 continue
@@ -127,6 +134,16 @@ class _RateSampler(Node):
             self._subs[topic] = self.create_subscription(
                 msg_cls, topic, lambda _msg, t=topic: self._record(t), self._qos,
             )
+
+    def _battery_cb(self, msg):
+        self._battery = (float(msg.voltage), time.monotonic())
+
+    def battery(self):
+        """Latest (volts, age_seconds), or None if no reading has arrived."""
+        if self._battery is None:
+            return None
+        volts, stamp = self._battery
+        return volts, time.monotonic() - stamp
 
     def measure_hz(self, topic: str):
         """Return arrival rate (Hz) over the window, or None if not subscribed/no data."""
@@ -237,6 +254,36 @@ def _collect_system_health():
     }
 
 
+# 3S LiPo bands: full 12.6 V, low warning 11.1 V, cutoff 10.8 V.
+BATTERY_V_LOW = 11.1
+BATTERY_V_MIN = 10.8
+BATTERY_V_MAX = 12.6
+BATTERY_STALE_SEC = 15.0
+
+
+def _battery_card():
+    """Battery card for system_health, or None before the first reading."""
+    sampler = _sampler
+    if sampler is None:
+        return None
+    reading = sampler.battery()
+    if reading is None:
+        return None
+    volts, age = reading
+    if age > BATTERY_STALE_SEC:
+        status, detail = 'dead', f'no reading for {age:.0f} s'
+    else:
+        pct = min(1.0, max(0.0, (volts - BATTERY_V_MIN) / (BATTERY_V_MAX - BATTERY_V_MIN)))
+        detail = f'{volts:.1f} V ({pct:.0%})'
+        if volts < BATTERY_V_MIN:
+            status, detail = 'dead', detail + ' - CHARGE NOW'
+        elif volts < BATTERY_V_LOW:
+            status, detail = 'stale', detail + ' - low'
+        else:
+            status = 'healthy'
+    return {'label': 'Battery (3S pack)', 'status': status, 'detail': detail}
+
+
 def _monitor_loop() -> None:
     """Background thread that continuously refreshes the cached status snapshot."""
     global _monitor_running
@@ -281,13 +328,20 @@ def _monitor_loop() -> None:
                 system_health = _collect_system_health()
                 last_system_health = now
 
+            # Battery changes faster than the 60 s health refresh; merge it in
+            # every tick.
+            health_now = dict(system_health)
+            battery = _battery_card()
+            if battery is not None:
+                health_now['battery'] = battery
+
             status = {
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'nodes': node_status,
                 'node_list': nodes,
                 'topic_list': topics,
                 'rates': rates,
-                'system_health': system_health,
+                'system_health': health_now,
                 'watchdog_log': _read_watchdog_tail(),
                 'log_dir': str(Path.home() / 'logs' / 'latest'),
             }
