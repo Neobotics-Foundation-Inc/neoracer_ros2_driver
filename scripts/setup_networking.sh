@@ -18,13 +18,13 @@
 #
 # Interface names differ across boards; override via environment variables:
 #   RACECAR_WIFI_IFACE    (default: wlP1p1s0)
-#   RACECAR_ETH_IFACE     (default: enP8p1s0)
+#   RACECAR_ETH_IFACE     (default: nr_eth0, the PCB's USB-Ethernet bridge the cudy router plugs into)
 # Tunables (override via env or `racecar setup networking --flag=...`):
 #   RACECAR_AP_SSID       (default: neoracer-1)
 #   RACECAR_AP_PSK        (default: neobotics)
 #   RACECAR_AP_CHANNEL    (default: 6)
 #   RACECAR_AP_ADDR       (default: 10.42.0.1/24)
-#   RACECAR_ETH_STATIC    (default: 192.168.1.101/24)
+#   RACECAR_ETH_STATIC    (default: 192.168.10.100/24, the car's fixed address on the cudy router)
 #   RACECAR_LIDAR_HOST    (default: 192.168.8.1/24, sensor at .2)
 #
 # All steps are idempotent - re-running is safe.
@@ -50,7 +50,9 @@ fi
 echo "=== Neoracer Networking Setup ==="
 
 WIFI_IFACE="${RACECAR_WIFI_IFACE:-wlP1p1s0}"
-ETH_IFACE="${RACECAR_ETH_IFACE:-enP8p1s0}"
+# nr_eth0 is the factory udev name for the PCB's USB-Ethernet bridge (the port
+# the cudy router plugs into). Boards without that rule can override via env.
+ETH_IFACE="${RACECAR_ETH_IFACE:-nr_eth0}"
 
 AP_SSID="${RACECAR_AP_SSID:-neoracer-1}"
 AP_PSK="${RACECAR_AP_PSK:-neobotics}"
@@ -59,7 +61,7 @@ AP_BAND="bg"
 AP_CHANNEL="${RACECAR_AP_CHANNEL:-6}"
 AP_ADDR="${RACECAR_AP_ADDR:-10.42.0.1/24}"
 
-ETH_STATIC_ADDR="${RACECAR_ETH_STATIC:-192.168.1.101/24}"
+ETH_STATIC_ADDR="${RACECAR_ETH_STATIC:-192.168.10.100/24}"
 LIDAR_HOST="${RACECAR_LIDAR_HOST:-192.168.8.1/24}"
 LIDAR_SENSOR_IP="192.168.8.2"
 
