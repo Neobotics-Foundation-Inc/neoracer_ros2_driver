@@ -7,7 +7,7 @@
 #      interface so AP clients can reach the car's services (dashboard, jupyter,
 #      SSH) but cannot use the car as an internet gateway.
 #   2. Creates the Neoracer AP NetworkManager connection (WPA2 / 2.4 GHz / ch 6).
-#   3. Writes a netplan file so the Ethernet interface carries both a static
+#   3. Configures the Ethernet interface (NetworkManager) with both a static
 #      address and a DHCP-assigned address.
 #   4. Removes any prior Wi-Fi client connection so the AP can claim the radio.
 #   5. Verifies the Lakibeam lidar subnet (the USB-C link presents the host at
@@ -66,7 +66,6 @@ LIDAR_HOST="${RACECAR_LIDAR_HOST:-192.168.8.1/24}"
 LIDAR_SENSOR_IP="192.168.8.2"
 
 DISPATCHER_PATH="/etc/NetworkManager/dispatcher.d/99-racecar-ap-isolate"
-NETPLAN_ETH_PATH="/etc/netplan/99-racecar-eth0.yaml"
 
 CHANGES_MADE=false
 
@@ -181,41 +180,31 @@ if [ "$CHANGES_MADE" = "true" ] || [ "$ap_state" != "activated" ]; then
     sudo nmcli connection up "$AP_CON_NAME" >/dev/null 2>&1 || true
 fi
 
-# --- 3. Ethernet dual-IP via netplan -----------------------------------------
+# --- 3. Ethernet dual-IP (NetworkManager) ------------------------------------
 echo "[3/5] Configuring $ETH_IFACE dual-IP (static $ETH_STATIC_ADDR + DHCP)..."
-TMP_NETPLAN=$(mktemp)
-cat >"$TMP_NETPLAN" <<YAML
-network:
-  version: 2
-  ethernets:
-    $ETH_IFACE:
-      renderer: NetworkManager
-      addresses:
-      - "$ETH_STATIC_ADDR"
-      dhcp4: true
-      dhcp6: true
-      optional: true
-      networkmanager:
-        passthrough:
-          ipv4.method: "auto"
-          ipv4.address1: "$ETH_STATIC_ADDR"
-          ipv4.dhcp-timeout: "15"
-          ipv4.may-fail: "true"
-YAML
-if sudo cmp -s "$TMP_NETPLAN" "$NETPLAN_ETH_PATH" 2>/dev/null; then
-    echo "  $NETPLAN_ETH_PATH already up to date."
-else
-    sudo install -m 600 -o root -g root "$TMP_NETPLAN" "$NETPLAN_ETH_PATH"
-    echo "  Wrote $NETPLAN_ETH_PATH"
-    CHANGES_MADE=true
+# Pure NetworkManager: factory images don't ship netplan. ipv4.method auto
+# plus a fixed ipv4.addresses entry carries the DHCP lease and the static
+# side by side, the same dual-IP the old netplan passthrough produced.
+# Factory images configure this port under their own profile name; adopt it.
+ETH_CON="$(nmcli -t -f NAME,DEVICE con show | awk -F: -v d="$ETH_IFACE" '$2 == d { print $1; exit }')"
+if [ -z "$ETH_CON" ]; then
+    ETH_CON="racecar-eth0"
+    if ! nmcli -t -f NAME con show | grep -qx "$ETH_CON"; then
+        sudo nmcli connection add type ethernet ifname "$ETH_IFACE" \
+            con-name "$ETH_CON" autoconnect yes >/dev/null
+        echo "  Created connection '$ETH_CON' for $ETH_IFACE."
+    fi
 fi
-rm -f "$TMP_NETPLAN"
-
-if [ "$CHANGES_MADE" = "true" ]; then
-    echo
-    echo "Applying netplan..."
-    sudo netplan apply
-fi
+sudo nmcli connection modify "$ETH_CON" \
+    connection.autoconnect yes \
+    ipv4.method auto \
+    ipv4.addresses "$ETH_STATIC_ADDR" \
+    ipv4.dhcp-timeout 15 \
+    ipv4.may-fail yes \
+    ipv6.method auto
+sudo nmcli connection up "$ETH_CON" >/dev/null
+echo "  '$ETH_CON' carries $ETH_STATIC_ADDR + DHCP on $ETH_IFACE."
+CHANGES_MADE=true
 
 # The factory image ships no profile for the Jetson's native RJ45, so a
 # plugged cable does nothing until one exists. The docs sell this port as the
