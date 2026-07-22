@@ -107,10 +107,13 @@ TMP="$(mktemp -d)"
 git clone --depth 1 --branch "$LIB_BRANCH" "$LIB_REPO" "$TMP/lib"
 git clone --depth 1 "$LABS_REPO" "$TMP/labs"
 mkdir -p "$NEO_OS"
-rm -rf "$NEO_OS/library" "$NEO_OS/labs"
+# The library is ours to replace wholesale. The labs folder is the student's
+# workspace: overlay the shipped files but never delete what they saved there.
+rm -rf "$NEO_OS/library"
 cp -r "$TMP/lib/library" "$NEO_OS/library"
-cp -r "$TMP/labs" "$NEO_OS/labs"
-rm -rf "$NEO_OS/labs/.git"
+rm -rf "$TMP/labs/.git"
+mkdir -p "$NEO_OS/labs"
+cp -r "$TMP/labs/." "$NEO_OS/labs/"
 rm -rf "$TMP"
 
 # Select this library by writing the same racecar_student.pth that
