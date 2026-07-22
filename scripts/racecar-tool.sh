@@ -150,26 +150,11 @@ racecar() {
                 install)
                     bash "$pkg_dir/scripts/setup_services.sh"
                     ;;
-                start)
+                start|stop|restart)
                     if [[ -n "$1" ]]; then
-                        sudo systemctl start "neoracer-$1"
+                        sudo systemctl "$action" "neoracer-$1"
                     else
-                        # Start teleop; BindsTo pulls watchdog with it.
-                        sudo systemctl start neoracer-teleop
-                    fi
-                    ;;
-                stop)
-                    if [[ -n "$1" ]]; then
-                        sudo systemctl stop "neoracer-$1"
-                    else
-                        sudo systemctl stop neoracer-teleop
-                    fi
-                    ;;
-                restart)
-                    if [[ -n "$1" ]]; then
-                        sudo systemctl restart "neoracer-$1"
-                    else
-                        sudo systemctl restart neoracer-teleop
+                        sudo systemctl "$action" "${units[@]}"
                     fi
                     ;;
                 enable|disable)
