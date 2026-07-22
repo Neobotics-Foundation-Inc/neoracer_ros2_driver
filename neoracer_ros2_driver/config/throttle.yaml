@@ -1,7 +1,9 @@
 throttle_node:
   ros__parameters:
     # Single source of truth for top speed. Fractions of full PWM swing.
-    # Defaults preserve v1 top speed (PWM 6510 fwd / 5280 rev / +/-2500 steer offset).
-    max_speed_forward: 0.5
-    max_speed_backward: 0.6
+    # Speed runs the full ESC swing. Steering stays at 0.625 (the v1 +/-2500
+    # offset): past that the servo is commanded beyond full lock and stalls
+    # against the linkage.
+    max_speed_forward: 1.0
+    max_speed_backward: 1.0
     max_steering: 0.625
