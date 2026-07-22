@@ -217,6 +217,19 @@ if [ "$CHANGES_MADE" = "true" ]; then
     sudo netplan apply
 fi
 
+# The factory image ships no profile for the Jetson's native RJ45, so a
+# plugged cable does nothing until one exists. The docs sell this port as the
+# wired fallback; give it a plain DHCP autoconnect profile so that is true.
+RJ45_IFACE="${RACECAR_RJ45_IFACE:-enP8p1s0}"
+if nmcli -t -f NAME con show | grep -qx "wired-rj45"; then
+    echo "  wired-rj45 profile already present."
+else
+    sudo nmcli connection add type ethernet ifname "$RJ45_IFACE" \
+        con-name wired-rj45 autoconnect yes ipv4.method auto ipv6.method auto >/dev/null
+    echo "  Added wired-rj45 profile for $RJ45_IFACE (DHCP, autoconnect)."
+    CHANGES_MADE=true
+fi
+
 # --- 4. Delete prior Wi-Fi client connections --------------------------------
 # Done after the AP + Ethernet are up so removing the old client can't strand us.
 echo "[4/5] Removing any prior Wi-Fi client connection..."
