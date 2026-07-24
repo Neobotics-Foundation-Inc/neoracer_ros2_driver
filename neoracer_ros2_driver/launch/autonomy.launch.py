@@ -34,12 +34,16 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('neoracer_ros2_driver')
 
+    # slam and nav are mutually exclusive by default: slam_toolbox and
+    # Nav2's map-file localization both publish map->odom, so running both
+    # double-publishes the transform. Mapping (default): slam:=true nav:=false.
+    # Navigating a saved map: slam:=false nav:=true.
     enable_slam = DeclareLaunchArgument(
         'slam', default_value='true',
         description='Start slam_toolbox (osracer_slam)')
     enable_nav = DeclareLaunchArgument(
-        'nav', default_value='true',
-        description='Start Nav2 (osracer_navigation)')
+        'nav', default_value='false',
+        description='Start Nav2 on a saved map (osracer_navigation)')
 
     # TF: robot_state_publisher + odom-topic broadcaster from the vendor
     # description package, fed by the neoracer controller's /odom.
@@ -63,11 +67,18 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('slam')),
     )
 
+    # use_namespace/use_rviz must be Python-cased: Nav2's bringup evaluates
+    # them in a PythonExpression, and the vendor's lowercase defaults throw
+    # NameError. RViz stays off; this runs headless under systemd.
     nav = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('osracer_navigation'),
             'launch', 'nav2.launch.py')),
         condition=IfCondition(LaunchConfiguration('nav')),
+        launch_arguments={
+            'use_namespace': 'False',
+            'use_rviz': 'False',
+        }.items(),
     )
 
     twist_bridge = Node(
