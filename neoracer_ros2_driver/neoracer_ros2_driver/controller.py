@@ -30,6 +30,8 @@ from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 # ===== IMPORT ROS2 MESSAGE TYPES =====
 from sensor_msgs.msg import BatteryState, Imu, Joy, MagneticField
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
 from ackermann_msgs.msg import AckermannDriveStamped
 
 # ===== IMPORT OTHER DEPENDENCIES ======
@@ -85,6 +87,10 @@ class ControllerNode(Node):
         self.imu_frame = self.declare_parameter('imu_frame', 'imu_link').value
         self.odom_frame = self.declare_parameter('odom_frame', 'odom').value
         self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
+        # Broadcast odom -> base_footprint alongside /odom. SLAM and Nav2
+        # need the transform, and this node is the single odometry source
+        # (the vendor chassis node broadcast it the same way).
+        self.publish_tf = self.declare_parameter('publish_tf', True).value
 
         # Optional magnetometer publication (the student library does not use it).
         self.publish_mag = self.declare_parameter('publish_mag', False).value
@@ -112,6 +118,7 @@ class ControllerNode(Node):
         # ===== SET UP PUBLISHERS =====
         self.imu_pub = self.create_publisher(Imu, '/imu', qos_profile_sensor_data)
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile_sensor_data)
+        self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
         self.battery_pub = self.create_publisher(
             BatteryState, '/battery', qos_profile_sensor_data)
         self._unknown_tags = set()
@@ -287,6 +294,20 @@ class ControllerNode(Node):
         odom_msg.twist.twist.angular.z = 0.0
 
         self.odom_pub.publish(odom_msg)
+
+        if self.tf_broadcaster is not None:
+            t = TransformStamped()
+            t.header.stamp = odom_msg.header.stamp
+            t.header.frame_id = self.odom_frame
+            t.child_frame_id = self.base_frame
+            t.transform.translation.x = data['p_x']
+            t.transform.translation.y = data['p_y']
+            t.transform.translation.z = data['p_z']
+            t.transform.rotation.x = q[0]
+            t.transform.rotation.y = q[1]
+            t.transform.rotation.z = q[2]
+            t.transform.rotation.w = q[3]
+            self.tf_broadcaster.sendTransform(t)
 
     def pub_joy(self, data):
         """Publish a Joy message synthesized from a parsed ``r`` (FlySky) record."""
