@@ -145,7 +145,8 @@ racecar() {
             local action="${1:-status}"
             shift || true
             local -a units=("neoracer-teleop" "neoracer-watchdog"
-                            "neoracer-dashboard" "neoracer-jupyter")
+                            "neoracer-dashboard" "neoracer-jupyter"
+                            "neoracer-autonomy")
             case "$action" in
                 install)
                     bash "$pkg_dir/scripts/setup_services.sh"
@@ -768,7 +769,7 @@ _racecar_complete() {
                 local action="${COMP_WORDS[2]}"
                 case "$action" in
                     start|stop|restart|logs)
-                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter autonomy" -- "$cur") )
                         ;;
                 esac
             fi

@@ -1,0 +1,22 @@
+[Unit]
+Description=Neoracer Autonomy (TF + SLAM + Nav2 + twist bridge)
+# Teleop owns every device; autonomy only adds intelligence on top. Start
+# after it so /odom and /scan exist, but don't hard-bind: autonomy restarts
+# on its own if teleop bounces, and teleop never waits on autonomy.
+After=network-online.target neoracer-teleop.service
+Wants=network-online.target neoracer-teleop.service
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+ExecStart=/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+Restart=on-failure
+RestartSec=10
+Environment=HOME=/home/racecar
+WorkingDirectory=/home/racecar/ros2_ws
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

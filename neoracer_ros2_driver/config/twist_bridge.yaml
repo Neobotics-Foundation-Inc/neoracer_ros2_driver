@@ -1,0 +1,15 @@
+twist_bridge_node:
+  ros__parameters:
+    # Mirror config/controller.yaml so the normalization round-trips:
+    # a 1.5 m/s Twist reaches the firmware as 1.5 m/s.
+    max_speed_mps: 6.0
+    max_steering_angle_deg: 30.0
+    wheelbase: 0.285
+
+    # Slowest speed at which the front axle still steers; commanded when a
+    # planner requests rotation below it (Ackermann cars cannot turn in place).
+    min_turn_speed_mps: 0.4
+
+    # One explicit zero after the planner goes quiet. The mux also zeroes on
+    # its own command_timeout_sec; this makes the stop deterministic.
+    cmd_timeout_sec: 0.5

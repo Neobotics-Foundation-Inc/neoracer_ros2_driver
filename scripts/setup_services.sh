@@ -10,6 +10,7 @@
 #   neoracer-watchdog.service  - BindsTo=teleop, restart-on-failure supervisor
 #   neoracer-dashboard.service - web status page (port 8080, after Phase 4E)
 #   neoracer-jupyter.service   - JupyterLab (port 8888)
+#   neoracer-autonomy.service  - TF + SLAM + Nav2 + twist bridge (osracer layer)
 #
 # After install: `sudo systemctl start neoracer-teleop` or reboot.
 set -eo pipefail
@@ -21,6 +22,7 @@ SERVICES=(
     neoracer-watchdog.service
     neoracer-dashboard.service
     neoracer-jupyter.service
+    neoracer-autonomy.service
 )
 
 changed=0
