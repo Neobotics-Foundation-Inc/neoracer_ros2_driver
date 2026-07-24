@@ -37,6 +37,12 @@ MONITORED = {
     'joy': {'topic': '/joy', 'label': 'FlySky RC (/joy)', 'supervised': False},
     'lidar': {'topic': '/scan', 'label': 'Lakibeam lidar', 'supervised': True},
     'camera': {'topic': '/camera', 'label': 'USB camera', 'supervised': True},
+    # Autonomy layer (neoracer-autonomy service). `optional`: absent is a
+    # normal state (service off), shown as OFF rather than DEAD.
+    'slam': {'topic': '/map', 'label': 'SLAM (slam_toolbox)', 'supervised': False, 'optional': True},
+    'bridge': {'topic': '/odometry/filtered', 'label': 'Twist bridge (Nav2 -> mux)', 'supervised': False, 'optional': True},
+    'model': {'topic': '/joint_states', 'label': 'Robot model (TF)', 'supervised': False, 'optional': True},
+    'nav': {'topic': '/plan', 'label': 'Nav2 planner', 'supervised': False, 'optional': True},
 }
 
 RATE_TOPICS = [
@@ -47,6 +53,10 @@ RATE_TOPICS = [
     '/joy',
     '/scan',
     '/camera',
+    '/drive',
+    '/cmd_vel',
+    '/odometry/filtered',
+    '/map',
 ]
 
 log = logging.getLogger('dashboard')
@@ -178,6 +188,16 @@ def _measure_hz(topic: str):
     return sampler.measure_hz(topic)
 
 
+def _count_publishers(topic: str) -> int:
+    sampler = _sampler
+    if sampler is None:
+        return 0
+    try:
+        return sampler.count_publishers(topic)
+    except Exception:
+        return 0
+
+
 def _get_topic_list():
     sampler = _sampler
     if sampler is None:
@@ -303,9 +323,14 @@ def _monitor_loop() -> None:
 
             node_status = {}
             for name, cfg in MONITORED.items():
-                present = cfg['topic'] in topics
+                # Publisher count, not topic existence: the sampler's own
+                # subscriptions create the topics, so existence always reads
+                # true and a dead node never went red.
+                present = _count_publishers(cfg['topic']) > 0
                 if present:
                     status = 'healthy'
+                elif cfg.get('optional', False):
+                    status = 'off'
                 elif cfg.get('supervised', True):
                     status = 'dead'
                 else:
@@ -315,6 +340,7 @@ def _monitor_loop() -> None:
                     'topic': cfg['topic'],
                     'alive': present,
                     'supervised': cfg.get('supervised', True),
+                    'optional': cfg.get('optional', False),
                     'status': status,
                 }
 
