@@ -125,11 +125,13 @@ def main(args=None):
     node = TwistBridgeNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # try_shutdown: a SIGTERM from systemd already shut the context down;
+        # a second shutdown() raises and turns clean stops into tracebacks.
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':
