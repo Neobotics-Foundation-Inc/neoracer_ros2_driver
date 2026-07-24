@@ -155,6 +155,42 @@ class _RateSampler(Node):
         volts, stamp = self._battery
         return volts, time.monotonic() - stamp
 
+    # Plumbing hidden from the graph view: ROS internals and the
+    # dashboard's own observer machinery.
+    _GRAPH_SKIP_TOPICS = frozenset({
+        '/parameter_events', '/rosout', '/tf', '/tf_static', '/bond',
+    })
+    _GRAPH_SKIP_NODE_PREFIXES = (
+        'transform_listener_impl', '_ros2cli', 'rqt', 'racecar_dashboard',
+    )
+
+    def graph(self):
+        """Live node->topic->node graph for the dashboard's graph view."""
+        nodes, topics, edges = set(), set(), []
+        for name, ns in self.get_node_names_and_namespaces():
+            if name.startswith(self._GRAPH_SKIP_NODE_PREFIXES):
+                continue
+            full = (ns.rstrip('/') + '/' + name)
+            if full in nodes:
+                continue
+            try:
+                pubs = self.get_publisher_names_and_types_by_node(name, ns)
+                subs = self.get_subscriber_names_and_types_by_node(name, ns)
+            except Exception:
+                continue
+            nodes.add(full)
+            for t, _types in pubs:
+                if t in self._GRAPH_SKIP_TOPICS:
+                    continue
+                topics.add(t)
+                edges.append([full, t])
+            for t, _types in subs:
+                if t in self._GRAPH_SKIP_TOPICS:
+                    continue
+                topics.add(t)
+                edges.append([t, full])
+        return {'nodes': sorted(nodes), 'topics': sorted(topics), 'edges': edges}
+
     def measure_hz(self, topic: str):
         """Return arrival rate (Hz) over the window, or None if not subscribed/no data."""
         with self._lock:
@@ -368,6 +404,8 @@ def _monitor_loop() -> None:
                 'topic_list': topics,
                 'rates': rates,
                 'system_health': health_now,
+                'graph': (_sampler.graph() if _sampler is not None else
+                          {'nodes': [], 'topics': [], 'edges': []}),
                 'watchdog_log': _read_watchdog_tail(),
                 'log_dir': str(Path.home() / 'logs' / 'latest'),
             }

@@ -191,6 +191,70 @@
     color: var(--text-muted);
   }
 
+  /* ── Node graph overlay ─────────────────────────────────────────── */
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.78rem;
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: border-color 150ms ease-out, background 150ms ease-out;
+  }
+  .btn:hover, .btn:focus-visible { border-color: var(--nb-red); background: rgba(255,0,51,0.08); }
+  .btn:focus-visible { outline: 2px solid var(--nb-red); outline-offset: 2px; }
+  .btn svg { display: block; }
+
+  #graph-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 20, 28, 0.96);
+    z-index: 100;
+    flex-direction: column;
+  }
+  #graph-overlay.open { display: flex; }
+  #graph-overlay .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    background: var(--nb-blue);
+    border-bottom: 2px solid var(--nb-red);
+  }
+  #graph-overlay .bar h2 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  #graph-overlay .bar .legend {
+    margin-left: auto;
+    display: flex;
+    gap: 16px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    align-items: center;
+  }
+  .legend .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw-node { width: 14px; height: 10px; border-radius: 3px; background: var(--nb-blue); border: 1px solid #4A5470; }
+  .legend .sw-topic { width: 14px; height: 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+  #graph-svg { flex: 1; width: 100%; touch-action: none; }
+  #graph-svg .gnode rect { fill: var(--nb-blue); stroke: #4A5470; stroke-width: 1; rx: 6; }
+  #graph-svg .gnode text { fill: var(--text); font-size: 11px; font-weight: 600; }
+  #graph-svg .gtopic rect { fill: var(--surface-2); stroke: rgba(255,255,255,0.14); stroke-width: 1; }
+  #graph-svg .gtopic text { fill: var(--text-muted); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
+  #graph-svg .gedge { stroke: rgba(255,255,255,0.22); stroke-width: 1.2; fill: none; }
+  #graph-svg g.dim { opacity: 0.15; }
+  #graph-svg .gedge.hot { stroke: var(--nb-red); stroke-width: 1.8; }
+  #graph-svg .gedge.dim { opacity: 0.08; }
+  #graph-svg .gnode, #graph-svg .gtopic { cursor: grab; }
+
   footer {
     max-width: 1120px;
     margin: 0 auto;
@@ -207,6 +271,10 @@
   <div class="divider" aria-hidden="true"></div>
   <h1>NeoRacer System Dashboard</h1>
   <div class="meta">
+    <button class="btn" id="graph-btn" aria-haspopup="dialog">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="3" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="13" cy="3" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="13" cy="13" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M5 7.2 11 3.8M5 8.8 11 12.2" stroke="currentColor" stroke-width="1.4"/></svg>
+      Node graph
+    </button>
     <span class="pulse" id="pulse" aria-hidden="true"></span>
     <span id="timestamp">Loading&hellip;</span>
   </div>
@@ -240,6 +308,26 @@
   Logs: <span class="mono" id="log-dir"></span>
 </footer>
 
+<div id="graph-overlay" role="dialog" aria-modal="true" aria-label="ROS node graph">
+  <div class="bar">
+    <h2>Live node graph</h2>
+    <div class="legend">
+      <span class="chip"><span class="sw-node"></span>node</span>
+      <span class="chip"><span class="sw-topic"></span>topic</span>
+      <span>drag to arrange &middot; hover to trace</span>
+    </div>
+    <button class="btn" id="graph-close">Close</button>
+  </div>
+  <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+        <path d="M0 0 L7 3.5 L0 7 Z" fill="rgba(255,255,255,0.35)"/>
+      </marker>
+    </defs>
+    <g id="graph-root"></g>
+  </svg>
+</div>
+
 <script>
 const STATE_LABEL = {
   healthy: 'PUBLISHING',
@@ -263,6 +351,7 @@ function update() {
     .then(data => {
       document.getElementById('error-banner').style.display = 'none';
       document.getElementById('pulse').classList.remove('err');
+      latestGraph = data.graph || null;
       document.getElementById('timestamp').textContent = data.timestamp;
       document.getElementById('log-dir').textContent = data.log_dir;
 
@@ -314,6 +403,159 @@ function update() {
 
 update();
 setInterval(update, 3000);
+
+/* ── Node graph: force layout over the live pub/sub graph ─────────── */
+let latestGraph = null;
+
+function short(name) {
+  const parts = name.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : name;
+}
+
+function layoutAndRender() {
+  const svg = document.getElementById('graph-svg');
+  const root = document.getElementById('graph-root');
+  root.innerHTML = '';
+  if (!latestGraph || !latestGraph.nodes.length) {
+    root.innerHTML = '<text x="40" y="60" fill="#A2A6B5" font-size="14">Graph not available yet.</text>';
+    return;
+  }
+  const W = svg.clientWidth, H = svg.clientHeight;
+  const items = [];
+  const index = new Map();
+  latestGraph.nodes.forEach(n => { index.set(n, items.length); items.push({ id: n, kind: 'node' }); });
+  latestGraph.topics.forEach(t => { index.set(t, items.length); items.push({ id: t, kind: 'topic' }); });
+  const links = latestGraph.edges
+    .filter(([a, b]) => index.has(a) && index.has(b))
+    .map(([a, b]) => [index.get(a), index.get(b)]);
+
+  // Deterministic starting ring (no Math.random: stable between opens).
+  items.forEach((it, i) => {
+    const a = (i / items.length) * 2 * Math.PI;
+    it.x = W / 2 + Math.cos(a) * Math.min(W, H) * 0.33;
+    it.y = H / 2 + Math.sin(a) * Math.min(W, H) * 0.33;
+  });
+
+  // Small synchronous force sim: repulsion + springs + centering.
+  for (let iter = 0; iter < 260; iter++) {
+    const k = 1 - iter / 260;
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i], b = items[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy + 0.01;
+        if (d2 < 260 * 260) {
+          const f = (9000 * k) / d2;
+          const d = Math.sqrt(d2);
+          dx /= d; dy /= d;
+          a.x += dx * f; a.y += dy * f;
+          b.x -= dx * f; b.y -= dy * f;
+        }
+      }
+    }
+    for (const [ai, bi] of links) {
+      const a = items[ai], b = items[bi];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+      const f = (d - 130) * 0.02 * k;
+      dx /= d; dy /= d;
+      a.x += dx * f * d * 0.02; a.y += dy * f * d * 0.02;
+      b.x -= dx * f * d * 0.02; b.y -= dy * f * d * 0.02;
+    }
+    for (const it of items) {
+      it.x += (W / 2 - it.x) * 0.004;
+      it.y += (H / 2 - it.y) * 0.004;
+      it.x = Math.max(70, Math.min(W - 70, it.x));
+      it.y = Math.max(40, Math.min(H - 30, it.y));
+    }
+  }
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const edgeEls = [];
+  for (const [ai, bi] of links) {
+    const e = document.createElementNS(NS, 'path');
+    e.setAttribute('class', 'gedge');
+    e.setAttribute('marker-end', 'url(#arrow)');
+    root.appendChild(e);
+    edgeEls.push([e, ai, bi]);
+  }
+  const itemEls = [];
+  items.forEach((it, i) => {
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', it.kind === 'node' ? 'gnode' : 'gtopic');
+    const label = it.kind === 'node' ? short(it.id) : it.id;
+    const w = Math.max(46, label.length * (it.kind === 'node' ? 7.2 : 6.2) + 18);
+    const h = it.kind === 'node' ? 26 : 20;
+    const rect = document.createElementNS(NS, 'rect');
+    rect.setAttribute('width', w); rect.setAttribute('height', h);
+    rect.setAttribute('rx', it.kind === 'node' ? 6 : 10);
+    const text = document.createElementNS(NS, 'text');
+    text.textContent = label;
+    text.setAttribute('x', w / 2); text.setAttribute('y', h / 2 + 3.5);
+    text.setAttribute('text-anchor', 'middle');
+    const title = document.createElementNS(NS, 'title');
+    title.textContent = it.id;
+    g.appendChild(rect); g.appendChild(text); g.appendChild(title);
+    root.appendChild(g);
+    it.w = w; it.h = h;
+    itemEls.push(g);
+
+    g.addEventListener('mouseenter', () => {
+      const hot = new Set([i]);
+      edgeEls.forEach(([e, a, b]) => {
+        if (a === i || b === i) { e.classList.add('hot'); hot.add(a); hot.add(b); }
+        else e.classList.add('dim');
+      });
+      itemEls.forEach((el, j) => { if (!hot.has(j)) el.classList.add('dim'); });
+    });
+    g.addEventListener('mouseleave', () => {
+      edgeEls.forEach(([e]) => e.classList.remove('hot', 'dim'));
+      itemEls.forEach(el => el.classList.remove('dim'));
+    });
+
+    // Drag to arrange.
+    g.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      g.setPointerCapture(ev.pointerId);
+      const move = (mv) => {
+        const pt = svg.createSVGPoint(); pt.x = mv.clientX; pt.y = mv.clientY;
+        const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+        it.x = loc.x; it.y = loc.y;
+        position();
+      };
+      const up = () => {
+        g.removeEventListener('pointermove', move);
+        g.removeEventListener('pointerup', up);
+      };
+      g.addEventListener('pointermove', move);
+      g.addEventListener('pointerup', up);
+    });
+  });
+
+  function position() {
+    items.forEach((it, i) => {
+      itemEls[i].setAttribute('transform',
+        `translate(${it.x - it.w / 2}, ${it.y - it.h / 2})`);
+    });
+    edgeEls.forEach(([e, ai, bi]) => {
+      const a = items[ai], b = items[bi];
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const bend = 0.12;
+      const cx = mx - dy * bend, cy = my + dx * bend;
+      e.setAttribute('d', `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`);
+    });
+  }
+  position();
+}
+
+const overlay = document.getElementById('graph-overlay');
+document.getElementById('graph-btn').addEventListener('click', () => {
+  overlay.classList.add('open');
+  requestAnimationFrame(layoutAndRender);
+});
+document.getElementById('graph-close').addEventListener('click', () => overlay.classList.remove('open'));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.classList.remove('open'); });
 </script>
 </body>
 </html>
