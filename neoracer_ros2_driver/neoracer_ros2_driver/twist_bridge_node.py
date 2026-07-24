@@ -25,9 +25,11 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 
 from ackermann_msgs.msg import AckermannDriveStamped
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 
 
 class TwistBridgeNode(Node):
@@ -54,6 +56,19 @@ class TwistBridgeNode(Node):
         self.pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.sub = self.create_subscription(Twist, '/cmd_vel', self.on_cmd_vel, 10)
 
+        # Vendor-compat odom relay: the osracer Nav2 params and cartographer
+        # read odometry from /odometry/filtered (their EKF's output name).
+        # There is no EKF in the fused stack, so republish the controller's
+        # /odom under that name - and at default (RELIABLE) QoS, because the
+        # controller publishes BEST_EFFORT and Nav2 subscribes RELIABLE.
+        self.relay_filtered_odom = self.declare_parameter(
+            'relay_filtered_odom', True).value
+        if self.relay_filtered_odom:
+            self._odom_relay_pub = self.create_publisher(
+                Odometry, '/odometry/filtered', 10)
+            self._odom_relay_sub = self.create_subscription(
+                Odometry, '/odom', self._on_odom, qos_profile_sensor_data)
+
         self._last_cmd_time = None
         self._stopped = True
         self.create_timer(0.1, self._check_stale)
@@ -62,6 +77,9 @@ class TwistBridgeNode(Node):
             f'[INFO] twist_bridge up: /cmd_vel -> /drive '
             f'(max {self.max_speed_mps} m/s, {self.max_steering_angle_deg} deg, '
             f'wheelbase {self.wheelbase} m)')
+
+    def _on_odom(self, msg: Odometry):
+        self._odom_relay_pub.publish(msg)
 
     def on_cmd_vel(self, msg: Twist):
         """Convert one Twist to a normalized Ackermann command."""
