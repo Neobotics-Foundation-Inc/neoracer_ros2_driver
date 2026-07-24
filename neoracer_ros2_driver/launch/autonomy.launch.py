@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 """
-Autonomy layer on top of teleop: TF + SLAM + Nav2 from the osracer stack,
-bridged into the neoracer mux.
+Autonomy base layer on top of teleop: TF and the twist bridge, always cheap
+to run. SLAM and Nav2 are on-demand activities, launched by `racecar
+mapping` and `racecar navigation` when needed rather than living in the
+service.
 
 Teleop owns every device (serial, lidar, camera, LED); this launch adds the
 intelligence and no hardware drivers. The osracer chassis, lidar, camera,
@@ -11,10 +13,10 @@ with the teleop nodes on the same devices.
 
   osracer_description  robot_state_publisher + odom-topic TF, fed from the
                        controller's /odom (odom -> base_footprint -> laser)
-  osracer_slam         slam_toolbox online async on /scan
-  osracer_navigation   Nav2, publishing /cmd_vel
   twist_bridge         /cmd_vel -> normalized /drive into the mux, so SWB
                        manual override and the throttle caps still apply
+  osracer_slam         opt-in (slam:=true); `racecar mapping` is the front door
+  osracer_navigation   opt-in (nav:=true); `racecar navigation` is the front door
 
 Requires the osracer workspace sourced underneath this one
 (scripts/launch_autonomy.sh does that; see also `racecar service`).
@@ -34,12 +36,12 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('neoracer_ros2_driver')
 
-    # slam and nav are mutually exclusive by default: slam_toolbox and
-    # Nav2's map-file localization both publish map->odom, so running both
-    # double-publishes the transform. Mapping (default): slam:=true nav:=false.
-    # Navigating a saved map: slam:=false nav:=true.
+    # Both default off: mapping and navigation are on-demand activities
+    # (`racecar mapping` / `racecar navigation`), not part of the service.
+    # They are also mutually exclusive: slam_toolbox and Nav2's map-file
+    # localization both publish map->odom.
     enable_slam = DeclareLaunchArgument(
-        'slam', default_value='true',
+        'slam', default_value='false',
         description='Start slam_toolbox (osracer_slam)')
     enable_nav = DeclareLaunchArgument(
         'nav', default_value='false',

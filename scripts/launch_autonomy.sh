@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch wrapper for autonomy.launch.py (TF + SLAM + Nav2 + twist bridge).
+# Launch wrapper for autonomy.launch.py (autonomy base: TF + twist bridge).
 #
 # Same shape as launch_teleop.sh: timestamped log dir, output tee'd to a
 # plain-text log and journald, exec so systemd tracks the ros2 launch PID.

@@ -245,7 +245,7 @@
   .legend .sw-node { width: 14px; height: 10px; border-radius: 3px; background: var(--nb-blue); border: 1px solid #4A5470; }
   .legend .sw-topic { width: 14px; height: 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
   #graph-svg { flex: 1; width: 100%; touch-action: none; }
-  #graph-svg .gnode rect { fill: var(--nb-blue); stroke: #4A5470; stroke-width: 1; rx: 6; }
+  #graph-svg .gnode ellipse { fill: var(--nb-blue); stroke: #4A5470; stroke-width: 1.2; }
   #graph-svg .gnode text { fill: var(--text); font-size: 11px; font-weight: 600; }
   #graph-svg .gtopic rect { fill: var(--surface-2); stroke: rgba(255,255,255,0.14); stroke-width: 1; }
   #graph-svg .gtopic text { fill: var(--text-muted); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
@@ -420,7 +420,8 @@ function layoutAndRender() {
     root.innerHTML = '<text x="40" y="60" fill="#A2A6B5" font-size="14">Graph not available yet.</text>';
     return;
   }
-  const W = svg.clientWidth, H = svg.clientHeight;
+
+  // ── Items: ROS nodes (ellipses) and topics (rectangles), rqt_graph style.
   const items = [];
   const index = new Map();
   latestGraph.nodes.forEach(n => { index.set(n, items.length); items.push({ id: n, kind: 'node' }); });
@@ -429,47 +430,79 @@ function layoutAndRender() {
     .filter(([a, b]) => index.has(a) && index.has(b))
     .map(([a, b]) => [index.get(a), index.get(b)]);
 
-  // Deterministic starting ring (no Math.random: stable between opens).
-  items.forEach((it, i) => {
-    const a = (i / items.length) * 2 * Math.PI;
-    it.x = W / 2 + Math.cos(a) * Math.min(W, H) * 0.33;
-    it.y = H / 2 + Math.sin(a) * Math.min(W, H) * 0.33;
-  });
+  const out = items.map(() => []);
+  links.forEach(([a, b]) => out[a].push(b));
 
-  // Small synchronous force sim: repulsion + springs + centering.
-  for (let iter = 0; iter < 260; iter++) {
-    const k = 1 - iter / 260;
-    for (let i = 0; i < items.length; i++) {
-      for (let j = i + 1; j < items.length; j++) {
-        const a = items[i], b = items[j];
-        let dx = a.x - b.x, dy = a.y - b.y;
-        let d2 = dx * dx + dy * dy + 0.01;
-        if (d2 < 260 * 260) {
-          const f = (9000 * k) / d2;
-          const d = Math.sqrt(d2);
-          dx /= d; dy /= d;
-          a.x += dx * f; a.y += dy * f;
-          b.x -= dx * f; b.y -= dy * f;
-        }
-      }
+  // ── Layering, left to right, like dot: longest path over the DAG after
+  // breaking cycles (the drive pipeline is a loop: controller -> ... -> motor
+  // -> controller). DFS marks back edges; layering ignores them.
+  const state = new Array(items.length).fill(0);  // 0 new, 1 open, 2 done
+  const back = new Set();
+  function dfs(u) {
+    state[u] = 1;
+    for (const v of out[u]) {
+      if (state[v] === 1) back.add(u + '>' + v);
+      else if (state[v] === 0) dfs(v);
     }
-    for (const [ai, bi] of links) {
-      const a = items[ai], b = items[bi];
-      let dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const f = (d - 130) * 0.02 * k;
-      dx /= d; dy /= d;
-      a.x += dx * f * d * 0.02; a.y += dy * f * d * 0.02;
-      b.x -= dx * f * d * 0.02; b.y -= dy * f * d * 0.02;
+    state[u] = 2;
+  }
+  for (let i = 0; i < items.length; i++) if (state[i] === 0) dfs(i);
+  const fwd = links.filter(([a, b]) => !back.has(a + '>' + b));
+
+  const layer = new Array(items.length).fill(0);
+  for (let pass = 0; pass < items.length; pass++) {
+    let changed = false;
+    for (const [a, b] of fwd) {
+      if (layer[b] < layer[a] + 1) { layer[b] = layer[a] + 1; changed = true; }
     }
-    for (const it of items) {
-      it.x += (W / 2 - it.x) * 0.004;
-      it.y += (H / 2 - it.y) * 0.004;
-      it.x = Math.max(70, Math.min(W - 70, it.x));
-      it.y = Math.max(40, Math.min(H - 30, it.y));
+    if (!changed) break;
+  }
+
+  // ── Order within layers by neighbour barycenter to reduce crossings.
+  const nLayers = Math.max(...layer) + 1;
+  const cols = Array.from({ length: nLayers }, () => []);
+  items.forEach((it, i) => cols[layer[i]].push(i));
+  const pos = new Array(items.length).fill(0);
+  cols.forEach(col => col.forEach((id, k) => { pos[id] = k; }));
+  const nbrs = items.map(() => []);
+  links.forEach(([a, b]) => { nbrs[a].push(b); nbrs[b].push(a); });
+  for (let sweep = 0; sweep < 4; sweep++) {
+    for (const col of cols) {
+      col.sort((x, y) => {
+        const bx = nbrs[x].length ? nbrs[x].reduce((s2, n) => s2 + pos[n], 0) / nbrs[x].length : pos[x];
+        const by = nbrs[y].length ? nbrs[y].reduce((s2, n) => s2 + pos[n], 0) / nbrs[y].length : pos[y];
+        return bx - by;
+      });
+      col.forEach((id, k) => { pos[id] = k; });
     }
   }
 
+  // ── Coordinates. Column width fits the widest label in that column.
+  const PADX = 60, ROWH = 52, GAPX = 70;
+  const widths = items.map(it => {
+    const label = it.kind === 'node' ? short(it.id) : it.id;
+    return Math.max(60, label.length * (it.kind === 'node' ? 7.4 : 6.4) + 26);
+  });
+  let x = PADX;
+  const colX = [];
+  cols.forEach((col, li) => {
+    const w = Math.max(...col.map(id => widths[id]), 60);
+    colX[li] = x + w / 2;
+    x += w + GAPX;
+  });
+  const totalW = x + PADX;
+  const maxRows = Math.max(...cols.map(c => c.length));
+  const totalH = Math.max(maxRows * ROWH + 80, 420);
+  svg.setAttribute('viewBox', `0 0 ${Math.max(totalW, svg.clientWidth)} ${totalH}`);
+  items.forEach((it, i) => {
+    it.w = widths[i];
+    it.h = it.kind === 'node' ? 30 : 22;
+    it.x = colX[layer[i]];
+    const col = cols[layer[i]];
+    it.y = totalH / 2 + (pos[i] - (col.length - 1) / 2) * ROWH;
+  });
+
+  // ── Render: ellipses for nodes, rectangles for topics, spline edges.
   const NS = 'http://www.w3.org/2000/svg';
   const edgeEls = [];
   for (const [ai, bi] of links) {
@@ -484,20 +517,24 @@ function layoutAndRender() {
     const g = document.createElementNS(NS, 'g');
     g.setAttribute('class', it.kind === 'node' ? 'gnode' : 'gtopic');
     const label = it.kind === 'node' ? short(it.id) : it.id;
-    const w = Math.max(46, label.length * (it.kind === 'node' ? 7.2 : 6.2) + 18);
-    const h = it.kind === 'node' ? 26 : 20;
-    const rect = document.createElementNS(NS, 'rect');
-    rect.setAttribute('width', w); rect.setAttribute('height', h);
-    rect.setAttribute('rx', it.kind === 'node' ? 6 : 10);
+    let shape;
+    if (it.kind === 'node') {
+      shape = document.createElementNS(NS, 'ellipse');
+      shape.setAttribute('cx', it.w / 2); shape.setAttribute('cy', it.h / 2);
+      shape.setAttribute('rx', it.w / 2); shape.setAttribute('ry', it.h / 2);
+    } else {
+      shape = document.createElementNS(NS, 'rect');
+      shape.setAttribute('width', it.w); shape.setAttribute('height', it.h);
+      shape.setAttribute('rx', 2);
+    }
     const text = document.createElementNS(NS, 'text');
     text.textContent = label;
-    text.setAttribute('x', w / 2); text.setAttribute('y', h / 2 + 3.5);
+    text.setAttribute('x', it.w / 2); text.setAttribute('y', it.h / 2 + 3.5);
     text.setAttribute('text-anchor', 'middle');
     const title = document.createElementNS(NS, 'title');
     title.textContent = it.id;
-    g.appendChild(rect); g.appendChild(text); g.appendChild(title);
+    g.appendChild(shape); g.appendChild(text); g.appendChild(title);
     root.appendChild(g);
-    it.w = w; it.h = h;
     itemEls.push(g);
 
     g.addEventListener('mouseenter', () => {
@@ -513,7 +550,6 @@ function layoutAndRender() {
       itemEls.forEach(el => el.classList.remove('dim'));
     });
 
-    // Drag to arrange.
     g.addEventListener('pointerdown', (ev) => {
       ev.preventDefault();
       g.setPointerCapture(ev.pointerId);
@@ -537,13 +573,14 @@ function layoutAndRender() {
       itemEls[i].setAttribute('transform',
         `translate(${it.x - it.w / 2}, ${it.y - it.h / 2})`);
     });
+    // dot-style horizontal splines: leave the right edge, enter the left edge.
     edgeEls.forEach(([e, ai, bi]) => {
       const a = items[ai], b = items[bi];
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const bend = 0.12;
-      const cx = mx - dy * bend, cy = my + dx * bend;
-      e.setAttribute('d', `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`);
+      const leftToRight = a.x <= b.x;
+      const x1 = leftToRight ? a.x + a.w / 2 : a.x - a.w / 2;
+      const x2 = leftToRight ? b.x - b.w / 2 - 4 : b.x + b.w / 2 + 4;
+      const mx = (x1 + x2) / 2;
+      e.setAttribute('d', `M ${x1} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${x2} ${b.y}`);
     });
   }
   position();

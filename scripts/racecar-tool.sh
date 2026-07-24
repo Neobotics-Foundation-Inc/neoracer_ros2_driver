@@ -3,6 +3,27 @@
 # Not executed directly: it defines a `racecar` shell function so the build /
 # test / source subcommands can mutate the current shell (PWD, env).
 
+_rc_autonomy_env() {
+    # Chained env for the osracer layers: underlay beneath the neoracer
+    # overlay, same order as launch_autonomy.sh. Run inside a subshell so
+    # the caller's interactive shell keeps its own environment.
+    if [[ ! -f "$HOME/osracer_ws/install/setup.bash" ]]; then
+        echo "osracer workspace not found at ~/osracer_ws" >&2
+        return 1
+    fi
+    # shellcheck disable=SC1091
+    source /opt/ros/humble/setup.bash
+    # shellcheck disable=SC1090
+    source "$HOME/osracer_ws/install/setup.bash"
+    # shellcheck disable=SC1090
+    [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
+    systemctl is-active --quiet neoracer-teleop 2>/dev/null || \
+        echo "warning: teleop service not active; /scan and /odom are missing" >&2
+    systemctl is-active --quiet neoracer-autonomy 2>/dev/null || \
+        echo "warning: autonomy base not active (TF + bridge); run: racecar service start autonomy" >&2
+    return 0
+}
+
 racecar() {
     local pkg="neoracer_ros2_driver"
     local ws="$HOME/ros2_ws"
@@ -92,6 +113,55 @@ racecar() {
             # ~/logs/<ts>/ and a fresh FastRTPS SHM sweep. Extra args (e.g.
             # `lidar_enable:=false`) forward through to ros2 launch.
             bash "$pkg_dir/scripts/launch_teleop.sh" "$@"
+            ;;
+
+        mapping)
+            # On-demand SLAM. Mapping is an activity, not a daemon: run it
+            # while building a map, Ctrl-C when done. Needs teleop (for /scan
+            # and /odom) and the autonomy base service (TF + bridge).
+            local sub="${1:-run}"
+            shift || true
+            local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
+            case "$sub" in
+                run)
+                    (
+                        _rc_autonomy_env || exit 1
+                        echo "SLAM up. Drive under RC; Ctrl-C when the map is complete."
+                        echo "Save from another terminal: racecar mapping save <name>"
+                        exec ros2 launch osracer_slam slam_toolbox.launch.py "$@"
+                    )
+                    ;;
+                save)
+                    local name="${1:-map}"
+                    (
+                        _rc_autonomy_env || exit 1
+                        mkdir -p "$maps_dir"
+                        ros2 run nav2_map_server map_saver_cli -f "$maps_dir/$name" && \
+                            echo "Saved: $maps_dir/$name.yaml  (drive it with: racecar navigation $name)"
+                    )
+                    ;;
+                -h|--help|help)
+                    echo "usage: racecar mapping [run]        start SLAM (foreground)"
+                    echo "       racecar mapping save <name>  save the current map"
+                    ;;
+                *)
+                    echo "racecar mapping: unknown action '$sub'" >&2
+                    return 2
+                    ;;
+            esac
+            ;;
+
+        navigation)
+            # On-demand Nav2 against a saved map. Foreground; Ctrl-C stops it.
+            # slam and nav are mutually exclusive (both would publish
+            # map->odom), so don't run this while `racecar mapping` is up.
+            local map_name="${1:-map}"
+            shift || true
+            (
+                _rc_autonomy_env || exit 1
+                exec ros2 launch osracer_navigation nav2.launch.py \
+                    use_map:="$map_name" use_rviz:='False' use_namespace:='False' "$@"
+            )
             ;;
 
         cd)
@@ -189,7 +259,7 @@ actions:
   disable        Disable all neoracer-* units
   logs [name]    journalctl -u neoracer-<name> -f; default = teleop
   status         active/enabled snapshot for all units (default)
-units: teleop, watchdog, dashboard, jupyter
+units: teleop, watchdog, dashboard, jupyter, autonomy (TF + twist bridge)
 __RC_SVC_HELP__
                     ;;
                 *)
@@ -646,6 +716,10 @@ Commands:
     teleop              Launch the full teleop stack via launch_teleop.sh wrapper
                         (timestamped ~/logs/<ts>/ + FastRTPS SHM cleanup).
                         Forwards args, e.g. `racecar teleop camera_enable:=false`.
+    mapping             Start SLAM to build a map (foreground; Ctrl-C to stop).
+                        `racecar mapping save <name>` saves the current map.
+    navigation [map]    Start Nav2 on a saved map (foreground; Ctrl-C to stop).
+                        Default map name: map.
     launch <name>       Shortcut for `ros2 launch neoracer_ros2_driver <name>.launch.py`.
                         Examples: racecar launch lidar
                                   racecar launch camera
@@ -709,7 +783,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source ws cd teleop launch clear udev watchdog service setup library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch clear udev watchdog service setup library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -760,6 +834,20 @@ _racecar_complete() {
                 COMPREPLY=( $(compgen -W "all networking" -- "$cur") )
             elif [[ "${COMP_WORDS[2]}" == "networking" ]]; then
                 COMPREPLY=( $(compgen -W "--ssid= --psk= --channel= --ap-addr= --eth-static= --show --reset --help" -- "$cur") )
+            fi
+            ;;
+        mapping)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "run save" -- "$cur") )
+            fi
+            ;;
+        navigation)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                local maps=""
+                for f in "$HOME"/osracer_ws/src/osracer/osracer_slam/maps/*.yaml; do
+                    [[ -e "$f" ]] && maps+="$(basename "${f%.yaml}") "
+                done
+                COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
             fi
             ;;
         service)

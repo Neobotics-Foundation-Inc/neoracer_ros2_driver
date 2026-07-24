@@ -1,5 +1,5 @@
 [Unit]
-Description=Neoracer Autonomy (TF + SLAM + Nav2 + twist bridge)
+Description=Neoracer Autonomy base (TF + twist bridge; SLAM/Nav2 run on demand)
 # Teleop owns every device; autonomy only adds intelligence on top. Start
 # after it so /odom and /scan exist, but don't hard-bind: autonomy restarts
 # on its own if teleop bounces, and teleop never waits on autonomy.
