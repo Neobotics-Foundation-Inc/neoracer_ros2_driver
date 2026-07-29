@@ -166,12 +166,12 @@
     font-size: 0.65rem;
     padding: 2px 10px;
     border-radius: 999px;
-    background: var(--nb-white);
-    border: 1px solid var(--line);
-    color: var(--text-muted);
+    background: #566072;
+    border: 1px solid #47505F;
+    color: var(--nb-white);
     letter-spacing: 0.08em;
   }
-  .section-title .tag.on { background: rgba(30, 158, 90, 0.12); border-color: rgba(30, 158, 90, 0.4); color: var(--ok); }
+  .section-title .tag.on { background: #12813F; border-color: #0E6A33; color: var(--nb-white); }
 
   /* ── Glass cards ───────────────────────────────────────────────── */
   .grid {
@@ -191,12 +191,17 @@
   }
   .card:hover { box-shadow: var(--shadow-card-lg); transform: translateY(-1px); }
   @media (prefers-reduced-motion: reduce) { .card, .card:hover { transition: none; transform: none; } }
-  /* The whole card carries the status colour: solid soft tints. */
-  .card.healthy      { background: #EDF8F2; border-color: rgba(30, 158, 90, 0.30); }
+  /* The whole card carries the status colour: solid, white text. */
+  .card.healthy      { background: #12813F; border-color: #0E6A33; }
   .card.stale,
-  .card.unsupervised { background: #FBF3E7; border-color: rgba(180, 83, 9, 0.30); }
-  .card.dead         { background: #FCEDEF; border-color: rgba(204, 0, 41, 0.32); }
-  .card.off          { background: #F4F5F7; border-color: var(--line); opacity: 0.8; }
+  .card.unsupervised { background: #B45309; border-color: #96450A; }
+  .card.dead         { background: #CC0029; border-color: #A80022; }
+  .card.off          { background: #566072; border-color: #47505F; }
+  .card.healthy, .card.stale, .card.unsupervised, .card.dead, .card.off { color: var(--nb-white); }
+  .card.healthy h2, .card.stale h2, .card.unsupervised h2, .card.dead h2, .card.off h2 { color: var(--nb-white); }
+  .card.healthy .topic, .card.stale .topic, .card.unsupervised .topic,
+  .card.dead .topic, .card.off .topic { color: rgba(255, 255, 255, 0.78); }
+  .card .accent { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
   .card h2 {
     font-family: var(--heading-font);
     font-size: 0.88rem;
@@ -225,18 +230,16 @@
     letter-spacing: 0.14em;
     color: var(--text-muted);
   }
-  .state.dead { color: var(--bad); }
-  .state.off  { color: var(--text-dim); }
+  .card .state {
+    border-top-color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.92);
+  }
   .indicator {
     width: 7px; height: 7px; border-radius: 50%;
-    background: var(--off);
+    background: var(--nb-white);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
     transition: background 300ms ease-out;
   }
-  .state.healthy .indicator      { background: var(--ok); box-shadow: 0 0 0 3px rgba(30, 158, 90, 0.14); }
-  .state.stale .indicator,
-  .state.unsupervised .indicator { background: var(--warn); box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.12); }
-  .state.dead .indicator         { background: var(--bad); box-shadow: 0 0 0 3px rgba(204, 0, 41, 0.14); }
-  .state.off .indicator          { background: var(--off); }
 
   /* ── Rates table ───────────────────────────────────────────────── */
   .table-wrap {
