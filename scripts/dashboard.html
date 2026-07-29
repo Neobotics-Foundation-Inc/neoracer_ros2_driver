@@ -191,20 +191,12 @@
   }
   .card:hover { box-shadow: var(--shadow-card-lg); transform: translateY(-1px); }
   @media (prefers-reduced-motion: reduce) { .card, .card:hover { transition: none; transform: none; } }
-  /* Status ribbon across the top edge. */
-  .card::before {
-    content: "";
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--off);
-  }
-  .card.healthy::before      { background: linear-gradient(90deg, var(--ok), #37D67F); }
-  .card.stale::before,
-  .card.unsupervised::before { background: linear-gradient(90deg, var(--warn), #F0A828); }
-  .card.dead::before         { background: linear-gradient(90deg, var(--nb-red-dark), var(--nb-red)); }
-  .card.off::before          { background: rgba(27, 32, 54, 0.18); }
-  .card.off { opacity: 0.72; }
+  /* The whole card carries the status colour: solid soft tints. */
+  .card.healthy      { background: #EDF8F2; border-color: rgba(30, 158, 90, 0.30); }
+  .card.stale,
+  .card.unsupervised { background: #FBF3E7; border-color: rgba(180, 83, 9, 0.30); }
+  .card.dead         { background: #FCEDEF; border-color: rgba(204, 0, 41, 0.32); }
+  .card.off          { background: #F4F5F7; border-color: var(--line); opacity: 0.8; }
   .card h2 {
     font-family: var(--heading-font);
     font-size: 0.88rem;
