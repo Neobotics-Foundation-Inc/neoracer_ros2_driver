@@ -151,16 +151,6 @@
     gap: 10px;
   }
   .section-title:first-of-type { margin-top: 0; }
-  .section-title .glyph {
-    width: 10px; height: 10px; border-radius: 3px;
-    transform: rotate(45deg);
-    flex-shrink: 0;
-  }
-  .section-title.s-drive .glyph    { background: var(--nb-red); }
-  .section-title.s-autonomy .glyph { background: var(--nb-blue); }
-  .section-title.s-health .glyph   { background: var(--ok); }
-  .section-title.s-rates .glyph    { background: var(--warn); }
-  .section-title.s-log .glyph      { background: var(--text-dim); }
   .section-title::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .section-title .tag {
     font-size: 0.65rem;
@@ -201,7 +191,6 @@
   .card.healthy h2, .card.stale h2, .card.unsupervised h2, .card.dead h2, .card.off h2 { color: var(--nb-white); }
   .card.healthy .topic, .card.stale .topic, .card.unsupervised .topic,
   .card.dead .topic, .card.off .topic { color: rgba(255, 255, 255, 0.78); }
-  .card .accent { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
   .card h2 {
     font-family: var(--heading-font);
     font-size: 0.88rem;
@@ -210,11 +199,6 @@
     display: flex;
     align-items: center;
     gap: 9px;
-  }
-  .accent {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
   }
   .card .topic { color: var(--text-muted); font-size: 0.74rem; margin-top: 3px; }
   /* Quiet status footer: hairline divider, dot, small caps. */
@@ -358,16 +342,16 @@
 <main>
   <div id="error-banner" role="alert"></div>
 
-  <div class="section-title s-drive"><span class="glyph" aria-hidden="true"></span>Drive stack</div>
+  <div class="section-title s-drive">Drive stack</div>
   <div class="grid" id="nodes"></div>
 
-  <div class="section-title s-autonomy"><span class="glyph" aria-hidden="true"></span>Autonomy <span class="tag" id="autonomy-tag">OFF</span></div>
+  <div class="section-title s-autonomy">Autonomy <span class="tag" id="autonomy-tag">OFF</span></div>
   <div class="grid" id="autonomy"></div>
 
-  <div class="section-title s-health"><span class="glyph" aria-hidden="true"></span>System health</div>
+  <div class="section-title s-health">System health</div>
   <div class="grid" id="system-health"></div>
 
-  <div class="section-title s-rates"><span class="glyph" aria-hidden="true"></span>Topic rates</div>
+  <div class="section-title s-rates">Topic rates</div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Topic</th><th class="hz">Rate</th><th>Status</th></tr></thead>
@@ -375,7 +359,7 @@
     </table>
   </div>
 
-  <div class="section-title s-log"><span class="glyph" aria-hidden="true"></span>Watchdog log</div>
+  <div class="section-title s-log">Watchdog log</div>
   <div class="log-box" id="watchdog-log">No watchdog events yet.</div>
 </main>
 
@@ -412,27 +396,9 @@ const STATE_LABEL = {
   stale: 'STALE',
 };
 
-/* Per-node accent colours: every card keeps its own identity while the
-   status ribbon carries the health colour. */
-const ACCENTS = {
-  controller: '#FF0033',
-  throttle:   '#F0A828',
-  mux:        '#7A3FB0',
-  gamepad:    '#2563EB',
-  odom:       '#0E9594',
-  joy:        '#C2185B',
-  lidar:      '#0E9594',
-  camera:     '#7A3FB0',
-  slam:       '#2563EB',
-  bridge:     '#FF0033',
-  model:      '#4F46E5',
-  nav:        '#1E9E5A',
-};
-
 function card(key, n) {
-  const accent = ACCENTS[key] || '#1B2036';
   return `<div class="card ${n.status}">
-    <h2><span class="accent" style="background:${accent}" aria-hidden="true"></span>${n.label}</h2>
+    <h2>${n.label}</h2>
     <div class="topic">${n.topic}</div>
     <span class="state ${n.status}"><span class="indicator" aria-hidden="true"></span>${STATE_LABEL[n.status] || n.status.toUpperCase()}</span>
   </div>`;
@@ -470,7 +436,7 @@ function update() {
       let sh = '';
       for (const [key, item] of Object.entries(data.system_health || {})) {
         sh += `<div class="card ${item.status}">
-          <h2><span class="accent" style="background:#1B2036" aria-hidden="true"></span>${item.label}</h2>
+          <h2>${item.label}</h2>
           <span class="state ${item.status}"><span class="indicator" aria-hidden="true"></span>${item.detail}</span>
         </div>`;
       }
