@@ -140,9 +140,22 @@ racecar() {
                             echo "Saved: $maps_dir/$name.yaml  (drive it with: racecar navigation $name)"
                     )
                     ;;
+                rviz)
+                    # The vendor's pre-configured mapping RViz. Needs a display:
+                    # run from the car desktop (monitor or RustDesk), not SSH.
+                    (
+                        _rc_autonomy_env || exit 1
+                        if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+                            echo "racecar mapping rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
+                            exit 1
+                        fi
+                        exec ros2 launch osracer_debug debug_mapping.launch.py "$@"
+                    )
+                    ;;
                 -h|--help|help)
                     echo "usage: racecar mapping [run]        start SLAM (foreground)"
                     echo "       racecar mapping save <name>  save the current map"
+                    echo "       racecar mapping rviz         watch the map form (car desktop only)"
                     ;;
                 *)
                     echo "racecar mapping: unknown action '$sub'" >&2
@@ -838,7 +851,7 @@ _racecar_complete() {
             ;;
         mapping)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "run save" -- "$cur") )
+                COMPREPLY=( $(compgen -W "run save rviz" -- "$cur") )
             fi
             ;;
         navigation)
