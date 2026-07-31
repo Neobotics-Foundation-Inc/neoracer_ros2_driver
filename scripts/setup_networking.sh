@@ -197,13 +197,22 @@ if [ -z "$ETH_CON" ]; then
 fi
 sudo nmcli connection modify "$ETH_CON" \
     connection.autoconnect yes \
+    connection.autoconnect-retries 0 \
     ipv4.method auto \
     ipv4.addresses "$ETH_STATIC_ADDR" \
     ipv4.dhcp-timeout 15 \
     ipv4.may-fail yes \
     ipv6.method auto
-sudo nmcli connection up "$ETH_CON" >/dev/null
-echo "  '$ETH_CON' carries $ETH_STATIC_ADDR + DHCP on $ETH_IFACE."
+# Activation needs the cudy to answer DHCP. A dark port (router off, still
+# booting, or bench without one) must not abort the run: the profile is
+# saved with infinite autoconnect retries, so the port comes up on its own
+# once something answers.
+if sudo nmcli --wait 20 connection up "$ETH_CON" >/dev/null 2>&1; then
+    echo "  '$ETH_CON' carries $ETH_STATIC_ADDR + DHCP on $ETH_IFACE."
+else
+    echo "  WARN: no DHCP answer on $ETH_IFACE (cudy off or not connected)."
+    echo "        Profile saved; it activates automatically when the router responds."
+fi
 CHANGES_MADE=true
 
 # The factory image ships no profile for the Jetson's native RJ45, so a

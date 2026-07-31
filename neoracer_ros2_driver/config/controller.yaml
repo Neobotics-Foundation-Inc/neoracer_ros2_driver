@@ -19,6 +19,7 @@ controller_node:
     base_frame: "base_footprint"
 
     # ---- Optional publications ----
+    publish_tf: true            # broadcast odom -> base_footprint (SLAM/Nav2 need it)
     publish_mag: false          # firmware emits "m"; student library ignores it
     publish_joy: true           # synthesize /joy from the FlySky "r" channels
 
