@@ -39,8 +39,12 @@ MONITORED = {
     'camera': {'topic': '/camera', 'label': 'USB camera', 'supervised': True},
     # Autonomy layer (neoracer-autonomy service). `optional`: absent is a
     # normal state (service off), shown as OFF rather than DEAD.
-    'slam': {'topic': '/map', 'label': 'SLAM (slam_toolbox)', 'supervised': False, 'optional': True},
-    'bridge': {'topic': '/odometry/filtered', 'label': 'Twist bridge (Nav2 -> mux)', 'supervised': False, 'optional': True},
+    'slam': {'topic': '/map', 'label': 'SLAM', 'supervised': False, 'optional': True},
+    # /drive: the bridge's publisher endpoint exists exactly while the node
+    # lives. /odometry/filtered belongs to the EKF now, not the bridge relay.
+    'bridge': {'topic': '/drive', 'label': 'Twist bridge (Nav2 -> mux)', 'supervised': False, 'optional': True},
+    'imu_filter': {'topic': '/imu_filter', 'label': 'IMU filter (complementary)', 'supervised': False, 'optional': True},
+    'ekf': {'topic': '/odometry/filtered', 'label': 'EKF (robot_localization)', 'supervised': False, 'optional': True},
     'model': {'topic': '/joint_states', 'label': 'Robot model (TF)', 'supervised': False, 'optional': True},
     'nav': {'topic': '/plan', 'label': 'Nav2 planner', 'supervised': False, 'optional': True},
 }
@@ -55,6 +59,7 @@ RATE_TOPICS = [
     '/camera',
     '/drive',
     '/cmd_vel',
+    '/imu_filter',
     '/odometry/filtered',
     '/map',
 ]
