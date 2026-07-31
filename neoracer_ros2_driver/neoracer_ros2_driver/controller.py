@@ -116,8 +116,12 @@ class ControllerNode(Node):
             qos_profile_sensor_data)
 
         # ===== SET UP PUBLISHERS =====
-        self.imu_pub = self.create_publisher(Imu, '/imu', qos_profile_sensor_data)
-        self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile_sensor_data)
+        # /imu and /odom are RELIABLE: the EKF (robot_localization) and the
+        # complementary filter subscribe reliable, and a reliable publisher
+        # still satisfies every BEST_EFFORT subscriber (student library,
+        # dashboard, rviz).
+        self.imu_pub = self.create_publisher(Imu, '/imu', 10)
+        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
         self.battery_pub = self.create_publisher(
             BatteryState, '/battery', qos_profile_sensor_data)

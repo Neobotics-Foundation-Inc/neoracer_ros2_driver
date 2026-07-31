@@ -15,6 +15,9 @@ with the teleop nodes on the same devices.
                        controller's /odom (odom -> base_footprint -> laser)
   twist_bridge         /cmd_vel -> normalized /drive into the mux, so SWB
                        manual override and the throttle caps still apply
+  EKF                  imu_complementary_filter + robot_localization fusing
+                       /odom + /imu; owns the odom -> base_footprint TF and
+                       publishes the real /odometry/filtered
   osracer_slam         opt-in (slam:=true); `racecar mapping` is the front door
   osracer_navigation   opt-in (nav:=true); `racecar navigation` is the front door
 
@@ -91,11 +94,54 @@ def generate_launch_description():
         output='screen',
     )
 
+    # EKF pair from the vendor stack, fed by our controller's topics. The
+    # complementary filter smooths the raw IMU; robot_localization fuses it
+    # with wheel odometry. It owns odom -> base_footprint (the controller's
+    # publish_tf ships off) and publishes /odometry/filtered for Nav2 and
+    # cartographer, replacing the bridge's old relay.
+    imu_filter = Node(
+        package='imu_complementary_filter',
+        executable='complementary_filter_node',
+        name='complementary_filter_gain_node',
+        output='screen',
+        remappings=[
+            ('imu/data_raw', 'imu'),
+            ('imu/data', 'imu_filter'),
+        ],
+        parameters=[{
+            'do_bias_estimation': True,
+            'do_adaptive_gain': True,
+            'use_mag': False,
+            'gain_acc': 0.01,
+            'gain_mag': 0.01,
+        }],
+    )
+    ekf = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[
+            os.path.join(
+                get_package_share_directory('osracer_bringup'),
+                'param', 'chassis_ekf_params.yaml'),
+            {
+                'map_frame': 'map',
+                'odom_frame': 'odom',
+                'base_link_frame': 'base_footprint',
+                'world_frame': 'odom',
+                'publish_tf': True,
+            },
+        ],
+    )
+
     return LaunchDescription([
         enable_slam,
         enable_nav,
         description,
         twist_bridge,
+        imu_filter,
+        ekf,
         slam,
         nav,
     ])

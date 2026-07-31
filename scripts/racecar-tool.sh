@@ -119,16 +119,17 @@ racecar() {
             # On-demand SLAM. Mapping is an activity, not a daemon: run it
             # while building a map, Ctrl-C when done. Needs teleop (for /scan
             # and /odom) and the autonomy base service (TF + bridge).
-            local sub="${1:-run}"
+            local sub="${1:-slam_toolbox}"
             shift || true
             local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
+            [[ "$sub" == "run" ]] && sub="slam_toolbox"
             case "$sub" in
-                run)
+                slam_toolbox|gmapping|cartographer)
                     (
                         _rc_autonomy_env || exit 1
-                        echo "SLAM up. Drive under RC; Ctrl-C when the map is complete."
+                        echo "SLAM up ($sub). Drive under RC; Ctrl-C when the map is complete."
                         echo "Save from another terminal: racecar mapping save <name>"
-                        exec ros2 launch osracer_slam slam_toolbox.launch.py "$@"
+                        exec ros2 launch osracer_slam "$sub.launch.py" "$@"
                     )
                     ;;
                 save)
@@ -143,19 +144,22 @@ racecar() {
                 rviz)
                     # The vendor's pre-configured mapping RViz. Needs a display:
                     # run from the car desktop (monitor or RustDesk), not SSH.
+                    # Cartographer has its own debug view: racecar mapping rviz cartographer
+                    local view="debug_mapping"
+                    [[ "${1:-}" == "cartographer" ]] && view="debug_cartographer"
                     (
                         _rc_autonomy_env || exit 1
                         if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
                             echo "racecar mapping rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
                             exit 1
                         fi
-                        exec ros2 launch osracer_debug debug_mapping.launch.py "$@"
+                        exec ros2 launch osracer_debug "$view.launch.py"
                     )
                     ;;
                 -h|--help|help)
-                    echo "usage: racecar mapping [run]        start SLAM (foreground)"
-                    echo "       racecar mapping save <name>  save the current map"
-                    echo "       racecar mapping rviz         watch the map form (car desktop only)"
+                    echo "usage: racecar mapping [backend]     start SLAM: slam_toolbox (default), gmapping, cartographer"
+                    echo "       racecar mapping save <name>   save the current map (works with any backend)"
+                    echo "       racecar mapping rviz [cartographer]  watch the map form (car desktop only)"
                     ;;
                 *)
                     echo "racecar mapping: unknown action '$sub'" >&2
@@ -168,12 +172,18 @@ racecar() {
             # On-demand Nav2 against a saved map. Foreground; Ctrl-C stops it.
             # slam and nav are mutually exclusive (both would publish
             # map->odom), so don't run this while `racecar mapping` is up.
+            # Optional first arg picks the local planner: teb (default) or dwb.
+            local planner="teb"
+            case "${1:-}" in
+                teb|dwb) planner="$1"; shift ;;
+            esac
             local map_name="${1:-map}"
             shift || true
             (
                 _rc_autonomy_env || exit 1
                 exec ros2 launch osracer_navigation nav2.launch.py \
-                    use_map:="$map_name" use_rviz:='False' use_namespace:='False' "$@"
+                    use_planner:="$planner" use_map:="$map_name" \
+                    use_rviz:='False' use_namespace:='False' "$@"
             )
             ;;
 
@@ -729,10 +739,12 @@ Commands:
     teleop              Launch the full teleop stack via launch_teleop.sh wrapper
                         (timestamped ~/logs/<ts>/ + FastRTPS SHM cleanup).
                         Forwards args, e.g. `racecar teleop camera_enable:=false`.
-    mapping             Start SLAM to build a map (foreground; Ctrl-C to stop).
-                        `racecar mapping save <name>` saves the current map.
-    navigation [map]    Start Nav2 on a saved map (foreground; Ctrl-C to stop).
-                        Default map name: map.
+    mapping [backend]   Start SLAM to build a map (foreground; Ctrl-C to stop).
+                        Backends: slam_toolbox (default), gmapping, cartographer.
+                        `racecar mapping save <name>` saves from any backend.
+    navigation [teb|dwb] [map]
+                        Start Nav2 on a saved map (foreground; Ctrl-C to stop).
+                        Planner: teb (default) or dwb. Default map name: map.
     launch <name>       Shortcut for `ros2 launch neoracer_ros2_driver <name>.launch.py`.
                         Examples: racecar launch lidar
                                   racecar launch camera
@@ -851,12 +863,12 @@ _racecar_complete() {
             ;;
         mapping)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "run save rviz" -- "$cur") )
+                COMPREPLY=( $(compgen -W "slam_toolbox gmapping cartographer save rviz" -- "$cur") )
             fi
             ;;
         navigation)
-            if [[ $COMP_CWORD -eq 2 ]]; then
-                local maps=""
+            if [[ $COMP_CWORD -ge 2 ]]; then
+                local maps="teb dwb "
                 for f in "$HOME"/osracer_ws/src/osracer/osracer_slam/maps/*.yaml; do
                     [[ -e "$f" ]] && maps+="$(basename "${f%.yaml}") "
                 done

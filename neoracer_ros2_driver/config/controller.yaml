@@ -19,7 +19,10 @@ controller_node:
     base_frame: "base_footprint"
 
     # ---- Optional publications ----
-    publish_tf: true            # broadcast odom -> base_footprint (SLAM/Nav2 need it)
+    # odom -> base_footprint TF is owned by the EKF in the autonomy base
+    # service (robot_localization fusing /odom + IMU). Turn this on only if
+    # the autonomy service is disabled and something still needs raw-odom TF.
+    publish_tf: false
     publish_mag: false          # firmware emits "m"; student library ignores it
     publish_joy: true           # synthesize /joy from the FlySky "r" channels
 

@@ -13,3 +13,7 @@ twist_bridge_node:
     # One explicit zero after the planner goes quiet. The mux also zeroes on
     # its own command_timeout_sec; this makes the stop deterministic.
     cmd_timeout_sec: 0.5
+
+    # The EKF in the autonomy base publishes the real /odometry/filtered, so
+    # the compat relay stays off. Turn it on only when running without the EKF.
+    relay_filtered_odom: false

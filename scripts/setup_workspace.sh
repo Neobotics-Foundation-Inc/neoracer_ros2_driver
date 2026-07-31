@@ -83,7 +83,8 @@ if [ -d "$VENDOR_WS/src" ] && [ -d "$CANON_LAKIBEAM" ]; then
     OSR_LIDAR_LAUNCH="$VENDOR_WS/src/osracer/osracer_bringup/launch/lidar.launch.py"
     [ -f "$OSR_LIDAR_LAUNCH" ] && sed -i 's/192\.168\.198\.2/192.168.8.2/g' "$OSR_LIDAR_LAUNCH"
     # Runtime deps the vendor bringup needs that the factory image omits.
-    sudo apt-get install -y -qq ros-humble-tf-transformations python3-transforms3d || true
+    sudo apt-get install -y -qq ros-humble-tf-transformations python3-transforms3d \
+        ros-humble-robot-localization ros-humble-imu-complementary-filter || true
     # Build with base ROS only so our ros2_ws install is not an underlay that
     # trips colcon's package-override check.
     if env -i HOME="$HOME" USER="$USER" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
