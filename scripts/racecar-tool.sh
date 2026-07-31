@@ -173,12 +173,35 @@ racecar() {
             # slam and nav are mutually exclusive (both would publish
             # map->odom), so don't run this while `racecar mapping` is up.
             # Optional first arg picks the local planner: teb (default) or dwb.
+            # `racecar navigation rviz` opens the navigation RViz view instead
+            # (set a goal, watch the plan); needs the car desktop.
+            if [[ "${1:-}" == "rviz" ]]; then
+                (
+                    _rc_autonomy_env || exit 1
+                    if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+                        echo "racecar navigation rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
+                        exit 1
+                    fi
+                    exec rviz2 -d "$HOME/osracer_ws/src/osracer/osracer_debug/config/navigation.rviz"
+                )
+                return
+            fi
             local planner="teb"
             case "${1:-}" in
                 teb|dwb) planner="$1"; shift ;;
             esac
             local map_name="${1:-map}"
             shift || true
+            local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
+            if [[ ! -f "$maps_dir/$map_name.yaml" ]]; then
+                echo "racecar navigation: no map named '$map_name' in $maps_dir" >&2
+                local avail=""
+                for f in "$maps_dir"/*.yaml; do
+                    [[ -e "$f" ]] && avail+="$(basename "${f%.yaml}") "
+                done
+                echo "  available maps: ${avail:-none (build one with: racecar mapping)}" >&2
+                return 2
+            fi
             (
                 _rc_autonomy_env || exit 1
                 exec ros2 launch osracer_navigation nav2.launch.py \
@@ -761,6 +784,8 @@ Commands:
     navigation [teb|dwb] [map]
                         Start Nav2 on a saved map (foreground; Ctrl-C to stop).
                         Planner: teb (default) or dwb. Default map name: map.
+                        `racecar navigation rviz` opens the goal-setting RViz
+                        view (car desktop only).
     update              Field update in one command: repo to latest origin/main
                         (discards local repo edits), full `setup all`, restart
                         all services. Needs internet.
@@ -887,7 +912,7 @@ _racecar_complete() {
             ;;
         navigation)
             if [[ $COMP_CWORD -ge 2 ]]; then
-                local maps="teb dwb "
+                local maps="teb dwb rviz "
                 for f in "$HOME"/osracer_ws/src/osracer/osracer_slam/maps/*.yaml; do
                     [[ -e "$f" ]] && maps+="$(basename "${f%.yaml}") "
                 done
