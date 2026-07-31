@@ -187,6 +187,22 @@ racecar() {
             )
             ;;
 
+        update)
+            # One-command field update: repo to latest main, full setup, and
+            # a service restart. The git reset runs BEFORE setup_all so the
+            # script never rewrites itself mid-run; this function is already
+            # loaded in shell memory, so replacing the file under it is safe.
+            # reset --hard discards local edits in the driver repo.
+            echo "Updating $pkg_dir to latest origin/main..."
+            ( cd "$pkg_dir" && git fetch origin && git reset --hard origin/main ) || return 1
+            bash "$pkg_dir/scripts/setup_all.sh" || return 1
+            echo "Restarting services..."
+            sudo systemctl restart neoracer-teleop neoracer-watchdog \
+                neoracer-dashboard neoracer-jupyter neoracer-autonomy
+            echo "Update complete. Open a new terminal (or run: racecar source)"
+            echo "so this shell picks up the new environment and racecar tool."
+            ;;
+
         cd)
             # Hop to the package source dir. Has to be a shell function (not
             # subprocess) so the cd sticks in the user's interactive shell.
@@ -745,6 +761,9 @@ Commands:
     navigation [teb|dwb] [map]
                         Start Nav2 on a saved map (foreground; Ctrl-C to stop).
                         Planner: teb (default) or dwb. Default map name: map.
+    update              Field update in one command: repo to latest origin/main
+                        (discards local repo edits), full `setup all`, restart
+                        all services. Needs internet.
     launch <name>       Shortcut for `ros2 launch neoracer_ros2_driver <name>.launch.py`.
                         Examples: racecar launch lidar
                                   racecar launch camera
@@ -808,7 +827,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch clear udev watchdog service setup library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
