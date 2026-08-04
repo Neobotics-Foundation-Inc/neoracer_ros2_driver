@@ -5,7 +5,33 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-04
+
+GPU release: the Orin's integrated GPU becomes usable from setup, with PyTorch
+for training and TensorRT for deployment. Also carries the package flattening
+that landed after 0.2.0.
+
+### Added
+- Setup phase 6, `scripts/setup_ml.sh`: the on-board GPU stack. Installs
+  PyTorch 2.8.0 and torchvision 0.23.0 built for Tegra, Ultralytics, and the
+  ONNX tooling behind `YOLO.export(format='engine')`, then verifies the
+  TensorRT bindings JetPack already ships. Reachable on its own as
+  `racecar setup ml`. Wheels come from the jetson-ai-lab index keyed by the
+  CUDA version read off the running image, not from PyPI, whose aarch64 torch
+  builds are CPU-only or target datacenter GPUs and will not drive the Orin's
+  integrated GPU.
+- CUDA toolchain block in `setup_user_env.sh`: puts `nvcc` and `trtexec` on
+  PATH and exports `CUDA_HOME`. JetPack installs both and leaves neither
+  reachable from a login shell.
+
 ### Changed
+- numpy in the user site moves to the last 1.x release. Ultralytics floors it
+  at 1.23 and apt ships 1.21.5; numpy 2 is excluded because ROS 2 Humble's
+  binary extensions (`cv_bridge`, `sensor_msgs_py`) are built against the
+  numpy 1 C ABI.
+- `cv2` resolves to pip's opencv-python 4.11 rather than apt's 4.5.4, pulled in
+  by Ultralytics' floor of 4.6. `cv_bridge` links its own OpenCV in C++ and is
+  unaffected; the camera node's V4L2 capture path is present in the pip build.
 - Flattened the package to the repository root, matching the
   `racecar_neo_ros2_driver` layout: `config/`, `launch/`, `resource/`, `test/`,
   `package.xml`, `setup.py`, and `setup.cfg` moved up out of
@@ -14,6 +40,11 @@ All notable changes to this project. Format: Keep a Changelog
   package to justify it since the lidar driver moved to a pinned fork.
 
 ### Fixed
+- `colcon test` died during plugin loading on any car that had run the Jupyter
+  phase, before collecting a test. jupyterlab pulls anyio, whose pytest plugin
+  imports `_pytest.scope` (pytest 7+), and Jammy's apt pytest is 6.2.5.
+  `setup_jupyter.sh` now puts a 7.x in the user site alongside the dependency
+  that needs it, held below 8 for ament_cmake_pytest.
 - `racecar launch <TAB>` completion listed nothing. It looked for launch files
   in the repository root while they lived one level down; flattening puts them
   where the completion already expected.

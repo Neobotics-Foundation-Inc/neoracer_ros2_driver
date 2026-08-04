@@ -97,3 +97,22 @@ if grep -qF "$LEGACY_ALIAS_MARKER" "$BASHRC" 2>/dev/null; then
     sed -i "/^${LEGACY_ALIAS_MARKER}$/,+5d" "$BASHRC"
     echo "  removed legacy racecar-* aliases from $BASHRC"
 fi
+
+# Block 4: CUDA + TensorRT command-line tools. JetPack installs both but puts
+# neither on PATH, so `nvcc` and `trtexec` are missing from a login shell even
+# though the toolkit is right there. trtexec is what benchmarks a .engine
+# outside Python; nvcc is needed to build custom TensorRT plugins.
+CUDA_MARKER="# Neoracer - CUDA toolchain"
+if grep -qF "$CUDA_MARKER" "$BASHRC" 2>/dev/null; then
+    echo "  $BASHRC already has the CUDA toolchain block"
+elif [ -d /usr/local/cuda/bin ]; then
+    cat >> "$BASHRC" <<'EOF'
+
+# Neoracer - CUDA toolchain
+# Appended by setup_user_env.sh. JetPack ships nvcc and trtexec but leaves both
+# off PATH; /usr/local/cuda is a symlink to the installed CUDA point release.
+export CUDA_HOME=/usr/local/cuda
+export PATH="$CUDA_HOME/bin:/usr/src/tensorrt/bin:$PATH"
+EOF
+    echo "  added CUDA toolchain block to $BASHRC"
+fi

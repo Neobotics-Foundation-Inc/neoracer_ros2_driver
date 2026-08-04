@@ -41,6 +41,23 @@ student lib -> /led_matrix/command -> led_matrix -> 8x8 display
 - Topics: `/motor`, `/imu`, `/odom`, `/joy`, `/scan`, `/camera`,
   `/led_matrix/command`, `/drive`.
 
+## GPU stack
+
+No driver node depends on the GPU; the stack exists for student code and future
+perception nodes, and is installed by `scripts/setup_ml.sh` into the user site so
+the systemd units (which run as the same user) can import it.
+
+```
+.pt weights -> ultralytics -> ONNX -> TensorRT builder -> .engine (board-specific)
+                    |                                          |
+                torch/CUDA                              runtime inference
+                (training, eager inference)             (deployment)
+```
+
+TensorRT comes from JetPack; PyTorch and torchvision come from the jetson-ai-lab
+index for the image's CUDA version, because the PyPI aarch64 builds do not target
+Tegra. Engines are not portable across boards or TensorRT versions.
+
 ## Constraints
 
 - The ESP32 USB-CDC port ignores baud. `/imu` streams ~170 Hz; `/scan` ~30 Hz.
@@ -48,3 +65,7 @@ student lib -> /led_matrix/command -> led_matrix -> 8x8 display
   must stream `/motor` continuously to retain authority.
 - All drive topics are normalized to `[-1, 1]`; the physical mapping lives in
   `config/controller.yaml` (m/s, degrees) and `config/throttle.yaml` (caps).
+- CPU and GPU share the Orin Nano's 8 GB. A TensorRT build peaks near 3 GB, so
+  it competes with a running teleop stack.
+- numpy is held below 2.0: `cv_bridge` and `sensor_msgs_py` ship binaries built
+  against the numpy 1 C ABI.

@@ -337,11 +337,14 @@ __RC_SVC_HELP__
             case "$phase" in
                 "")
                     echo "usage: racecar setup <phase>" >&2
-                    echo "  phases: all, networking" >&2
+                    echo "  phases: all, ml, networking" >&2
                     return 2
                     ;;
                 all)
                     bash "$pkg_dir/scripts/setup_all.sh" "$@"
+                    ;;
+                ml|gpu)
+                    bash "$pkg_dir/scripts/setup_ml.sh" "$@"
                     ;;
                 networking)
                     # Persist any --flag values to ~/.config/racecar/networking.env
@@ -799,7 +802,10 @@ Commands:
                         Monitors control + sensor nodes; logs to
                         ~/logs/latest/watchdog.log. Assumes teleop runs separately.
     setup <phase>       Run a setup script. Phases:
-                          all          - setup_all.sh (the 7-phase orchestrator)
+                          all          - setup_all.sh (the 8-phase orchestrator)
+                          ml           - GPU stack: PyTorch/torchvision for Tegra,
+                                         Ultralytics, ONNX export tooling; verifies
+                                         the JetPack TensorRT bindings.
                           networking   - Wi-Fi AP + Lakibeam lidar subnet.
                                          Flags persist to ~/.config/racecar/networking.env:
                                            --ssid=NAME   --psk=PASS   --channel=N
