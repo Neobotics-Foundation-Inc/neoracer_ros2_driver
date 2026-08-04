@@ -5,6 +5,24 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-04
+
+Puts the 0.3.0 GPU stack to work: a detection node turns camera frames into
+`/detections` on the graph, so student code and downstream perception read boxes
+instead of each re-running a model on the same frames.
+
+### Added
+- `inference_node`: subscribes `/camera`, publishes `vision_msgs/Detection2DArray` on `/detections`. Adapted from the MIT `racecar_neo_ros2_driver` EdgeTPU node, retargeted from pycoral/Coral to Ultralytics on the Orin's integrated GPU. Loads either a `.pt` file or a TensorRT `.engine` through the same call, decodes the camera's JPEG passthrough directly, and takes class names from the weights, so there is no separate labels file to keep in sync.
+- `inference_lib.py`: frame decode, weights-path resolution, and box geometry as pure functions, with 17 unit tests in `test/test_inference.py` that need neither a ROS graph nor a GPU.
+- `config/inference.yaml`, `launch/inference.launch.py`, and a `models/` drop point with the TensorRT export recipe. `racecar launch inference` runs the node on its own.
+- `inference_enable` arg on `teleop.launch.py`, defaulting to false: the model holds GPU memory for the life of the stack, which is wasted on a car whose student code never reads `/detections`.
+- Optional annotated overlay on `/detections/image`, JPEG-encoded like `/camera` and drawn only while something is subscribed.
+- Inference health on `/diagnostics`: per-frame and averaged latency, detection counts, and frame staleness. Dashboard gains a YOLO inference card.
+
+### Changed
+- The detection subscription keeps a depth-1 best-effort queue rather than the shared sensor-data profile. Inference at ~45 ms cannot follow a 60 fps camera, and a deeper queue would hand the model progressively staler frames; dropping to the newest one keeps detections on the present. `max_rate_hz` caps the work below that, leaving GPU headroom for the rest of the stack.
+- `package.xml` declares `vision_msgs` and `diagnostic_msgs`. Ultralytics and torch stay outside rosdep, which has no key for the Tegra builds `scripts/setup_ml.sh` installs.
+
 ## [0.3.0] - 2026-08-04
 
 GPU release: the Orin's integrated GPU becomes usable from setup, with PyTorch

@@ -13,6 +13,7 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [Web dashboard](#web-dashboard)
 - [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library)
 - [GPU stack](#gpu-stack)
+- [Object detection](#object-detection)
 - [Checking lidar health](#checking-lidar-health)
 - [Coexisting with the vendor workspace](#coexisting-with-the-vendor-workspace)
 - [Manual build](#manual-build)
@@ -47,7 +48,7 @@ FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/
                           └──> /imu, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
 
 LakiBeam1 ──(UDP)──> lakibeam1_scan_node ──/scan
-USB webcam ────────> camera ──/camera  (JPEG-in-Image)
+USB webcam ────────> camera ──/camera  (JPEG-in-Image) ──> inference_node ──/detections
 Nav2 ──/cmd_vel──> twist_bridge ──/drive
 student library ──/led_matrix/command──> led_matrix ──(USB-UART)──> 8×8 display
 ```
@@ -58,6 +59,7 @@ Published topics:
 - `/joy` (sensor_msgs/Joy): synthesized from FlySky RC channels
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
 - `/camera` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
+- `/detections` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera`, stamped with that frame's header. Off by default; see [Object detection](#object-detection).
 
 The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) enforces speed caps, arming, and manual/autonomy arbitration, so RC driving and autonomous code share one speed-limited path. A 3-position FlySky switch selects **idle / manual / autonomy**, mapped to the `/joy` buttons the mux reads. Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
@@ -314,6 +316,43 @@ Two things worth knowing before training on the car:
 - The Orin Nano shares 8 GB between CPU and GPU. Training is viable for small models and short fine-tunes; anything larger belongs on a desktop, with only the exported engine copied over.
 - `nvpmodel -q` reports the active power mode. The 25 W mode is the default; `sudo nvpmodel -m 0` unlocks MAXN for benchmarking, at the cost of thermals.
 
+## Object detection
+
+`inference_node` runs the frames from `/camera` through a YOLO model and publishes `vision_msgs/Detection2DArray` on `/detections`. Detection happens once, on the graph, so several consumers can read the same boxes instead of each holding its own copy of a model.
+
+```sh
+racecar launch inference                                   # on its own
+racecar teleop inference_enable:=true                      # with the rest of the stack
+ros2 topic echo /detections
+```
+
+It is the only subsystem in `teleop.launch.py` that defaults to **off**: the model holds GPU memory for the life of the stack, and a car whose student code never reads `/detections` should not pay for it.
+
+Each `Detection2D` carries a `bbox` in pixels (`center.position` and `size_x`/`size_y`, origin top-left) and one `results` entry with the class name and score. Class names come out of the weights, so a model trained on your own dataset publishes your own labels with no separate labels file:
+
+```
+bus     0.941  center=(399.9, 479.0)  size=(792.6 x 499.2)
+person  0.889  center=(740.3, 636.9)  size=(138.9 x 483.8)
+```
+
+Settings live in `config/inference.yaml`:
+
+| Parameter | Default | Notes |
+| --- | --- | --- |
+| `model_path` | `yolo11n.pt` | Absolute path, a filename in `models/`, or a stock Ultralytics name |
+| `device` | `"0"` | CUDA index, or `"cpu"` |
+| `imgsz` / `score_threshold` / `iou_threshold` | 640 / 0.5 / 0.45 | Model input size and NMS thresholds |
+| `max_detections` | 10 | Cap per frame |
+| `class_filter` | all | Class indices to keep, e.g. `[0, 2]`; omit the key for every class |
+| `max_rate_hz` | 15.0 | Ceiling on inference rate |
+| `publish_annotated` | false | Overlay on `/detections/image`, encoded only while subscribed |
+
+Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo11n.pt` gives ~45 ms per frame and ~11 Hz on `/detections`; the TensorRT engine roughly halves the inference half of that.
+
+Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. Engines are tied to the board and the TensorRT version that built them, so `models/` is a per-car drop point and its weights are gitignored.
+
+Health lands on `/diagnostics` (latency, detection counts, frame staleness) and on the dashboard as a **YOLO inference** card.
+
 ## Checking lidar health
 
 The lidar driver watches its own output. When a scan streams with (nearly) every range `inf` for 3 s, it logs `[scan-watchdog]` at ERROR and attaches the sensor's live state JSON (laser on/off, motor rpm, scan window). On any "the lidar looks dead" report, check this first:
@@ -355,18 +394,20 @@ racecar launch controller       # individual subsystems too
 racecar launch lidar
 racecar launch camera
 racecar launch led_matrix
+racecar launch inference
 racecar launch autonomy
 ```
 
-Any subsystem can be disabled at launch:
+Any subsystem can be toggled at launch. `lidar`, `camera`, and `led_matrix` default to on; `inference` defaults to off:
 
 ```sh
 ros2 launch neoracer_ros2_driver teleop.launch.py camera_enable:=false
+ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=true
 ```
 
 The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
 
-Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `twist_bridge.yaml`, `camera.yaml`, `led_matrix.yaml`.
+Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `twist_bridge.yaml`, `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
 
 ## Troubleshooting
 
@@ -377,6 +418,8 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 **Car won't drive.** The mux only forwards commands when the FlySky switch arms manual or autonomy mode. Verify with `ros2 topic echo /joy`. Direction and the m/s mapping are tuned in `config/controller.yaml`.
 
 **`/camera` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
+
+**No `/detections`.** The node is off unless launched with `inference_enable:=true`. If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
 
 **FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
 

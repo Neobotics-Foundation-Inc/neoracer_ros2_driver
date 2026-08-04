@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>neoracer_ros2_driver</name>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
   <description>Backend ROS2 driver for neoracer v1 with support for OSRbot software stack in collaboration with Seeed Studio</description>
   <maintainer email="chrisclai02@gmail.com">chrisclai</maintainer>
   <license>GPL-3.0-only</license>
@@ -19,12 +19,17 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>vision_msgs</depend>
+  <depend>diagnostic_msgs</depend>
 
   <!-- ESP32 + LED-matrix serial bridge -->
   <exec_depend>python3-serial</exec_depend>
   <!-- camera node (OpenCV JPEG encode into sensor_msgs/Image) -->
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <!-- inference node also needs ultralytics and a Tegra torch build; both come
+       from scripts/setup_ml.sh, which has no rosdep key on this platform -->
+
 
   <export>
     <build_type>ament_python</build_type>

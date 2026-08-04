@@ -47,3 +47,8 @@ COLCON_IGNORE
 
 # Local-only configuration overrides
 neoracer_ros2_driver/config/*.local.yaml
+
+# Model weights: .pt files are large, .engine files are built per car
+models/*.pt
+models/*.onnx
+models/*.engine

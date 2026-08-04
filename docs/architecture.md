@@ -18,6 +18,8 @@ student-library contract.
 | `mux_node` (neoracer_ros2_driver/mux_node.py) | gate `/gamepad_drive` (manual) or `/drive` (autonomy) to `/mux_out` | - |
 | `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps; `/mux_out` to `/motor` | - |
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera` (JPEG-in-Image) | opencv, numpy |
+| `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera` frames to `/detections` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
+| `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
 | `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/led_matrix/command` to USB-UART 8x8 | pyserial |
 | `lakibeam1` (pinned fork, cloned to `src/`) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
 
@@ -29,6 +31,10 @@ FlySky RC -> controller -> /joy -> gamepad_node -> /gamepad_drive ->
 student lib -> /drive ------------------------^  (autonomy; gated by FlySky switch)
 ESP32 -> /imu, /odom     Lakibeam -> /scan     USB cam -> /camera
 student lib -> /led_matrix/command -> led_matrix -> 8x8 display
+
+/camera -> inference_node -> /detections -> student lib / downstream perception
+                |
+                +-> /detections/image (annotated overlay; only while subscribed)
 ```
 
 ## Interfaces
@@ -38,14 +44,17 @@ student lib -> /led_matrix/command -> led_matrix -> 8x8 display
   `docs/esp32_protocol.md`.
 - Network: Lakibeam lidar over UDP at `192.168.8.2` (launch/lidar.launch.py).
 - USB video: camera at `/dev/osrbot_usb_cam` (camera.py).
-- Topics: `/motor`, `/imu`, `/odom`, `/joy`, `/scan`, `/camera`,
+- Topics: `/motor`, `/imu`, `/odom`, `/joy`, `/scan`, `/camera`, `/detections`,
   `/led_matrix/command`, `/drive`.
+- Weights: `share/neoracer_ros2_driver/models/`, searched before the working
+  directory and before Ultralytics' own cache (inference_lib.resolve_model_path).
 
 ## GPU stack
 
-No driver node depends on the GPU; the stack exists for student code and future
-perception nodes, and is installed by `scripts/setup_ml.sh` into the user site so
-the systemd units (which run as the same user) can import it.
+`inference_node` is the one driver node that uses the GPU, and it is off by
+default in `teleop.launch.py`; every other node runs without it. The stack is
+installed by `scripts/setup_ml.sh` into the user site so the systemd units (which
+run as the same user) can import it.
 
 ```
 .pt weights -> ultralytics -> ONNX -> TensorRT builder -> .engine (board-specific)
