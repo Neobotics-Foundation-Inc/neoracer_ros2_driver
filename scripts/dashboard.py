@@ -42,10 +42,14 @@ MONITORED = {
     'slam': {'topic': '/map', 'label': 'SLAM', 'supervised': False, 'optional': True},
     # /drive: the bridge's publisher endpoint exists exactly while the node
     # lives. /odometry/filtered belongs to the EKF now, not the bridge relay.
-    'bridge': {'topic': '/drive', 'label': 'Twist bridge (Nav2 -> mux)', 'supervised': False, 'optional': True},
-    'imu_filter': {'topic': '/imu_filter', 'label': 'IMU filter (complementary)', 'supervised': False, 'optional': True},
-    'ekf': {'topic': '/odometry/filtered', 'label': 'EKF (robot_localization)', 'supervised': False, 'optional': True},
-    'model': {'topic': '/joint_states', 'label': 'Robot model (TF)', 'supervised': False, 'optional': True},
+    'bridge': {'topic': '/drive', 'label': 'Twist bridge (Nav2 -> mux)',
+               'supervised': False, 'optional': True},
+    'imu_filter': {'topic': '/imu_filter', 'label': 'IMU filter (complementary)',
+                   'supervised': False, 'optional': True},
+    'ekf': {'topic': '/odometry/filtered', 'label': 'EKF (robot_localization)',
+            'supervised': False, 'optional': True},
+    'model': {'topic': '/joint_states', 'label': 'Robot model (TF)',
+              'supervised': False, 'optional': True},
     'nav': {'topic': '/plan', 'label': 'Nav2 planner', 'supervised': False, 'optional': True},
 }
 
