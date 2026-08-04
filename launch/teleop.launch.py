@@ -20,7 +20,12 @@ Always-on control pipeline (FlySky RC and autonomy both flow through it):
     controller -> ESP32 serial "v <m/s> <deg>"
 
 Optional sensors/display, each gated by ``<name>_enable:=true|false``:
-lidar (Lakibeam -> /scan), camera (-> /camera), led_matrix (/led_matrix/command).
+lidar (Lakibeam -> /scan), camera (-> /camera), led_matrix (/led_matrix/command),
+inference (/camera -> /detections).
+
+``inference`` is the one subsystem defaulting to false: it holds a YOLO model on
+the GPU for the life of the stack, which is wasted on a car whose student code
+never reads ``/detections``.
 """
 
 import os
@@ -32,8 +37,14 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EqualsSubstitution, LaunchConfiguration
 
-# Optional subsystems, each toggled by a <name>_enable launch arg (default true).
-_SUBSYSTEMS = ('lidar', 'camera', 'led_matrix')
+# Optional subsystems, each toggled by a <name>_enable launch arg, mapped to the
+# default that arg takes.
+_SUBSYSTEMS = {
+    'lidar': 'true',
+    'camera': 'true',
+    'led_matrix': 'true',
+    'inference': 'false',
+}
 
 
 def generate_launch_description():
@@ -53,8 +64,8 @@ def generate_launch_description():
                 EqualsSubstitution(LaunchConfiguration(f'{name}_enable'), 'true')))
 
     enable_args = [
-        DeclareLaunchArgument(f'{name}_enable', default_value='true')
-        for name in _SUBSYSTEMS
+        DeclareLaunchArgument(f'{name}_enable', default_value=default)
+        for name, default in _SUBSYSTEMS.items()
     ]
 
     control = [include(n) for n in ('controller', 'gamepad', 'mux', 'throttle')]

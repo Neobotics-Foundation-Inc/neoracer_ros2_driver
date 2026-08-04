@@ -6,7 +6,7 @@ package_name = 'neoracer_ros2_driver'
 
 setup(
     name=package_name,
-    version='0.3.0',
+    version='0.3.1',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -14,6 +14,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         ('share/' + package_name + '/config', glob('config/*.yaml')),
+        # Weights are gitignored; this ships whatever a given car has dropped in.
+        ('share/' + package_name + '/models', glob('models/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -32,6 +34,7 @@ setup(
         'console_scripts': [
             'controller = neoracer_ros2_driver.controller:main',
             'camera = neoracer_ros2_driver.camera:main',
+            'inference_node = neoracer_ros2_driver.inference_node:main',
             'gamepad_node = neoracer_ros2_driver.gamepad_node:main',
             'mux_node = neoracer_ros2_driver.mux_node:main',
             'throttle_node = neoracer_ros2_driver.throttle_node:main',

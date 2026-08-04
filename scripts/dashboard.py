@@ -37,6 +37,8 @@ MONITORED = {
     'joy': {'topic': '/joy', 'label': 'FlySky RC (/joy)', 'supervised': False},
     'lidar': {'topic': '/scan', 'label': 'Lakibeam lidar', 'supervised': True},
     'camera': {'topic': '/camera', 'label': 'USB camera', 'supervised': True},
+    'inference': {'topic': '/detections', 'label': 'YOLO inference',
+                  'supervised': False, 'optional': True},
     # Autonomy layer (neoracer-autonomy service). `optional`: absent is a
     # normal state (service off), shown as OFF rather than DEAD.
     'slam': {'topic': '/map', 'label': 'SLAM', 'supervised': False, 'optional': True},
@@ -61,6 +63,7 @@ RATE_TOPICS = [
     '/joy',
     '/scan',
     '/camera',
+    '/detections',
     '/drive',
     '/cmd_vel',
     '/imu_filter',
