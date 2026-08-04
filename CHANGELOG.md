@@ -5,6 +5,21 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+- Flattened the package to the repository root, matching the
+  `racecar_neo_ros2_driver` layout: `config/`, `launch/`, `resource/`, `test/`,
+  `package.xml`, `setup.py`, and `setup.cfg` moved up out of
+  `neoracer_ros2_driver/`, which now holds only the Python module. Reverses the
+  multi-package nesting introduced in 0.2.0, which no longer has a second
+  package to justify it since the lidar driver moved to a pinned fork.
+
+### Fixed
+- `racecar launch <TAB>` completion listed nothing. It looked for launch files
+  in the repository root while they lived one level down; flattening puts them
+  where the completion already expected.
+- Four over-length lines in `scripts/dashboard.py`. `scripts/` was outside the
+  lint scope while the package was nested and is inside it now.
+
 ## [0.2.0] - 2026-08-03
 
 Autonomy release: SLAM/Nav2 fused behind the mux, EKF odometry, and the lidar
