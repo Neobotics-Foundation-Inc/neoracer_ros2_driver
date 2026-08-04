@@ -12,6 +12,7 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
 - [Web dashboard](#web-dashboard)
 - [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library)
+- [GPU stack](#gpu-stack)
 - [Checking lidar health](#checking-lidar-health)
 - [Coexisting with the vendor workspace](#coexisting-with-the-vendor-workspace)
 - [Manual build](#manual-build)
@@ -138,15 +139,16 @@ Run this from a wired session or the console. It reconfigures the WiFi interface
 
 ### What `setup_all.sh` does
 
-Seven phases, all under `scripts/`:
+Eight phases, all under `scripts/`:
 
 1. **`setup_ros2.sh`**: ROS 2 Humble apt repo + message/driver packages
 2. **`setup_dev_tools.sh`**: build tools and Python hardware libraries
-3. **`setup_user_env.sh`**: joins device groups; sources ROS 2 and the `racecar` shell tool in `.bashrc`
+3. **`setup_user_env.sh`**: joins device groups; sources ROS 2, the CUDA toolchain, and the `racecar` shell tool in `.bashrc`
 4. **`setup_udev.sh`**: installs `/etc/udev/rules.d/99-racecar.rules` (stable `/dev/osrbot_*`)
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
-6. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
-7. **`setup_services.sh`**: installs and enables the systemd units
+6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
+7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
+8. **`setup_services.sh`**: installs and enables the systemd units
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
@@ -266,6 +268,51 @@ racecar library --status           # show the current selection
 ```
 
 Refreshing the labs preserves student files.
+
+## GPU stack
+
+Phase 6 (`scripts/setup_ml.sh`, or `racecar setup ml` on its own) installs what the Orin needs to train and run vision models on-board:
+
+| Package | Version | Source |
+| --- | --- | --- |
+| TensorRT | 10.3.0 | JetPack; verified, not installed |
+| PyTorch | 2.8.0 | jetson-ai-lab `jp6/cu126` |
+| torchvision | 0.23.0 | jetson-ai-lab `jp6/cu126` |
+| Ultralytics | 8.4.x | PyPI |
+| onnx, onnxslim | latest | PyPI |
+| numpy | 1.26.x | PyPI, held below 2 |
+
+PyTorch does **not** come from PyPI. Its aarch64 wheels are either CPU-only or built for datacenter GPUs (sbsa); neither drives the Orin's integrated GPU. The script reads the CUDA version off the running image and picks the matching jetson-ai-lab index (`jp6/cu126` for JetPack 6.2), so it follows a JetPack upgrade without edits.
+
+Check the install:
+
+```sh
+python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+# True Orin
+```
+
+Deployment goes through TensorRT. Export once, then load the `.engine` the same way as the `.pt`:
+
+```sh
+yolo export model=yolo11n.pt format=engine half=True imgsz=640 device=0
+yolo predict model=yolo11n.engine source=bus.jpg
+```
+
+The export runs ONNX first and then a TensorRT builder pass. Budget the time: YOLO11n at 640 took 8m 17s to build on a 25 W Orin Nano, peaking at 2.6 GB. The resulting engine is tied to this board and this TensorRT version, so rebuild it after a JetPack upgrade rather than copying it between cars.
+
+What the engine buys, measured on YOLO11n at 640 with the teleop stack running:
+
+| Backend | Inference | End-to-end |
+| --- | --- | --- |
+| PyTorch fp32 | 30.2 ms | 45.8 ms (21.8 fps) |
+| TensorRT fp16 | 12.7 ms | 29.2 ms (34.3 fps) |
+
+End-to-end includes letterboxing and NMS, which run on the CPU and dominate what TensorRT leaves behind.
+
+Two things worth knowing before training on the car:
+
+- The Orin Nano shares 8 GB between CPU and GPU. Training is viable for small models and short fine-tunes; anything larger belongs on a desktop, with only the exported engine copied over.
+- `nvpmodel -q` reports the active power mode. The 25 W mode is the default; `sudo nvpmodel -m 0` unlocks MAXN for benchmarking, at the cost of thermals.
 
 ## Checking lidar health
 

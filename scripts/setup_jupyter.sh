@@ -20,6 +20,19 @@ if ! command -v "$USER_HOME/.local/bin/jupyter" >/dev/null 2>&1; then
     pip3 install "${PIP_FLAGS[@]}" jupyterlab
 fi
 
+# jupyterlab's anyio dependency registers a pytest11 plugin that imports
+# _pytest.scope, added in pytest 7. Jammy's apt pytest is 6.2.5, so once
+# jupyterlab is installed every `colcon test` run dies during plugin loading,
+# before collecting a single test. Put a 7.x in the user site to shadow it;
+# 8.x is held back because ROS2 Humble's ament_cmake_pytest targets 6/7.
+if ! python3 -c "
+import sys
+from importlib.metadata import version
+sys.exit(0 if int(version('pytest').split('.')[0]) >= 7 else 1)
+" >/dev/null 2>&1; then
+    pip3 install "${PIP_FLAGS[@]}" "pytest>=7,<8"
+fi
+
 # Student-library runtime deps for the v2 racecar-neo library / labs:
 #   - ipywidgets: live FPS / joystick / detection widgets in
 #     labs/tests/test_async_core_real.ipynb. JupyterLab 4.x renders

@@ -23,31 +23,35 @@ sudo -v
 SUDO_KEEPALIVE_PID=$!
 trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null' EXIT
 
-echo "==> [1/7] ROS2 Humble + driver dependencies"
+echo "==> [1/8] ROS2 Humble + driver dependencies"
 bash "$SCRIPT_DIR/setup_ros2.sh"
 
 echo
-echo "==> [2/7] Robotics dev tools"
+echo "==> [2/8] Robotics dev tools"
 bash "$SCRIPT_DIR/setup_dev_tools.sh"
 
 echo
-echo "==> [3/7] User environment (groups, .bashrc, racecar tool)"
+echo "==> [3/8] User environment (groups, .bashrc, racecar tool)"
 bash "$SCRIPT_DIR/setup_user_env.sh"
 
 echo
-echo "==> [4/7] udev rules (stable /dev/osrbot_base, _led_matrix, _usb_cam)"
+echo "==> [4/8] udev rules (stable /dev/osrbot_base, _led_matrix, _usb_cam)"
 bash "$SCRIPT_DIR/setup_udev.sh"
 
 echo
-echo "==> [5/7] Workspace build (driver + pinned Lakibeam lidar clone)"
+echo "==> [5/8] Workspace build (driver + pinned Lakibeam lidar clone)"
 bash "$SCRIPT_DIR/setup_workspace.sh"
 
 echo
-echo "==> [6/7] JupyterLab + workspace"
+echo "==> [6/8] GPU stack (PyTorch, Ultralytics, TensorRT check)"
+bash "$SCRIPT_DIR/setup_ml.sh"
+
+echo
+echo "==> [7/8] JupyterLab + workspace"
 bash "$SCRIPT_DIR/setup_jupyter.sh"
 
 echo
-echo "==> [7/7] systemd services (teleop, watchdog, dashboard, jupyter)"
+echo "==> [8/8] systemd services (teleop, watchdog, dashboard, jupyter)"
 bash "$SCRIPT_DIR/setup_services.sh"
 
 echo
