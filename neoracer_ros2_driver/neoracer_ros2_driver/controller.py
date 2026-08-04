@@ -45,7 +45,8 @@ _INT_ARRAY = ParameterDescriptor(type=ParameterType.PARAMETER_INTEGER_ARRAY)
 
 
 def declare_float_param(node: Node, name: str, default: float) -> float:
-    """Declare a double parameter that tolerates integer YAML values.
+    """
+    Declare a double parameter that tolerates integer YAML values.
 
     A hand-edited ``steering_trim_deg: -5`` arrives from the YAML as an int,
     and a strictly-typed double parameter kills the node at startup over the
@@ -208,9 +209,12 @@ class ControllerNode(Node):
                 time.sleep(0.005)  # ~200 Hz idle poll
 
     def _note_unknown_line(self, line):
-        """Warn once per unknown frame tag so a firmware protocol change is
-        visible in the log instead of silently binned (the V1.1 's' frame
-        went unnoticed exactly this way)."""
+        """
+        Warn once per unknown frame tag.
+
+        A firmware protocol change stays visible in the log instead of being
+        silently binned (the V1.1 's' frame went unnoticed exactly this way).
+        """
         tag = line.split(None, 1)[0]
         if tag in self._IGNORED_EXACT or tag.startswith(self._IGNORED_PREFIXES):
             return

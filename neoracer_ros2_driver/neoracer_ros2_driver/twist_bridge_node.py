@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 """
-Bridge Nav2's ``/cmd_vel`` (Twist, m/s and rad/s) onto the normalized
-``/drive`` topic the mux arbitrates.
+Bridge Nav2's ``/cmd_vel`` onto the normalized ``/drive`` topic.
+
+``/cmd_vel`` carries a Twist in m/s and rad/s; ``/drive`` is the normalized
+topic the mux arbitrates.
 
 Nav2 and the osracer planners speak Twist in physical units. The neoracer
 pipeline speaks normalized Ackermann: ``/drive`` -> mux -> throttle ->

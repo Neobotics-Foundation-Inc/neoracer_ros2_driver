@@ -6,7 +6,7 @@ package_name = 'neoracer_ros2_driver'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.2.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -22,7 +22,7 @@ setup(
     description=(
         'Backend ROS2 driver for neoracer v1 with OSRbot software '
         'stack support, in collaboration with Seeed Studio'),
-    license='CERN Open Hardware Licence Version 2 - Strongly Reciprocal',
+    license='GPL-3.0-only',
     extras_require={
         'test': [
             'pytest',

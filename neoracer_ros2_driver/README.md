@@ -12,11 +12,15 @@ services, and networking.
 
 ## Changelog
 
+**0.2.0** - autonomy release: SLAM/Nav2 fused behind the mux, EKF odometry,
+`twist_bridge` (`/cmd_vel` to `/drive`), MJPG camera passthrough at 60 fps, and
+the Lakibeam lidar driver moved out of this repo to a pinned Neobotics fork.
+
 **0.1.0** - migrated the MIT RACECAR Neo driver to the Neoracer (Jetson Orin
 Nano, ROS Humble): ESP32 bridge (IMU/odom/FlySky joy/ESC), Lakibeam lidar,
 USB-UART display, and a retargeted fleet toolchain. Full history in
-[docs/changelog.md](docs/changelog.md); design in
-[docs/architecture.md](docs/architecture.md).
+[CHANGELOG.md](../CHANGELOG.md); design in
+[docs/architecture.md](../docs/architecture.md).
 
 ---
 
@@ -126,7 +130,8 @@ Networking is configured separately (it reconfigures Wi-Fi - see section 6).
 
 The Lakibeam lidar driver (package `lakibeam1`) is a separate upstream project,
 not vendored here; `setup_workspace.sh` clones it into `src/` alongside this
-package. Override the source with `LIDAR_REPO=...`.
+package, from the Neobotics fork at a pinned tag. Override with `LAKI_REPO=...`
+and `LAKI_PIN=...` to test an unreleased driver revision.
 
 After install, log out/in (or `newgrp dialout`) so group changes apply.
 

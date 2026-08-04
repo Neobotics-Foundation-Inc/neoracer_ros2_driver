@@ -39,7 +39,7 @@ echo "==> [4/7] udev rules (stable /dev/osrbot_base, _led_matrix, _usb_cam)"
 bash "$SCRIPT_DIR/setup_udev.sh"
 
 echo
-echo "==> [5/7] Workspace build (vendored Lakibeam lidar + driver)"
+echo "==> [5/7] Workspace build (driver + pinned Lakibeam lidar clone)"
 bash "$SCRIPT_DIR/setup_workspace.sh"
 
 echo
