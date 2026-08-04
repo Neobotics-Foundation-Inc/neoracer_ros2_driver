@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
 """
-Autonomy base layer on top of teleop: TF and the twist bridge, always cheap
-to run. SLAM and Nav2 are on-demand activities, launched by `racecar
-mapping` and `racecar navigation` when needed rather than living in the
-service.
+Launch the autonomy base layer on top of teleop.
+
+TF and the twist bridge are always cheap to run. SLAM and Nav2 are on-demand
+activities, launched by `racecar mapping` and `racecar navigation` when needed
+rather than living in the service.
 
 Teleop owns every device (serial, lidar, camera, LED); this launch adds the
 intelligence and no hardware drivers. The osracer chassis, lidar, camera,

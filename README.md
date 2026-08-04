@@ -8,7 +8,11 @@ car's workspace and build; there are no side-loaded packages.
 | Package | What it is |
 |---------|------------|
 | `neoracer_ros2_driver` | Vehicle driver stack: controller, gamepad, mux, throttle, camera (native MJPG passthrough, 60 fps on `/camera`), LED matrix, odometry TF. Launch entry point is `teleop.launch.py`. |
-| `lakibeam1` | Vendored RichBeam LakiBeam1 lidar driver, publishes `/scan`. Carries local fixes; see `docs/lidar_scan_health.md`. |
+
+The RichBeam LakiBeam1 lidar driver (package `lakibeam1`, publishes `/scan`) is
+third-party and is **not** kept in this repo. `setup_workspace.sh` clones it
+into `src/lakibeam1` from the Neobotics fork at a pinned tag; the fork carries
+the scan-health fixes described in `docs/lidar_scan_health.md`.
 
 ## Provisioning a car
 
@@ -20,8 +24,10 @@ cd ~/ros2_ws/src/neoracer_ros2_driver && git pull
 bash scripts/setup_all.sh
 ```
 
-Setup removes the superseded sibling lidar clone factory images ship at
-`src/lakibeam1` (lakibeam1 is vendored inside this repo, with local fixes).
+Setup clones the lidar driver into `src/lakibeam1` at the pinned tag. If a
+factory image already has a clone there pointing at RichbeamTechnology upstream,
+setup re-points it at the Neobotics fork so the car does not run an unpatched
+driver.
 
 Then log out and back in (group changes) and bring the stack up as the
 service, so it runs headless instead of holding a terminal:
@@ -51,11 +57,11 @@ can't share the serial ports.
 ### Coexisting with the vendor workspace
 
 The factory image ships the vendor stack preinstalled in `~/osracer_ws`. It
-shipped its own copy of the `lakibeam1` lidar package, divergent from the one
-vendored here, so which lidar ran depended on overlay order and colcon could
+shipped its own copy of the `lakibeam1` lidar package, divergent from the
+pinned fork, so which lidar ran depended on overlay order and colcon could
 refuse to build on the duplicate ("underlay override"). Setup reconciles this
 to a single shared lidar: it masks the vendor copy with `COLCON_IGNORE`,
-symlinks this repo's `lakibeam1` into `~/osracer_ws/src`, and rebuilds it there,
+symlinks `src/lakibeam1` into `~/osracer_ws/src`, and rebuilds it there,
 so both workspaces build the one canonical source (the copy with the
 scan-health fixes). Setup also installs the `tf_transformations` /
 `transforms3d` runtime deps the vendor bringup needs but the factory image

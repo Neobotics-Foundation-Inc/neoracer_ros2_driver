@@ -1,67 +1,79 @@
-* text=auto
-*.sh text eol=lf
-*.bash text eol=lf
-*.py text eol=lf
-*.js text eol=lf
-*.html text eol=lf
-*.css text eol=lf
-*.json text eol=lf
-*.xml text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
-*.md text eol=lf
-*.txt text eol=lf
-*.c text eol=lf
-*.h text eol=lf
-*.java text eol=lf
-*.go text eol=lf
-*.rs text eol=lf
-*.rb text eol=lf
-*.pl text eol=lf
-*.php text eol=lf
-*.swift text eol=lf
-*.ts text eol=lf
-*.tsx text eol=lf
-*.jsx text eol=lf
-*.vue text eol=lf
-*.tsx text eol=lf
-*.less text eol=lf
-*.sass text eol=lf
-*.scss text eol=lf
-*.conf text eol=lf
-*.ini text eol=lf
-*.cfg text eol=lf
-*.toml text eol=lf
-*.lock text eol=lf
-*.env text eol=lf
-*.gitignore text eol=lf
-*.editorconfig text eol=lf
-*.dockerignore text eol=lf
-*.gitattributes text eol=lf
-*.travis.yml text eol=lf
-*.circleci/config.yml text eol=lf
-*.github/workflows/*.yml text eol=lf
-*.github/dependabot.yml text eol=lf
-*.github/pull_request_template.md text eol=lf
-*.github/ISSUE_TEMPLATE.md text eol=lf
-*.github/CONTRIBUTING.md text eol=lf
-*.github/README.md text eol=lf
-*.github/LICENSE text eol=lf
-*.github/SECURITY.md text eol=lf
-*.github/CHANGELOG.md text eol=lf
-*.github/RELEASE.md text eol=lf
-*.github/ROADMAP.md text eol=lf
-*.github/FEATURES.md text eol=lf
-*.github/FAQ.md text eol=lf
-*.github/CONTRIBUTORS.md text eol=lf
-*.github/MAINTAINERS.md text eol=lf
-*.github/ACKNOWLEDGEMENTS.md text eol=lf
-*.github/THANKS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=lf
-*.github/SPONSORS.md text eol=l   
+# Default: normalize line endings to LF in the repo, auto-detect on checkout.
+* text=auto eol=lf
+
+# Source / config — always LF (Linux-only target, scripts must stay executable)
+*.py        text eol=lf
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.service   text eol=lf
+*.rules     text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.xml       text eol=lf
+*.urdf      text eol=lf
+*.xacro     text eol=lf
+*.json      text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.cff       text eol=lf
+Makefile    text eol=lf
+Dockerfile  text eol=lf
+
+# Vendored lakibeam1 C/C++ sources and rviz configs
+*.c         text eol=lf
+*.cpp       text eol=lf
+*.h         text eol=lf
+*.hpp       text eol=lf
+*.rviz      text eol=lf
+CMakeLists.txt text eol=lf
+
+# Web dashboard assets
+*.html      text eol=lf
+*.css       text eol=lf
+*.js        text eol=lf
+
+# Windows-only scripts (if ever added) — CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Binary assets — never munge line endings
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.svg       text eol=lf
+*.pdf       binary
+*.ico       binary
+
+# 3D meshes (if added later for rviz/urdf)
+*.stl       binary
+*.dae       binary
+*.obj       binary
+
+# ML model files
+*.tflite    binary
+*.onnx      binary
+*.pt        binary
+*.pth       binary
+*.pb        binary
+*.h5        binary
+
+# Pre-packaged installers
+*.deb       binary
+*.whl       binary
+*.tar.gz    binary
+*.tgz       binary
+*.zip       binary
+
+# ROS2 bag files
+*.bag       binary
+*.bag2      binary
+*.db3       binary
+*.mcap      binary
+
+# Calibration data
+*.bin       binary

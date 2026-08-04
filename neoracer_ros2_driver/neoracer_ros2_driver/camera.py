@@ -48,7 +48,8 @@ def device_to_index(device):
 
 
 def _is_jpeg(frame):
-    """True if ``frame`` is a raw MJPG buffer (starts with the JPEG SOI marker).
+    """
+    Report whether ``frame`` is a raw MJPG buffer (JPEG SOI marker).
 
     With ``CAP_PROP_CONVERT_RGB = 0`` a working MJPG capture returns the
     compressed byte buffer; a driver that ignores the flag returns a decoded
