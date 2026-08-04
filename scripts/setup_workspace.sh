@@ -54,6 +54,22 @@ if ! git -C "$LAKI_DIR" checkout -q --force "$LAKI_PIN" 2>/dev/null; then
 fi
 echo "  lakibeam1 at $LAKI_PIN ($(git -C "$LAKI_DIR" rev-parse --short HEAD))"
 
+# Cars provisioned before the driver was unvendored built lakibeam1 from
+# src/neoracer_ros2_driver/lakibeam1. CMake records the source directory in
+# CMakeCache.txt, so after the source moves to src/lakibeam1 the stale cache
+# still points at the old path and the build dies with
+#   CMake Error: The source directory "..." does not exist.
+# Drop the build/install trees whenever the cached source dir is not the
+# current one; colcon then reconfigures from scratch.
+LAKI_CACHE="$WS_DIR/build/lakibeam1/CMakeCache.txt"
+if [ -f "$LAKI_CACHE" ]; then
+    CACHED_SRC=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$LAKI_CACHE" | head -1)
+    if [ "$CACHED_SRC" != "$LAKI_DIR" ]; then
+        echo "  clearing stale lakibeam1 build (was built from ${CACHED_SRC:-unknown})"
+        rm -rf "$WS_DIR/build/lakibeam1" "$WS_DIR/install/lakibeam1"
+    fi
+fi
+
 # Lakibeam build dependency: libcurl (the sensor's HTTP config calls).
 if ! dpkg -s libcurl4-openssl-dev >/dev/null 2>&1; then
     echo "  installing libcurl4-openssl-dev (lakibeam1 build dep)"
