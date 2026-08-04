@@ -1,127 +1,367 @@
-# NeoRacer ROS 2 Driver
+# neoracer_ros2_driver
 
-Everything that runs on a NeoRacer car lives in this repo. Clone it into the
-car's workspace and build; there are no side-loaded packages.
+ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering racing robot built by [Neobotics Foundation](https://github.com/Neobotics-Foundation-Inc) in collaboration with Seeed Studio.
 
-## Packages
+## Contents
 
-| Package | What it is |
-|---------|------------|
-| `neoracer_ros2_driver` | Vehicle driver stack: controller, gamepad, mux, throttle, camera (native MJPG passthrough, 60 fps on `/camera`), LED matrix, odometry TF. Launch entry point is `teleop.launch.py`. |
+- [Hardware](#hardware)
+- [Architecture](#architecture)
+- [Quickstart (fresh JetPack 6.2 install)](#quickstart-fresh-jetpack-62-install)
+- [The `racecar` shell tool](#the-racecar-shell-tool)
+- [Networking (optional)](#networking-optional)
+- [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
+- [Web dashboard](#web-dashboard)
+- [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library)
+- [Checking lidar health](#checking-lidar-health)
+- [Coexisting with the vendor workspace](#coexisting-with-the-vendor-workspace)
+- [Manual build](#manual-build)
+- [Launch](#launch)
+- [Troubleshooting](#troubleshooting)
+- [Changelog](#changelog)
+- [License](#license)
+- [Citation](#citation)
 
-The RichBeam LakiBeam1 lidar driver (package `lakibeam1`, publishes `/scan`) is
-third-party and is **not** kept in this repo. `setup_workspace.sh` clones it
-into `src/lakibeam1` from the Neobotics fork at a pinned tag; the fork carries
-the scan-health fixes described in `docs/lidar_scan_health.md`.
+## Hardware
 
-## Provisioning a car
+| Subsystem | Component | Interface | udev symlink |
+|---|---|---|---|
+| Drive / steering / IMU / odometry / RC | Seeed OSRbot **ESP32** (OSCORE_NEO) | USB-CDC | `/dev/osrbot_base` |
+| 2D LIDAR | RichBeam **LakiBeam1** | Ethernet over USB-C (UDP), sensor at `192.168.8.2` | — |
+| Forward camera | USB webcam (MJPG) | USB | `/dev/osrbot_usb_cam` |
+| Display | 8×8 LED dot matrix | USB-UART | `/dev/osrbot_led_matrix` |
+| Manual control | **FlySky** RC transmitter | receiver wired to the ESP32 | — |
+| Compute | Jetson Orin Nano (Seeed reComputer J4012) | — | — |
 
-Brand-new car (fresh JetPack 6.x / Ubuntu 22.04 image):
+All `/dev/osrbot_*` paths are stable udev symlinks installed by `scripts/setup_udev.sh`, so devices won't shift between `ttyACM0` and `ttyACM1` across reboots.
 
-```
-# factory images pre-clone this repo; pull it (clone instead on a bare image)
-cd ~/ros2_ws/src/neoracer_ros2_driver && git pull
-bash scripts/setup_all.sh
-```
+One ESP32 carries the IMU, wheel odometry, the FlySky receiver, and the motor ESC. A single `controller` node owns that serial link; there is no separate IMU, PWM, or joystick driver.
 
-Setup clones the lidar driver into `src/lakibeam1` at the pinned tag. If a
-factory image already has a clone there pointing at RichbeamTechnology upstream,
-setup re-points it at the Neobotics fork so the car does not run an unpatched
-driver.
-
-Then log out and back in (group changes) and bring the stack up as the
-service, so it runs headless instead of holding a terminal:
-
-```
-racecar service status   # units enabled by setup, teleop not yet running
-racecar service start    # starts neoracer-teleop (watchdog follows)
-racecar service status   # confirm teleop active; it now also starts on boot
-```
-
-Wi-Fi AP + lidar subnet setup is separate: `racecar setup networking`.
-
-### Running the stack
-
-The systemd service is the normal way to run the car: `racecar service
-start` / `racecar service logs` / `racecar service status` (wrapping
-`neoracer-teleop`), headless and started automatically on every boot once
-enabled. Verify with `ros2 topic hz /scan` or `ros2 topic echo /motor`
-while moving the FlySky sticks (3-position switch in manual).
-
-`racecar teleop` runs the same stack in the foreground of your terminal
-for interactive debugging, like a dev server: startup logs stream, then it
-goes quiet and holds the terminal while the car is live. That is it
-working, not hanging. Ctrl+C stops it. Stop the service first - the two
-can't share the serial ports.
-
-### Coexisting with the vendor workspace
-
-The factory image ships the vendor stack preinstalled in `~/osracer_ws`. It
-shipped its own copy of the `lakibeam1` lidar package, divergent from the
-pinned fork, so which lidar ran depended on overlay order and colcon could
-refuse to build on the duplicate ("underlay override"). Setup reconciles this
-to a single shared lidar: it masks the vendor copy with `COLCON_IGNORE`,
-symlinks `src/lakibeam1` into `~/osracer_ws/src`, and rebuilds it there,
-so both workspaces build the one canonical source (the copy with the
-scan-health fixes). Setup also installs the `tf_transformations` /
-`transforms3d` runtime deps the vendor bringup needs but the factory image
-omits. Both workspaces stay usable, one active per shell.
-
-- Setup never edits existing `.bashrc` lines (a factory file has unknown
-  contents; commenting lines could orphan an `if`/`fi` or kill unrelated
-  exports). It appends one marked block, `# Neoracer - default workspace`,
-  at the end: it runs after whatever the factory lines set up and resets the
-  environment to the neoracer overlay. Nothing under `~/osracer_ws` is
-  modified.
-- `racecar ws osracer` switches the current shell to the vendor stack;
-  `racecar ws neoracer` switches back; `racecar ws` shows which is active.
-  The switch is per shell and leaves disk state alone.
-- Restore the factory default entirely by deleting the
-  `# Neoracer - default workspace` block from `~/.bashrc`; every factory
-  line is still there, untouched.
-- If the vendor stack autostarts on your image
-  (`systemctl list-unit-files | grep -i osr`), stop it before `racecar teleop`
-  or the two stacks will fight over the serial ports.
-
-Updating an already-provisioned car:
+## Architecture
 
 ```
-cd ~/ros2_ws/src/neoracer_ros2_driver && git pull
-bash scripts/setup_workspace.sh          # rebuild + keep the shared lidar in sync
-sudo systemctl restart neoracer-teleop
+FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/gamepad_drive──┐
+                          │                                                ├──> mux_node ──/mux_out──> throttle_node ──/motor──┐
+                          │        student library / Nav2 ──────/drive─────┘   (FlySky switch: idle | manual | autonomy)       │
+                          │                                                                                                   │
+                          └──> /imu, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
+
+LakiBeam1 ──(UDP)──> lakibeam1_scan_node ──/scan
+USB webcam ────────> camera ──/camera  (JPEG-in-Image)
+Nav2 ──/cmd_vel──> twist_bridge ──/drive
+student library ──/led_matrix/command──> led_matrix ──(USB-UART)──> 8×8 display
 ```
 
-## Checking lidar health (the watchdog)
+Published topics:
 
-The lidar driver watches its own output: when a scan streams with (nearly) every
-range inf for 3 s, it logs `[scan-watchdog]` at ERROR and attaches the sensor's
-live state JSON - laser on/off, motor rpm, scan window - so the log names the
-culprit. On any "lidar looks dead" report, check this first:
+- `/imu` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery`: from the ESP32 V1.1 firmware state frame
+- `/joy` (sensor_msgs/Joy): synthesized from FlySky RC channels
+- `/scan` (sensor_msgs/LaserScan): LakiBeam1
+- `/camera` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 
+The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) enforces speed caps, arming, and manual/autonomy arbitration, so RC driving and autonomous code share one speed-limited path. A 3-position FlySky switch selects **idle / manual / autonomy**, mapped to the `/joy` buttons the mux reads. Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
+
+Safety and uptime layers:
+
+- **Mux** gates commands behind the arming switch and zeroes output when the RC link drops.
+- **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu` and `/scan` freshness.
+- **Five systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter,autonomy}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down.
+- **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
+
+## Quickstart (fresh JetPack 6.2 install)
+
+Target: **Jetson Orin Nano** (Seeed reComputer J4012) running JetPack 6.2: Ubuntu 22.04.5 LTS (Jammy), Python 3.10, ROS 2 Humble. Humble is the only supported distro on Jammy.
+
+### 1. Flash JetPack
+
+Follow Seeed's [JetPack flashing guide](https://wiki.seeedstudio.com/reComputer_J4012_Flash_Jetpack/) for the reComputer J4012. Factory NeoRacer images ship with JetPack and this repo already present. Skip to step 3 and `git pull` instead of cloning.
+
+### 2. First-boot configuration
+
+Set these during the Ubuntu first-boot wizard. The `racecar` shell tool, udev groups, and systemd `User=` directives are hard-coded to the username; do not change it.
+
+- **Username**: `racecar`
+- **Hostname**: `neoracer`
+- **Password**: your choice (fleet default is `neobotics`)
+
+Then SSH in, or work on the console.
+
+### 3. Clone and run the orchestrator
+
+```sh
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+git clone https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver.git
+bash neoracer_ros2_driver/scripts/setup_all.sh
 ```
+
+`setup_all.sh` is idempotent. Each phase checks for existing state and skips when already applied, so re-running is safe.
+
+### 4. Apply group memberships
+
+Setup adds your user to `dialout` and the video groups. Group membership applies to new login sessions only:
+
+```sh
+exit                     # close SSH
+ssh racecar@<ip>         # back in, groups now active
+groups                   # verify dialout appears
+```
+
+`newgrp dialout` applies it to a single shell without reconnecting.
+
+### 5. Plug in the hardware and reboot
+
+With the car powered off, connect the ESP32 base, the LakiBeam1 (USB-C), the webcam, and the LED matrix. Power on, then:
+
+```sh
+sudo reboot
+```
+
+After reboot, verify and start the stack:
+
+```sh
+racecar status              # USB peripherals + /dev/osrbot_* symlinks + running nodes
+racecar service status      # units enabled by setup, teleop not yet running
+racecar service start       # starts neoracer-teleop (watchdog follows)
+```
+
+Browse to `http://neoracer.local:8080` for the live dashboard.
+
+### 6. (Optional) Switch to AP-mode networking
+
+Once the wired setup works, untether the car from your lab WiFi:
+
+```sh
+racecar setup networking
+```
+
+Run this from a wired session or the console. It reconfigures the WiFi interface and will drop SSH-over-WiFi. See [Networking (optional)](#networking-optional).
+
+### What `setup_all.sh` does
+
+Seven phases, all under `scripts/`:
+
+1. **`setup_ros2.sh`**: ROS 2 Humble apt repo + message/driver packages
+2. **`setup_dev_tools.sh`**: build tools and Python hardware libraries
+3. **`setup_user_env.sh`**: joins device groups; sources ROS 2 and the `racecar` shell tool in `.bashrc`
+4. **`setup_udev.sh`**: installs `/etc/udev/rules.d/99-racecar.rules` (stable `/dev/osrbot_*`)
+5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
+6. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
+7. **`setup_services.sh`**: installs and enables the systemd units
+
+Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
+
+The lidar driver (package `lakibeam1`) is third-party and is not vendored in this repo. Phase 5 clones it from the [Neobotics fork](https://github.com/Neobotics-Foundation-Inc/Lakibeam_ROS2_Driver) at tag `v1.0-neobotics`, which carries the scan-health fixes described in [docs/lidar_scan_health.md](docs/lidar_scan_health.md). Override with `LAKI_REPO=` / `LAKI_PIN=` to test an unreleased revision.
+
+## The `racecar` shell tool
+
+`setup_user_env.sh` sources [`scripts/racecar-tool.sh`](scripts/racecar-tool.sh) into `~/.bashrc`. Re-open a shell, then:
+
+```sh
+racecar build               # colcon build --symlink-install + source overlay
+racecar test                # package test suite, verbose
+racecar source              # source the workspace overlay
+racecar cd                  # chdir to the package source root
+racecar teleop              # full stack in the foreground via launch_teleop.sh
+racecar launch lidar        # ros2 launch neoracer_ros2_driver lidar.launch.py
+racecar watchdog            # run the supervisor in the foreground
+
+racecar service status      # active/enabled snapshot for all units
+racecar service install     # drop unit files in /etc/systemd/system/ + enable
+racecar service start       # default: start teleop (watchdog follows)
+racecar service stop        # default: stop teleop
+racecar service logs teleop # journalctl -u neoracer-teleop -f
+
+racecar mapping             # SLAM to build a map (slam_toolbox default)
+racecar mapping save <name> # save the current map
+racecar navigation          # Nav2 on a saved map (teb default)
+racecar navigation rviz     # goal-setting RViz view (car desktop only)
+
+racecar setup all           # the 7-phase orchestrator
+racecar setup networking    # WiFi AP + Ethernet + lidar subnet
+racecar update              # repo to latest main + full setup + service restart
+
+racecar ws [neoracer|osracer]   # switch this shell between workspaces
+racecar library --list          # student library folders in ~/jupyter_ws
+racecar library --select <dir>  # point the student library at a notebook tree
+racecar selftest --led[=TEXT]   # send test text to the 8x8 display
+racecar clear --led             # clear the display
+racecar udev                    # re-install the udev rules
+racecar status                  # peripherals + symlinks + running nodes
+racecar cleanup [--force]       # list / kill stale processes + SHM orphans
+racecar help                    # full usage
+```
+
+`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every service. Requires internet.
+
+## Networking (optional)
+
+```sh
+racecar setup networking
+```
+
+Configures an isolated WiFi access point (so a laptop can reach the car headless), a static + DHCP address on Ethernet, and the LakiBeam1 lidar subnet.
+
+> Warning: this reconfigures WiFi. Run it from a wired session or the console, or you will drop your own SSH connection.
+
+Defaults, persisted to `~/.config/racecar/networking.env` and replayed on every re-run:
+
+| Setting | Default | Flag |
+|---|---|---|
+| AP SSID | `neoracer-1` | `--ssid=NAME` |
+| AP password | `neobotics` | `--psk=PASS` |
+| AP channel | `6` | `--channel=N` |
+| AP address | `10.42.0.1/24` | `--ap-addr=CIDR` |
+| Ethernet static | `192.168.10.100/24` | `--eth-static=CIDR` |
+| Lidar host | `192.168.8.1/24` | `--lidar-host=CIDR` |
+| Lidar sensor | `192.168.8.2` | — |
+| WiFi interface | `wlP1p1s0` | `--wifi-iface=NAME` |
+| Ethernet interface | `nr_eth0` | `--eth-iface=NAME` |
+
+Ethernet is configured through NetworkManager (not netplan), carrying both the static address and a DHCP autoconnect profile on the native RJ45. The car is reachable at a known address on a bare switch and via DHCP on a lab network.
+
+Inspect or clear the saved overrides:
+
+```sh
+racecar setup networking --show     # print current persisted values
+racecar setup networking --reset    # disable the AP + clear the saved car ID
+```
+
+Run `--reset` before capturing a golden image, so the clone ships with no active AP and no baked-in SSID.
+
+## Autonomy: SLAM and Nav2
+
+SLAM and navigation run on demand, not as services. The always-on autonomy base (`autonomy.launch.py`, `neoracer-autonomy.service`) runs only TF, the EKF, and the twist bridge.
+
+```sh
+racecar mapping                 # slam_toolbox (also: gmapping, cartographer)
+racecar mapping save my_track   # save the map under that name
+racecar navigation              # Nav2 with the teb planner (also: dwb)
+racecar navigation rviz         # RViz goal-setting view, on the car's desktop
+```
+
+`twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
+
+Autonomy commands enter through the same mux as manual driving, so the FlySky arming switch still governs the car.
+
+## Web dashboard
+
+With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
+
+- **Nodes**: one card per monitored subsystem, coloured by liveness
+- **System health**: Jetson thermals, battery, kernel type
+- **Topic rates**: live Hz for the control and sensor topics, yellow when stale, red when missing
+- **Node graph**: live rqt-style view of the running graph
+- **Watchdog log**: tail of `~/logs/latest/watchdog.log`, so restart events are visible
+
+## Jupyter notebooks and the student library
+
+`http://neoracer.local:8888` serves JupyterLab from `~/jupyter_ws`, with `import rclpy` preconfigured.
+
+Setup also installs the student side into `~/jupyter_ws/neoracer-os`: the `racecar-neo-library` and the NeoRacer labs, from the Neobotics forks. That library carries `rc.slam` / `rc.nav` and the FlySky auto-start fix. The FlySky RC has no START button, so `rc.go()` enters your program without one; the upstream MIT library waits for the Xbox START.
+
+```sh
+racecar library --list             # valid folders in ~/jupyter_ws
+racecar library --select <folder>  # choose which library is on the Python path
+racecar library --status           # show the current selection
+```
+
+Refreshing the labs preserves student files.
+
+## Checking lidar health
+
+The lidar driver watches its own output. When a scan streams with (nearly) every range `inf` for 3 s, it logs `[scan-watchdog]` at ERROR and attaches the sensor's live state JSON (laser on/off, motor rpm, scan window). On any "the lidar looks dead" report, check this first:
+
+```sh
 journalctl -u neoracer-teleop -b | grep scan-watchdog
 ```
 
-Empty output means the scan never went blind this boot. Add `-f` to watch live
-while driving. A recovery is logged at INFO with the total blind duration.
+Empty output means the scan never went blind this boot. Add `-f` to watch live while driving; a recovery is logged at INFO with the total blind duration.
 
-A bare `ros2 topic echo /scan` is NOT evidence of a dead lidar: echo truncates
-arrays to their first 128 values, which sit entirely inside the always-blank
-rear crop, so a healthy scan prints a wall of `.inf`. Count instead of looking,
-or use RViz with Fixed Frame `laser`. Full symptom table, the 60-second decision
-test, and the boot-time config push behavior: `docs/lidar_scan_health.md`.
+A bare `ros2 topic echo /scan` is not evidence of a dead lidar. `echo` truncates arrays to their first 128 values, which sit inside the always-blank rear crop, so a healthy scan prints a wall of `.inf`. Count the values, or use RViz with Fixed Frame `laser`. Full symptom table and the 60-second decision test: [docs/lidar_scan_health.md](docs/lidar_scan_health.md).
 
-## Student library and labs
+## Coexisting with the vendor workspace
 
-`setup_all.sh` also installs the student side into `~/jupyter_ws/neoracer-os`:
-the racecar-neo library and the NeoRacer labs, cloned from the Neobotics repos
-(`racecar-neo-library`, branch `neobotics-slam-nav`, and `neoracer-labs`). That
-branch carries `rc.slam` / `rc.nav` and the FlySky auto-start fix: the FlySky RC
-has no START button, so `rc.go()` enters your program without one, unlike the
-upstream MIT library that waits for the Xbox START. JupyterLab serves
-`~/jupyter_ws` on port 8888; `racecar library --list` / `--select` choose which
-library is on the Python path.
+Factory images ship the Seeed vendor stack preinstalled in `~/osracer_ws`, including its own copy of the `lakibeam1` package that has diverged from the pinned fork. Two copies of one package means the lidar you get depends on overlay order, and colcon may refuse to build ("underlay override").
 
-## Repo layout
+Setup reconciles this to a single shared lidar: it masks the vendor copy with `COLCON_IGNORE`, symlinks `src/lakibeam1` into `~/osracer_ws/src`, and rebuilds it there. Both workspaces stay usable, one active per shell, and build from one source.
 
-`docs/` holds the operational checklists. `scripts/` holds car setup tooling.
+- Setup never edits existing `.bashrc` lines. It appends one marked block, `# Neoracer - default workspace`, which runs after the factory lines and resets the environment to the neoracer overlay. Nothing under `~/osracer_ws` is modified.
+- `racecar ws osracer` switches the current shell to the vendor stack, `racecar ws neoracer` switches back, and a bare `racecar ws` shows which is active. The switch is per shell and leaves disk state alone.
+- Restore the factory default by deleting that block from `~/.bashrc`; every factory line is still there, untouched.
+- If the vendor stack autostarts on your image (`systemctl list-unit-files | grep -i osr`), stop it before running teleop; both stacks contend for the serial ports.
+
+## Manual build
+
+Without the shell tool:
+
+```sh
+cd ~/ros2_ws
+colcon build --packages-select neoracer_ros2_driver --symlink-install
+source install/setup.bash
+```
+
+## Launch
+
+```sh
+racecar teleop                  # or: ros2 launch neoracer_ros2_driver teleop.launch.py
+racecar launch controller       # individual subsystems too
+racecar launch lidar
+racecar launch camera
+racecar launch led_matrix
+racecar launch autonomy
+```
+
+Any subsystem can be disabled at launch:
+
+```sh
+ros2 launch neoracer_ros2_driver teleop.launch.py camera_enable:=false
+```
+
+The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
+
+Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `twist_bridge.yaml`, `camera.yaml`, `led_matrix.yaml`.
+
+## Troubleshooting
+
+**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. Check IDs with `racecar status` or `udevadm info -n /dev/ttyACM0`.
+
+**No `/scan`.** Confirm the lidar answers: `ping 192.168.8.2`. If it doesn't, the USB-C link should bring up an interface at `192.168.8.1`; see [Networking](#networking-optional). Then read [Checking lidar health](#checking-lidar-health) before concluding the sensor is dead.
+
+**Car won't drive.** The mux only forwards commands when the FlySky switch arms manual or autonomy mode. Verify with `ros2 topic echo /joy`. Direction and the m/s mapping are tuned in `config/controller.yaml`.
+
+**`/camera` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
+
+**FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
+
+**JetPack dpkg errors.** Reset the dpkg info directory:
+
+```sh
+sudo mv /var/lib/dpkg/info/ /var/lib/dpkg/backup/
+sudo mkdir /var/lib/dpkg/info/
+sudo apt-get update && sudo apt-get -f install
+sudo mv /var/lib/dpkg/backup/* /var/lib/dpkg/info/
+sudo rm -rf /var/lib/dpkg/backup/
+sudo apt update && sudo apt upgrade -y
+```
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
+
+## License
+
+GPLv3. See [LICENSE](./LICENSE). Provided as-is, without express or implied warranty.
+
+## Citation
+
+If you use the NeoRacer ROS 2 driver in published research, please cite this repository. GitHub renders a "Cite this repository" button from [`CITATION.cff`](CITATION.cff) that produces BibTeX and APA automatically.
+
+```bibtex
+@software{neobotics_neoracer_ros2_driver_2026,
+  author = {Lai, Chris and Bandyopadhyay, Koneshka},
+  title  = {{NeoRacer ROS2 Driver}: Hardware Interface for the {NeoRacer V1} Autonomous Racing Platform},
+  year   = {2026},
+  url    = {https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver},
+  note   = {Neobotics Foundation Inc.}
+}
+```
