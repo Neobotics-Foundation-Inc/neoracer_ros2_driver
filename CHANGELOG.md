@@ -12,44 +12,18 @@ for training and TensorRT for deployment. Also carries the package flattening
 that landed after 0.2.0.
 
 ### Added
-- Setup phase 6, `scripts/setup_ml.sh`: the on-board GPU stack. Installs
-  PyTorch 2.8.0 and torchvision 0.23.0 built for Tegra, Ultralytics, and the
-  ONNX tooling behind `YOLO.export(format='engine')`, then verifies the
-  TensorRT bindings JetPack already ships. Reachable on its own as
-  `racecar setup ml`. Wheels come from the jetson-ai-lab index keyed by the
-  CUDA version read off the running image, not from PyPI, whose aarch64 torch
-  builds are CPU-only or target datacenter GPUs and will not drive the Orin's
-  integrated GPU.
-- CUDA toolchain block in `setup_user_env.sh`: puts `nvcc` and `trtexec` on
-  PATH and exports `CUDA_HOME`. JetPack installs both and leaves neither
-  reachable from a login shell.
+- Setup phase 6, `scripts/setup_ml.sh`: the on-board GPU stack. Installs PyTorch 2.8.0 and torchvision 0.23.0 built for Tegra, Ultralytics, and the ONNX tooling behind `YOLO.export(format='engine')`, then verifies the TensorRT bindings JetPack already ships. Reachable on its own as `racecar setup ml`. Wheels come from the jetson-ai-lab index keyed by the CUDA version read off the running image, not from PyPI, whose aarch64 torch builds are CPU-only or target datacenter GPUs and will not drive the Orin's integrated GPU.
+- CUDA toolchain block in `setup_user_env.sh`: puts `nvcc` and `trtexec` on PATH and exports `CUDA_HOME`. JetPack installs both and leaves neither reachable from a login shell.
 
 ### Changed
-- numpy in the user site moves to the last 1.x release. Ultralytics floors it
-  at 1.23 and apt ships 1.21.5; numpy 2 is excluded because ROS 2 Humble's
-  binary extensions (`cv_bridge`, `sensor_msgs_py`) are built against the
-  numpy 1 C ABI.
-- `cv2` resolves to pip's opencv-python 4.11 rather than apt's 4.5.4, pulled in
-  by Ultralytics' floor of 4.6. `cv_bridge` links its own OpenCV in C++ and is
-  unaffected; the camera node's V4L2 capture path is present in the pip build.
-- Flattened the package to the repository root, matching the
-  `racecar_neo_ros2_driver` layout: `config/`, `launch/`, `resource/`, `test/`,
-  `package.xml`, `setup.py`, and `setup.cfg` moved up out of
-  `neoracer_ros2_driver/`, which now holds only the Python module. Reverses the
-  multi-package nesting introduced in 0.2.0, which no longer has a second
-  package to justify it since the lidar driver moved to a pinned fork.
+- numpy in the user site moves to the last 1.x release. Ultralytics floors it at 1.23 and apt ships 1.21.5; numpy 2 is excluded because ROS 2 Humble's binary extensions (`cv_bridge`, `sensor_msgs_py`) are built against the numpy 1 C ABI.
+- `cv2` resolves to pip's opencv-python 4.11 rather than apt's 4.5.4, pulled in by Ultralytics' floor of 4.6. `cv_bridge` links its own OpenCV in C++ and is unaffected; the camera node's V4L2 capture path is present in the pip build.
+- Flattened the package to the repository root, matching the `racecar_neo_ros2_driver` layout: `config/`, `launch/`, `resource/`, `test/`, `package.xml`, `setup.py`, and `setup.cfg` moved up out of `neoracer_ros2_driver/`, which now holds only the Python module. Reverses the multi-package nesting introduced in 0.2.0, which no longer has a second package to justify it since the lidar driver moved to a pinned fork.
 
 ### Fixed
-- `colcon test` died during plugin loading on any car that had run the Jupyter
-  phase, before collecting a test. jupyterlab pulls anyio, whose pytest plugin
-  imports `_pytest.scope` (pytest 7+), and Jammy's apt pytest is 6.2.5.
-  `setup_jupyter.sh` now puts a 7.x in the user site alongside the dependency
-  that needs it, held below 8 for ament_cmake_pytest.
-- `racecar launch <TAB>` completion listed nothing. It looked for launch files
-  in the repository root while they lived one level down; flattening puts them
-  where the completion already expected.
-- Four over-length lines in `scripts/dashboard.py`. `scripts/` was outside the
-  lint scope while the package was nested and is inside it now.
+- `colcon test` died during plugin loading on any car that had run the Jupyter phase, before collecting a test. jupyterlab pulls anyio, whose pytest plugin imports `_pytest.scope` (pytest 7+), and Jammy's apt pytest is 6.2.5. `setup_jupyter.sh` now puts a 7.x in the user site alongside the dependency that needs it, held below 8 for ament_cmake_pytest.
+- `racecar launch <TAB>` completion listed nothing. It looked for launch files in the repository root while they lived one level down; flattening puts them where the completion already expected.
+- Four over-length lines in `scripts/dashboard.py`. `scripts/` was outside the lint scope while the package was nested and is inside it now.
 
 ## [0.2.0] - 2026-08-03
 
@@ -58,58 +32,37 @@ driver moved out of this repo to a pinned fork. Consolidates upstream work that
 shipped without changelog entries between 0.1.0 and this tag.
 
 ### Added
-- Autonomy layer: osracer SLAM/Nav2 fused behind the mux, with SLAM and
-  navigation mutually exclusive and Python-cased args for Nav2 bringup
-  (`autonomy.launch.py`, `neoracer-autonomy.service`, `launch_autonomy.sh`).
+- Autonomy layer: osracer SLAM/Nav2 fused behind the mux, with SLAM and navigation mutually exclusive and Python-cased args for Nav2 bringup (`autonomy.launch.py`, `neoracer-autonomy.service`, `launch_autonomy.sh`).
 - EKF in the autonomy base; selectable mapping backends and navigation planners.
-- `twist_bridge` node: `/cmd_vel` to `/drive` bridge, relays `/odom` to
-  `/odometry/filtered` for osracer consumers, clean shutdown under systemd
-  SIGTERM.
+- `twist_bridge` node: `/cmd_vel` to `/drive` bridge, relays `/odom` to `/odometry/filtered` for osracer consumers, clean shutdown under systemd SIGTERM.
 - `controller` broadcasts the `odom` to `base_footprint` TF.
-- `controller` publishes `/battery` from the V1.1 firmware `b` frame; dashboard
-  gains a battery card.
-- Lidar all-inf scan watchdog and remote-logger crash fix, carried by the
-  Neobotics `Lakibeam_ROS2_Driver` fork; `docs/lidar_scan_health.md`.
-- `racecar mapping` / `racecar navigation` for on-demand SLAM/Nav, plus a
-  `racecar update` that does repo reset, full setup, and service restart in one
-  command.
-- Dashboard: live node graph view (rqt-style), autonomy monitoring, EKF and IMU
-  filter cards.
-- Setup auto-installs the student library and labs on a fresh car; labs refresh
-  preserves student files.
+- `controller` publishes `/battery` from the V1.1 firmware `b` frame; dashboard gains a battery card.
+- Lidar all-inf scan watchdog and remote-logger crash fix, carried by the Neobotics `Lakibeam_ROS2_Driver` fork; `docs/lidar_scan_health.md`.
+- `racecar mapping` / `racecar navigation` for on-demand SLAM/Nav, plus a `racecar update` that does repo reset, full setup, and service restart in one command.
+- Dashboard: live node graph view (rqt-style), autonomy monitoring, EKF and IMU filter cards.
+- Setup auto-installs the student library and labs on a fresh car; labs refresh preserves student files.
 
 ### Changed
-- Restructured to a multi-package layout; the Python package moved into
-  `neoracer_ros2_driver/`.
+- Restructured to a multi-package layout; the Python package moved into `neoracer_ros2_driver/`.
 - Camera publishes native MJPG passthrough at 60 fps (no decode/re-encode).
 - Throttle unlocks the full ESC swing for speed; steering stays at 0.625.
 - `mux` gained autonomy passthrough for hardware-switched (FlySky) cars.
-- Networking configures the Ethernet dual-IP through NetworkManager rather than
-  netplan, creates a DHCP autoconnect profile for the native RJ45, and defaults
-  to the real car values (`nr_eth0`, `192.168.10.100`).
-- `racecar service start/stop/restart` with no unit now acts on all four
-  services.
-- Dashboard redesigned on the Neobotics 4-colour palette (white page, blue LED,
-  kernel type, quiet status footer, solid status colours).
-- One shared lakibeam across the neoracer and osracer workspaces; osracer's
-  lidar points at the USB-C sensor IP (`192.168.8.2`).
+- Networking configures the Ethernet dual-IP through NetworkManager rather than netplan, creates a DHCP autoconnect profile for the native RJ45, and defaults to the real car values (`nr_eth0`, `192.168.10.100`).
+- `racecar service start/stop/restart` with no unit now acts on all four services.
+- Dashboard redesigned on the Neobotics 4-colour palette (white page, blue LED, kernel type, quiet status footer, solid status colours).
+- One shared lakibeam across the neoracer and osracer workspaces; osracer's lidar points at the USB-C sensor IP (`192.168.8.2`).
 - Student library installs from the Neobotics fork's `main` branch.
 
 ### Fixed
-- `controller` parses the V1.1 firmware state frame; `/imu` and `/odom` were
-  silently dead.
+- `controller` parses the V1.1 firmware state frame; `/imu` and `/odom` were silently dead.
 - `controller` tolerates integer YAML values for float parameters.
-- Lidar remote logger nullptr crash; sensor config push re-enabled behind a
-  bounded readiness wait.
+- Lidar remote logger nullptr crash; sensor config push re-enabled behind a bounded readiness wait.
 - Dashboard survives unreadable thermal zones (`cv*` EAGAIN killed the monitor).
 - Networking setup no longer aborts the run when a Cudy port is dark.
 - Setup only passes `--break-system-packages` when pip supports it.
 
 ### Removed
-- The third-party `lakibeam1` driver is no longer kept in this repo (52 files,
-  including a bundled rapidjson). `setup_workspace.sh` clones it into
-  `src/lakibeam1` from the Neobotics fork at a pinned tag instead, and
-  re-points a factory image's upstream clone at the fork.
+- The third-party `lakibeam1` driver is no longer kept in this repo (52 files, including a bundled rapidjson). `setup_workspace.sh` clones it into `src/lakibeam1` from the Neobotics fork at a pinned tag instead, and re-points a factory image's upstream clone at the fork.
 
 ## [0.1.0] - 2026-06-06
 
@@ -118,27 +71,17 @@ to the Neoracer (1/12 scale, Jetson Orin Nano, ROS 2 Humble). Satisfies the
 Neobotics student-library topic contract and keeps the fleet toolchain.
 
 ### Added
-- ESP32 bridge `controller`: subscribes `/motor`; publishes `/imu`, `/odom`,
-  and `/joy` synthesized from FlySky RC channels (parameterized RC-to-Joy
-  mapping in `controller_lib.py`, with unit tests).
-- `led_matrix` node: USB-UART passthrough to the 8x8 display on
-  `/led_matrix/command`.
-- Fleet toolchain retargeted for Jetson/Humble: 7-phase setup orchestrator,
-  `racecar` tool, watchdog, web dashboard, systemd services, networking.
-- udev rules for `/dev/osrbot_base`, `/dev/osrbot_led_matrix`,
-  `/dev/osrbot_usb_cam`.
+- ESP32 bridge `controller`: subscribes `/motor`; publishes `/imu`, `/odom`, and `/joy` synthesized from FlySky RC channels (parameterized RC-to-Joy mapping in `controller_lib.py`, with unit tests).
+- `led_matrix` node: USB-UART passthrough to the 8x8 display on `/led_matrix/command`.
+- Fleet toolchain retargeted for Jetson/Humble: 7-phase setup orchestrator, `racecar` tool, watchdog, web dashboard, systemd services, networking.
+- udev rules for `/dev/osrbot_base`, `/dev/osrbot_led_matrix`, `/dev/osrbot_usb_cam`.
 - Docs: `docs/architecture.md`, `docs/esp32_protocol.md`, on-car checklist.
 
 ### Changed
-- Control pipeline (`gamepad` to `mux` to `throttle` to `/motor`) retained so
-  FlySky (manual) and the student library (`/drive`, autonomy) share one
-  arbitrated, speed-capped path; a 3-position FlySky switch selects the mode.
-- Camera: single `/camera` publisher (USB webcam, JPEG-in-Image), hardened with
-  a stable device symlink, MJPG request, and reconnect.
-- LIDAR: `lakibeam1` cloned into `src/` by `setup_workspace.sh` (sibling
-  package); default `sensorip` `192.168.8.2` (USB-C). Replaces RPLIDAR/`sllidar`.
-- Dashboard health check reads Jetson thermals; services target ROS Humble
-  (Python 3.10).
+- Control pipeline (`gamepad` to `mux` to `throttle` to `/motor`) retained so FlySky (manual) and the student library (`/drive`, autonomy) share one arbitrated, speed-capped path; a 3-position FlySky switch selects the mode.
+- Camera: single `/camera` publisher (USB webcam, JPEG-in-Image), hardened with a stable device symlink, MJPG request, and reconnect.
+- LIDAR: `lakibeam1` cloned into `src/` by `setup_workspace.sh` (sibling package); default `sensorip` `192.168.8.2` (USB-C). Replaces RPLIDAR/`sllidar`.
+- Dashboard health check reads Jetson thermals; services target ROS Humble (Python 3.10).
 
 ### Removed
 - LSM9DS1 I2C IMU node and Pololu Maestro PWM node (folded into the ESP32 bridge).
