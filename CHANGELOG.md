@@ -5,10 +5,24 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-05
+
+Aligns the topic contract with `MITRacecarNeo/racecar_neo_ros2_driver`, the
+reference platform. The student library now reads one set of topic names on
+both cars, so a lab written for either runs on the other unchanged; where the
+NeoRacer has no matching hardware, the API is present and says so.
+
 ### Added
+- `/encoder/speed` and `/battery/voltage` (std_msgs/Float32) and `/rc/channels` (std_msgs/Float32MultiArray) from `controller`: the scalar sensor topics `rc.physics` reads on the reference platform. Same data the ESP32 already reported through `/odom`, `/battery`, and `/joy`, under the names the reference publishes. `/rc/channels` carries every FlySky channel in firmware order, normalized by the same calibration `/joy` uses; the library reads the first eight.
+- `controller_lib.rc_to_channels`, the pure normalization behind `/rc/channels`, with three unit tests.
 - `racecar compile [model]`: TensorRT export as one command. With no argument it reads `model_path` and `imgsz` from `config/inference.yaml`, so the engine is built at the size it will be served at; a bare filename resolves in `models/`, and the engine is placed there whatever the source path. `--imgsz=`, `--device=`, and `--no-half` override the export, `--force` rebuilds over an existing engine. Refuses to start while teleop or autonomy is running, since the builder peaks near 3 GB of the Orin's 8 GB and the stack is already holding half of it.
 
 ### Changed
+- Sensor topics renamed to the reference contract: `/camera` -> `/camera/color`, `/imu` -> `/imu/fused`, `/detections` -> `/edgetpu/inference`, `/detections/image` -> `/edgetpu/inference/image`, `/led_matrix/command` -> `/dotmatrix/text`. Anything reading the old names breaks at once rather than going quietly stale; there is no aliasing period.
+- `/edgetpu/inference` names an accelerator this car does not have. It is kept because the reference hardcodes it and the library subscribes to it, so a NeoRacer-specific name would cost portability for nothing.
+- `publish_mag` now defaults true. `rc.physics.get_magnetic_field()` returned a hardcoded zero vector while the firmware's `m` frame went nowhere.
+- `autonomy.launch.py` remaps the complementary filter's `imu/data_raw` onto the absolute `/imu/fused` rather than the relative `imu` it resolved before. The EKF still reads `imu_filter`, so `chassis_ekf_params.yaml` is untouched.
+- The reference repo contradicts itself on the color stream: `docs/realsense_topics.md` and one README line say `/camera/forward`, while `edgetpu.yaml`, `realsense.launch.py`, `dashboard.py`, and `watchdog.py` all say `/camera/color`. The code is the contract.
 - `models/*.pt` is committed rather than gitignored, so a fresh clone runs inference without a download. The ONNX intermediate and the `.engine` stay ignored: an engine is built against one board's GPU and TensorRT and does not load on another, so each car still builds its own with `racecar compile`.
 - `config/inference.yaml` defaults to `yolo26n.pt`, which every clone has. Point it at `yolo26n.engine` per car after compiling; the engine is 2.4x faster in service but cannot be a committed default while it stays per-car.
 - TensorRT validated on-car through `teleop.launch.py inference_enable:=true`: `yolo26n.engine` averages 20.9 ms on `/diagnostics` against the fp32 model's 50.1 ms under the same load, with boxes matching fp32 to within a pixel or two at slightly higher scores. Standalone at 640: inference 35.5 -> 12.7 ms, end-to-end 39.6 -> 19.5 ms (25.2 -> 51.2 fps). The 640 build took 471.6 s.

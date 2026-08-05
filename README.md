@@ -267,6 +267,8 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
 Setup also installs the student side into `~/jupyter_ws/neoracer-os`: the `racecar-neo-library` and the NeoRacer labs, from the Neobotics forks. That library carries `rc.slam` / `rc.nav` and the FlySky auto-start fix. The FlySky RC has no START button, so `rc.go()` enters your program without one; the upstream MIT library waits for the Xbox START.
 
+The `rc.*` API matches MIT's RACECAR Neo, so a lab written for either car runs on the other. Four capabilities have no hardware here and raise `NotImplementedError` naming the missing part rather than returning a placeholder: `rc.camera.get_depth_image()` (monocular webcam, no depth sensor), `rc.physics.get_battery_current()` (no current shunt), `rc.led.*` (no addressable strip), and `rc.display.set_matrix()` / `get_matrix()` / `set_matrix_intensity()` (the 8x8 panel takes text only; `show_text()` works). Topic-level detail is in [docs/architecture.md](docs/architecture.md#topic-contract).
+
 ```sh
 racecar library --list             # valid folders in ~/jupyter_ws
 racecar library --select <folder>  # choose which library is on the Python path

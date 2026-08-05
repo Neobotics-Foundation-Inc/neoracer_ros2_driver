@@ -5,8 +5,9 @@
 ROS 2 Humble driver for the Neoracer (1/12 scale, Jetson Orin Nano). One ESP32
 serial bridge carries the IMU, wheel odometry, FlySky RC receiver, and motor
 ESC; a software pipeline arbitrates manual and autonomy drive commands; a lidar,
-camera, and 8x8 display round out the stack. Published topics match the Neobotics
-student-library contract.
+camera, and 8x8 display round out the stack. Published topics match the topic
+contract of `MITRacecarNeo/racecar_neo_ros2_driver`, the reference platform, so
+one student library serves both cars; see [Topic contract](#topic-contract).
 
 ## Components
 
@@ -49,6 +50,32 @@ student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
   scalar `/encoder/speed`, `/battery/voltage`, `/rc/channels`.
 - Weights: `share/neoracer_ros2_driver/models/`, searched before the working
   directory and before Ultralytics' own cache (inference_lib.resolve_model_path).
+
+## Topic contract
+
+`MITRacecarNeo/racecar_neo_ros2_driver` is the authority on topic names. The
+student library (`Neobotics-Foundation-Inc/racecar-neo-library`) subscribes to
+that set, so any name this driver invents costs portability. The two platforms
+run different hardware behind identical names:
+
+| Topic | Reference source | NeoRacer source |
+| --- | --- | --- |
+| `/camera/color` | RealSense D435i color, remapped | USB webcam, JPEG-in-Image |
+| `/imu/fused` | `imu_fusion_node` blending D435i and LSM9DS1 | ESP32 IMU, single source |
+| `/mag`, `/encoder/speed`, `/battery/voltage`, `/rc/channels` | `pit_node` from the Teensy | `controller` from the ESP32 |
+| `/edgetpu/inference` | Coral EdgeTPU, tflite | Orin iGPU, YOLO through TensorRT |
+| `/dotmatrix/text` | MAX7219 chain, 24x8 | USB-UART 8x8 panel |
+| `/scan`, `/joy`, `/drive`, `/motor`, `/mux_out`, `/gamepad_drive` | same | same |
+
+Four reference topics have no NeoRacer hardware behind them, so nothing
+publishes them and the matching library method raises `NotImplementedError`
+naming the missing part: `/camera/depth` (no depth camera), `/battery/current`
+(no current shunt), `/led/pixels` (no addressable strip), and
+`/dotmatrix/pixels` (the panel firmware takes text only).
+
+`/odom`, `/odometry/filtered`, `/map`, `/plan`, and `/cmd_vel` are NeoRacer
+additions with no reference counterpart. They serve the SLAM and Nav2 layer
+(`rc.slam`, `rc.nav`) that the reference platform does not carry.
 
 ## GPU stack
 
