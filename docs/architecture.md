@@ -79,13 +79,14 @@ additions with no reference counterpart. They serve the SLAM and Nav2 layer
 
 ## GPU stack
 
-`inference_node` is the one driver node that uses the GPU, and it is off by
-default in `teleop.launch.py`; every other node runs without it. The stack is
+`inference_node` is the one driver node that uses the GPU. It is part of the
+default teleop stack, so the GPU is held for the life of that stack; disable it
+with `inference_enable:=false` to get the memory back. The stack is
 installed by `scripts/setup_ml.sh` into the user site so the systemd units (which
 run as the same user) can import it.
 
 ```
-.pt weights -> ultralytics -> ONNX -> TensorRT builder -> .engine (board-specific)
+.pt weights -> ultralytics -> ONNX -> TensorRT builder -> .engine (config-specific)
                     |                                          |
                 torch/CUDA                              runtime inference
                 (training, eager inference)             (deployment)
@@ -93,7 +94,10 @@ run as the same user) can import it.
 
 TensorRT comes from JetPack; PyTorch and torchvision come from the jetson-ai-lab
 index for the image's CUDA version, because the PyPI aarch64 builds do not target
-Tegra. Engines are not portable across boards or TensorRT versions.
+Tegra. An engine is tied to its GPU, TensorRT version, and platform; the
+committed one covers the fleet's stock configuration (SM 8.7, TensorRT
+10.3.0.30, JetPack L4T R36.4.3). A car outside it falls back to the `.pt`
+rather than failing, and logs that it did.
 
 ## Constraints
 

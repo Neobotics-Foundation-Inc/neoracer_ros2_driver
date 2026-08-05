@@ -5,9 +5,24 @@ Drop point for the weights `inference_node` loads. `config/inference.yaml` sets
 `share/neoracer_ros2_driver/models/`), then in the working directory, and
 finally handed to Ultralytics, which fetches its own stock names into a cache.
 
-`.pt` weights are committed, so a fresh clone can run inference without a
-download. The `.onnx` export intermediate and the per-car `.engine` are not:
-`.gitignore` excludes both, and an engine only runs on the board that built it.
+`.pt` weights and the TensorRT `.engine` are both committed, so a fresh clone
+runs inference at full speed without a download and without an eight-minute
+build. The `.onnx` export intermediate is not; it is reproducible from the `.pt`
+and only exists on the way to an engine.
+
+The committed engine is built for the fleet's stock configuration:
+
+| | |
+|---|---|
+| GPU | Orin, compute capability 8.7 |
+| TensorRT | 10.3.0.30 (CUDA 12.5) |
+| JetPack | L4T R36.4.3 |
+
+Every car in the fleet shares that configuration, which is why one engine
+serves all of them. A car that has drifted from any row cannot deserialize the
+file. Nothing breaks quietly when that happens: `inference_node` falls back to
+`yolo26n.pt` beside it, logs a `WARN` naming the reason, and keeps publishing
+at roughly 2.4x the latency until somebody runs `racecar compile` there.
 
 A stock name that is not here downloads on first run into the process's working
 directory, which under systemd is whatever the unit happens to start in. Fetch
@@ -20,9 +35,11 @@ python3 -c "from ultralytics import YOLO; YOLO('yolo26n.pt')"
 
 ## TensorRT export
 
-An engine is built from a `.pt` on the car that will run it, against the
-TensorRT and GPU it will run on. It is not portable to another board, another
-JetPack, or another Ultralytics version, so rebuild after any of those move.
+An engine is built from a `.pt` against the TensorRT version and GPU it will
+run on. It carries across cars that match the configuration in the table above,
+which is why the fleet ships one. It does not carry across a different board, a
+different JetPack, or a different Ultralytics version, so rebuild and recommit
+after any of those move.
 
 ```sh
 racecar service stop

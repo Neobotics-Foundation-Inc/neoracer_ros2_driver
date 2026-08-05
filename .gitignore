@@ -48,8 +48,10 @@ COLCON_IGNORE
 # Local-only configuration overrides
 neoracer_ros2_driver/config/*.local.yaml
 
-# Model artifacts. .pt weights are committed so a fresh clone can run inference
-# without a download. The ONNX is an export intermediate, and an .engine is
-# built against one board's GPU and TensorRT; neither is portable or shared.
+# Model artifacts. .pt weights and the .engine are committed so a fresh clone
+# runs inference at full speed without a what is close to eight-minute build.
+# The engine is valid only for this fleet's exact configuration: SM 8.7 (Orin),
+# TensorRT 10.3.0.30, JetPack L4T R36.4.3. A car that drifts from any of those
+# cannot deserialize it and falls back to the .pt; see models/README.md.
+# The ONNX is only an export intermediate, so it stays out.
 models/*.onnx
-models/*.engine
