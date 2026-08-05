@@ -5,6 +5,16 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+### Added
+- `racecar compile [model]`: TensorRT export as one command. With no argument it reads `model_path` and `imgsz` from `config/inference.yaml`, so the engine is built at the size it will be served at; a bare filename resolves in `models/`, and the engine is placed there whatever the source path. `--imgsz=`, `--device=`, and `--no-half` override the export, `--force` rebuilds over an existing engine. Refuses to start while teleop or autonomy is running, since the builder peaks near 3 GB of the Orin's 8 GB and the stack is already holding half of it.
+
+### Changed
+- `models/*.pt` is committed rather than gitignored, so a fresh clone runs inference without a download. The ONNX intermediate and the `.engine` stay ignored: an engine is built against one board's GPU and TensorRT and does not load on another, so each car still builds its own with `racecar compile`.
+- `config/inference.yaml` defaults to `yolo26n.pt`, which every clone has. Point it at `yolo26n.engine` per car after compiling; the engine is 2.4x faster in service but cannot be a committed default while it stays per-car.
+- TensorRT validated on-car through `teleop.launch.py inference_enable:=true`: `yolo26n.engine` averages 20.9 ms on `/diagnostics` against the fp32 model's 50.1 ms under the same load, with boxes matching fp32 to within a pixel or two at slightly higher scores. Standalone at 640: inference 35.5 -> 12.7 ms, end-to-end 39.6 -> 19.5 ms (25.2 -> 51.2 fps). The 640 build took 471.6 s.
+- README benchmark table re-measured on YOLO26n, replacing the YOLO11n figures, and split into idle and full-stack columns since the two differ by more than the backend does.
+- Export documentation in `README.md` and `models/README.md` leads with `racecar compile` and keeps the raw `yolo export` line as the manual equivalent; both switch from `yolo11n` to `yolo26n`.
+
 ## [0.3.1] - 2026-08-04
 
 Puts the 0.3.0 GPU stack to work: a detection node turns camera frames into
