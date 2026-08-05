@@ -102,11 +102,12 @@ fi
 # ---------------------------------------------------------------------------
 # Student library + labs.
 # ---------------------------------------------------------------------------
-# Two Neobotics repos supply the student side. The racecar-neo library fork is
-# pinned to the neobotics-slam-nav branch, which carries the FlySky auto-start
-# fix (go() enters user program mode without a START button - the FlySky RC has
-# none, unlike the Xbox pad the upstream MIT library assumes) plus rc.slam and
-# rc.nav. The labs come from neoracer-labs. Assemble both into
+# Two Neobotics repos supply the student side. The racecar-neo library fork
+# tracks main, which carries the FlySky auto-start fix (go() enters user program
+# mode without a START button - the FlySky RC has none, unlike the Xbox pad the
+# upstream MIT library assumes) plus rc.slam and rc.nav. That work landed on
+# main in v0.3.2; the old neobotics-slam-nav branch it used to name is gone.
+# The labs come from neoracer-labs. Assemble both into
 # ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
 # library so notebooks can `import racecar_core`. Re-running refreshes both; a
 # fetch failure aborts setup rather than leaving a half-installed library.
