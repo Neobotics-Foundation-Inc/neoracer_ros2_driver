@@ -8,6 +8,8 @@ Type=exec
 User=racecar
 Group=racecar
 ExecStart=/bin/bash -c '\
+    source /opt/ros/humble/setup.bash && \
+    source /home/racecar/ros2_ws/install/setup.bash && \
     LOG_DIR="$(readlink -f /home/racecar/logs/latest 2>/dev/null || echo /home/racecar/logs)"; \
     mkdir -p "$LOG_DIR"; \
     exec /home/racecar/.local/bin/jupyter lab \
@@ -20,10 +22,10 @@ ExecStart=/bin/bash -c '\
         2>&1 | tee -a "$LOG_DIR/jupyter.log"'
 Restart=on-failure
 RestartSec=5
+# The ROS environment comes from setup.bash, as in the dashboard and watchdog
+# units. Hardcoding it missed /opt/ros/humble/local/lib/python3.10/dist-packages,
+# where rclpy actually lives, so notebooks could not import it.
 Environment=HOME=/home/racecar
-Environment=PYTHONPATH=/opt/ros/humble/lib/python3.10/site-packages:/home/racecar/ros2_ws/install/neoracer_ros2_driver/lib/python3.10/site-packages
-Environment=AMENT_PREFIX_PATH=/home/racecar/ros2_ws/install/neoracer_ros2_driver:/opt/ros/humble
-Environment=LD_LIBRARY_PATH=/opt/ros/humble/lib/aarch64-linux-gnu:/opt/ros/humble/lib
 WorkingDirectory=/home/racecar/jupyter_ws
 
 [Install]

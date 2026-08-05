@@ -9,11 +9,15 @@ IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
 - subscribes to ``/motor`` (ackermann_msgs/AckermannDriveStamped, normalized
   [-1, 1]) from the throttle node and writes the firmware drive command
   ``v <speed_mps> <steer_deg>``,
-- publishes ``/imu`` (sensor_msgs/Imu) and ``/odom`` (nav_msgs/Odometry) parsed
-  from the board, and
+- publishes ``/imu/fused`` (sensor_msgs/Imu), ``/odom`` (nav_msgs/Odometry),
+  ``/mag`` (sensor_msgs/MagneticField), and ``/battery``
+  (sensor_msgs/BatteryState) parsed from the board,
 - publishes ``/joy`` (sensor_msgs/Joy) synthesized from the FlySky RC channels,
   so the same software pipeline (gamepad -> mux -> throttle) and the student
-  controller API both work without a USB gamepad.
+  controller API both work without a USB gamepad, and
+- republishes ``/encoder/speed``, ``/battery/voltage`` (std_msgs/Float32) and
+  ``/rc/channels`` (std_msgs/Float32MultiArray), the scalar sensor topics
+  ``rc.physics`` reads on the racecar_neo platform.
 
 The exact FlySky channel order depends on the transmitter mixer and is exposed
 entirely as ROS parameters (see config/controller.yaml) for on-car tuning.
@@ -29,6 +33,7 @@ from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 # ===== IMPORT ROS2 MESSAGE TYPES =====
 from sensor_msgs.msg import BatteryState, Imu, Joy, MagneticField
+from std_msgs.msg import Float32, Float32MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
@@ -93,8 +98,9 @@ class ControllerNode(Node):
         # (the vendor chassis node broadcast it the same way).
         self.publish_tf = self.declare_parameter('publish_tf', True).value
 
-        # Optional magnetometer publication (the student library does not use it).
-        self.publish_mag = self.declare_parameter('publish_mag', False).value
+        # /mag feeds rc.physics.get_magnetic_field(); off only on a car
+        # whose firmware does not emit the `m` frame.
+        self.publish_mag = self.declare_parameter('publish_mag', True).value
         self.publish_joy = self.declare_parameter('publish_joy', True).value
 
         # FlySky RC -> Joy mapping (all tunable on-hardware; see config/controller.yaml).
@@ -117,15 +123,26 @@ class ControllerNode(Node):
             qos_profile_sensor_data)
 
         # ===== SET UP PUBLISHERS =====
-        # /imu and /odom are RELIABLE: the EKF (robot_localization) and the
+        # /imu/fused and /odom are RELIABLE: the EKF (robot_localization) and the
         # complementary filter subscribe reliable, and a reliable publisher
         # still satisfies every BEST_EFFORT subscriber (student library,
         # dashboard, rviz).
-        self.imu_pub = self.create_publisher(Imu, '/imu', 10)
+        self.imu_pub = self.create_publisher(Imu, '/imu/fused', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
         self.battery_pub = self.create_publisher(
             BatteryState, '/battery', qos_profile_sensor_data)
+        # The scalar racecar_neo sensor topics the student library reads. They
+        # carry no information /battery, /odom, and /joy do not already hold;
+        # they exist so rc.physics reads the same names on both platforms.
+        # /battery/current has no counterpart: the OSRbot base has no current
+        # shunt, so nothing publishes it and rc.physics raises there.
+        self.voltage_pub = self.create_publisher(
+            Float32, '/battery/voltage', qos_profile_sensor_data)
+        self.encoder_pub = self.create_publisher(
+            Float32, '/encoder/speed', qos_profile_sensor_data)
+        self.rc_pub = self.create_publisher(
+            Float32MultiArray, '/rc/channels', qos_profile_sensor_data)
         self._unknown_tags = set()
         # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
         # connects; BEST_EFFORT pipeline subscribers accept a reliable publisher.
@@ -232,12 +249,16 @@ class ControllerNode(Node):
             # V1.1 firmware state frame carries both sensor sets.
             self.pub_imu(data)
             self.pub_odom(data)
+            self.pub_encoder(data)
         elif tag == 'i':
             self.pub_imu(data)
         elif tag == 'o':
             self.pub_odom(data)
-        elif tag == 'r' and self.joy_pub is not None:
-            self.pub_joy(data)
+            self.pub_encoder(data)
+        elif tag == 'r':
+            if self.joy_pub is not None:
+                self.pub_joy(data)
+            self.pub_rc(data)
         elif tag == 'm' and self.mag_pub is not None:
             self.pub_mag(data)
         elif tag == 'b':
@@ -255,6 +276,14 @@ class ControllerNode(Node):
         msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
         msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
         self.battery_pub.publish(msg)
+        self.voltage_pub.publish(Float32(data=volts))
+
+    def pub_encoder(self, data):
+        """Publish forward speed (m/s) from a parsed state or odometry record."""
+        # Signed body-frame x velocity, so reverse reads negative. The OSRbot
+        # firmware integrates this from the same wheel encoder the Teensy
+        # reports on the reference platform.
+        self.encoder_pub.publish(Float32(data=float(data['v_x'])))
 
     def pub_imu(self, data):
         """Publish an Imu message from a parsed ``i`` record."""
@@ -325,6 +354,14 @@ class ControllerNode(Node):
         joy_msg.axes = [float(a) for a in axes]
         joy_msg.buttons = [int(b) for b in buttons]
         self.joy_pub.publish(joy_msg)
+
+    def pub_rc(self, data):
+        """Publish the raw FlySky channels from an ``r`` record, normalized."""
+        # The student library reads the first eight; publishing all ten keeps
+        # the aux switches reachable through `ros2 topic echo` while mapping them.
+        msg = Float32MultiArray()
+        msg.data = controller_lib.rc_to_channels(data['channels'], self._joy_cfg)
+        self.rc_pub.publish(msg)
 
     def pub_mag(self, data):
         """Publish a MagneticField message (Gauss -> Tesla) from an ``m`` record."""

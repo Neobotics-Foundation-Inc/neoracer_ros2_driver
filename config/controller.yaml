@@ -23,7 +23,7 @@ controller_node:
     # service (robot_localization fusing /odom + IMU). Turn this on only if
     # the autonomy service is disabled and something still needs raw-odom TF.
     publish_tf: false
-    publish_mag: false          # firmware emits "m"; student library ignores it
+    publish_mag: true           # firmware emits "m"; feeds rc.physics.get_magnetic_field()
     publish_joy: true           # synthesize /joy from the FlySky "r" channels
 
     # ================= FlySky RC -> /joy mapping =================

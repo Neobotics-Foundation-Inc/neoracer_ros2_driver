@@ -17,7 +17,7 @@ with the teleop nodes on the same devices.
   twist_bridge         /cmd_vel -> normalized /drive into the mux, so SWB
                        manual override and the throttle caps still apply
   EKF                  imu_complementary_filter + robot_localization fusing
-                       /odom + /imu; owns the odom -> base_footprint TF and
+                       /odom + /imu/fused; owns the odom -> base_footprint TF and
                        publishes the real /odometry/filtered
   osracer_slam         opt-in (slam:=true); `racecar mapping` is the front door
   osracer_navigation   opt-in (nav:=true); `racecar navigation` is the front door
@@ -106,7 +106,7 @@ def generate_launch_description():
         name='complementary_filter_gain_node',
         output='screen',
         remappings=[
-            ('imu/data_raw', 'imu'),
+            ('imu/data_raw', '/imu/fused'),
             ('imu/data', 'imu_filter'),
         ],
         parameters=[{

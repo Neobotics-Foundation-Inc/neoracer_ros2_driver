@@ -5,7 +5,7 @@ USB-UART bridge for the Neoracer's 8x8 dot-matrix display.
 
 The panel is driven by a small firmware that renders (and auto-scrolls) ASCII
 text received over a serial link. This node is a thin passthrough: it subscribes
-to ``/led_matrix/command`` (std_msgs/String) - the topic the student library's
+to ``/dotmatrix/text`` (std_msgs/String) - the topic the student library's
 ``display.show_text()`` publishes to - and writes each message to the serial
 port, appending a newline so the firmware knows the line is complete.
 
@@ -20,7 +20,7 @@ import serial
 
 
 class LedMatrixNode(Node):
-    """Forward ``/led_matrix/command`` strings to the USB-UART 8x8 display."""
+    """Forward ``/dotmatrix/text`` strings to the USB-UART 8x8 display."""
 
     def __init__(self):
         super().__init__('led_matrix_node')
@@ -30,7 +30,7 @@ class LedMatrixNode(Node):
         self.port = self.declare_parameter('port', '/dev/osrbot_led_matrix').value
         self.baud = self.declare_parameter('baud', 115200).value
         self.input_topic = self.declare_parameter(
-            'input_topic', '/led_matrix/command').value
+            'input_topic', '/dotmatrix/text').value
         self.append_newline = self.declare_parameter('append_newline', True).value
 
         try:

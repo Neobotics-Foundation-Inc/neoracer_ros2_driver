@@ -381,7 +381,7 @@ __RC_COMPILE__
             done
             case "$target" in
                 led)
-                    ros2 topic pub --once /led_matrix/command std_msgs/String "{data: ' '}"
+                    ros2 topic pub --once /dotmatrix/text std_msgs/String "{data: ' '}"
                     ;;
                 "")
                     echo "usage: racecar clear --led" >&2
@@ -856,8 +856,8 @@ __RC_CLEANUP_HELP__
                         echo "Start it first: racecar launch led_matrix" >&2
                         return 3
                     fi
-                    ros2 topic pub --once /led_matrix/command std_msgs/String "{data: '$text'}"
-                    echo "Sent '$text' to /led_matrix/command."
+                    ros2 topic pub --once /dotmatrix/text std_msgs/String "{data: '$text'}"
+                    echo "Sent '$text' to /dotmatrix/text."
                     ;;
                 "")
                     cat <<'__RC_SELFTEST_HELP__' >&2

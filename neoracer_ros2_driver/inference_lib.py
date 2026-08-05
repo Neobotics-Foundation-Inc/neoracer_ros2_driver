@@ -66,6 +66,22 @@ def resolve_model_path(model, search_dirs):
     return model
 
 
+def fallback_weights(model):
+    """
+    Return the ``.pt`` beside a TensorRT ``.engine``, or ``None``.
+
+    A serialized engine is valid only for the GPU, TensorRT version, and
+    platform it was built against. The committed engine covers the fleet's
+    stock configuration, but a car that has drifted from it cannot deserialize
+    the file at all. Naming the portable weights next to it lets the node run
+    slower rather than not at all.
+    """
+    if not model or os.path.splitext(model)[1] != '.engine':
+        return None
+    candidate = os.path.splitext(model)[0] + '.pt'
+    return candidate if os.path.exists(candidate) else None
+
+
 def box_to_center_size(xyxy, img_w, img_h):
     """
     Convert a pixel-space ``[x1, y1, x2, y2]`` box to ``(cx, cy, w, h)``.

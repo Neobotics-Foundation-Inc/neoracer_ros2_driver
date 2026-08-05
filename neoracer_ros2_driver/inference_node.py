@@ -3,17 +3,25 @@
 """
 Run camera frames through a YOLO model and publish the detections.
 
-Subscribes to ``/camera`` (the driver's native MJPG passthrough,
+Subscribes to ``/camera/color`` (the driver's native MJPG passthrough,
 ``encoding = 'jpeg'``) and publishes ``vision_msgs/Detection2DArray`` on
-``/detections``, so student code and any downstream perception node read boxes
-from the graph instead of each re-running a detector on the same frames.
+``/edgetpu/inference``, so student code and any downstream perception node
+read boxes from the graph instead of each re-running a detector on the same
+frames.
 
 The model runs through Ultralytics on the Orin's integrated GPU. Both weight
 formats it loads are useful here: a ``.pt`` file runs anywhere and is what a
-freshly trained model comes out as, while a TensorRT ``.engine`` exported by
-``yolo export format=engine`` runs several times faster. Engines are built for
-one board and one TensorRT version, so ``models/`` is a per-car drop point
-rather than something the repository carries.
+freshly trained model comes out as, while a TensorRT ``.engine`` runs several
+times faster. The repository carries both, and the engine is the default: it is
+built for the fleet's stock configuration (SM 8.7, TensorRT 10.3.0.30, JetPack
+L4T R36.4.3), which every car shares.
+
+An engine is valid only for the GPU, TensorRT version, and platform it was
+built on, so a car that has drifted from that configuration cannot use the
+committed one. Rather than leaving such a car with no detections, the node
+falls back to the ``.pt`` beside it and logs what happened. Ultralytics defers
+deserialization to the first inference, so that failure surfaces during warmup
+rather than at load; both routes go through ``_use_fallback``.
 
 Inference is slower than the 60 fps camera, so the subscription keeps a depth-1
 best-effort queue: while a frame is in the model the middleware holds only the
@@ -83,12 +91,12 @@ class InferenceNode(Node):
         self.declare_parameter('class_filter', rclpy.Parameter.Type.INTEGER_ARRAY)
         self.class_filter = self.get_parameter_or('class_filter').value or None
 
-        image_topic = self.declare_parameter('image_topic', '/camera').value
-        det_topic = self.declare_parameter('detections_topic', '/detections').value
+        image_topic = self.declare_parameter('image_topic', '/camera/color').value
+        det_topic = self.declare_parameter('detections_topic', '/edgetpu/inference').value
         max_rate = self.declare_parameter('max_rate_hz', 15.0).value
         self.publish_annotated = self.declare_parameter('publish_annotated', False).value
         annotated_topic = self.declare_parameter(
-            'annotated_topic', '/detections/image').value
+            'annotated_topic', '/edgetpu/inference/image').value
         self.annotated_quality = self.declare_parameter('annotated_quality', 80).value
         diag_period = self.declare_parameter('diagnostics_period_sec', 1.0).value
         self.image_timeout = self.declare_parameter('image_timeout_sec', 5.0).value
@@ -135,6 +143,11 @@ class InferenceNode(Node):
             os.getcwd(),
         ]
         resolved = il.resolve_model_path(model_path, search_dirs)
+        # A serialized engine is only valid for the GPU, TensorRT version, and
+        # platform it was built on. Ultralytics does not deserialize it until
+        # the first predict, so an unusable engine surfaces in warmup rather
+        # than here; both paths route through _use_fallback.
+        self._fallback = il.fallback_weights(resolved)
 
         try:
             model = load_yolo(resolved)
@@ -144,14 +157,40 @@ class InferenceNode(Node):
                 'run `racecar setup ml` to install the GPU stack.')
             raise SystemExit(1)
         except Exception as exc:  # noqa: BLE001 - ultralytics raises bare Exception
-            self.get_logger().fatal(
-                f'[FATAL] Could not load model {resolved}: {exc}')
-            raise SystemExit(1)
+            if not self._use_fallback(f'could not load {resolved}: {exc}'):
+                self.get_logger().fatal(
+                    f'[FATAL] Could not load model {resolved}: {exc}')
+                raise SystemExit(1)
+            return self.model
 
         self.get_logger().info(
             f'[INFO] Model {os.path.basename(resolved)} on device {self.device} '
             f'(imgsz {self.imgsz}, threshold {self.score_threshold})')
         return model
+
+    def _use_fallback(self, reason):
+        """
+        Swap to the portable ``.pt`` beside a failed ``.engine``.
+
+        Returns True when the swap happened. The committed engine covers the
+        fleet's stock configuration; a car that has drifted from it should run
+        slower rather than not at all, and say so loudly enough that somebody
+        rebuilds it.
+        """
+        fallback = getattr(self, '_fallback', None)
+        if fallback is None:
+            return False
+        self._fallback = None  # one attempt only
+        self.get_logger().warn(
+            f'[WARN] TensorRT engine unusable on this car ({reason}); '
+            f'falling back to {os.path.basename(fallback)} at roughly 2.4x the '
+            'latency. Rebuild the engine here with `racecar compile`.')
+        try:
+            self.model = load_yolo(fallback)
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().fatal(f'[FATAL] Fallback {fallback} failed: {exc}')
+            raise SystemExit(1)
+        return True
 
     def _warmup(self):
         """
@@ -166,8 +205,16 @@ class InferenceNode(Node):
         try:
             self._predict(blank)
         except Exception as exc:  # noqa: BLE001
-            self.get_logger().fatal(f'[FATAL] Warmup inference failed: {exc}')
-            raise SystemExit(1)
+            if not self._use_fallback(f'warmup inference failed: {exc}'):
+                self.get_logger().fatal(f'[FATAL] Warmup inference failed: {exc}')
+                raise SystemExit(1)
+            t0 = time.monotonic()
+            try:
+                self._predict(blank)
+            except Exception as exc2:  # noqa: BLE001
+                self.get_logger().fatal(
+                    f'[FATAL] Warmup failed on the fallback weights too: {exc2}')
+                raise SystemExit(1)
         self.get_logger().info(
             f'[INFO] Warmup done in {(time.monotonic() - t0) * 1000:.0f} ms')
 

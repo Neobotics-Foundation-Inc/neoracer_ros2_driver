@@ -174,3 +174,25 @@ def test_build_detections_empty_result():
         img_h=480,
     )
     assert dets == []
+
+
+# ---------- fallback_weights ----------
+
+def test_fallback_weights_finds_sibling_pt(tmp_path):
+    (tmp_path / 'yolo26n.pt').write_bytes(b'x')
+    engine = tmp_path / 'yolo26n.engine'
+    engine.write_bytes(b'x')
+    assert il.fallback_weights(str(engine)) == str(tmp_path / 'yolo26n.pt')
+
+
+def test_fallback_weights_none_without_sibling(tmp_path):
+    engine = tmp_path / 'yolo26n.engine'
+    engine.write_bytes(b'x')
+    assert il.fallback_weights(str(engine)) is None
+
+
+def test_fallback_weights_only_applies_to_engine(tmp_path):
+    (tmp_path / 'yolo26n.pt').write_bytes(b'x')
+    assert il.fallback_weights(str(tmp_path / 'yolo26n.pt')) is None
+    assert il.fallback_weights('') is None
+    assert il.fallback_weights(None) is None

@@ -128,3 +128,23 @@ def test_rc_to_joy_aux_buttons():
     cfg = dict(DEFAULT_CFG, aux_button_channels=[6], aux_button_indices=[0])
     _, buttons = cl.rc_to_joy(_channels(**{'6': 2000}), cfg)
     assert buttons[0] == 1
+
+
+# ---------- rc_to_channels ----------
+
+def test_rc_to_channels_preserves_firmware_order_and_length():
+    # Centered stick reads 0.0; full deflection reads +-1.0, in channel order.
+    out = cl.rc_to_channels(_channels(**{'0': 2000, '9': 1000}), DEFAULT_CFG)
+    assert len(out) == 10
+    assert out[0] == 1.0
+    assert out[9] == -1.0
+    assert all(v == 0.0 for v in out[1:9])
+
+
+def test_rc_to_channels_failsafe_is_neutral():
+    assert cl.rc_to_channels([-1] * 10, DEFAULT_CFG) == [0.0] * 10
+
+
+def test_rc_to_channels_empty_and_none():
+    assert cl.rc_to_channels(None, DEFAULT_CFG) == []
+    assert cl.rc_to_channels([], DEFAULT_CFG) == []

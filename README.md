@@ -45,28 +45,30 @@ FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/
                           │                                                ├──> mux_node ──/mux_out──> throttle_node ──/motor──┐
                           │        student library / Nav2 ──────/drive─────┘   (FlySky switch: idle | manual | autonomy)       │
                           │                                                                                                   │
-                          └──> /imu, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
+                          └──> /imu/fused, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
 
 LakiBeam1 ──(UDP)──> lakibeam1_scan_node ──/scan
-USB webcam ────────> camera ──/camera  (JPEG-in-Image) ──> inference_node ──/detections
+USB webcam ────────> camera ──/camera/color  (JPEG-in-Image) ──> inference_node ──/edgetpu/inference
 Nav2 ──/cmd_vel──> twist_bridge ──/drive
-student library ──/led_matrix/command──> led_matrix ──(USB-UART)──> 8×8 display
+student library ──/dotmatrix/text──> led_matrix ──(USB-UART)──> 8×8 display
 ```
 
 Published topics:
 
-- `/imu` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery`: from the ESP32 V1.1 firmware state frame
+- `/imu/fused` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery`: from the ESP32 V1.1 firmware state frame
 - `/joy` (sensor_msgs/Joy): synthesized from FlySky RC channels
+- `/mag` (sensor_msgs/MagneticField): ESP32 magnetometer, Gauss converted to Tesla
+- `/encoder/speed`, `/battery/voltage` (std_msgs/Float32), `/rc/channels` (std_msgs/Float32MultiArray): the scalar racecar_neo sensor topics the student library's `rc.physics` reads. Same data as `/odom`, `/battery`, and `/joy`, under the names the reference platform publishes
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
-- `/camera` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
-- `/detections` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera`, stamped with that frame's header. Off by default; see [Object detection](#object-detection).
+- `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
+- `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. On by default; see [Object detection](#object-detection).
 
 The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) enforces speed caps, arming, and manual/autonomy arbitration, so RC driving and autonomous code share one speed-limited path. A 3-position FlySky switch selects **idle / manual / autonomy**, mapped to the `/joy` buttons the mux reads. Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
 Safety and uptime layers:
 
 - **Mux** gates commands behind the arming switch and zeroes output when the RC link drops.
-- **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu` and `/scan` freshness.
+- **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
 - **Five systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter,autonomy}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down.
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
 
@@ -265,6 +267,8 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
 Setup also installs the student side into `~/jupyter_ws/neoracer-os`: the `racecar-neo-library` and the NeoRacer labs, from the Neobotics forks. That library carries `rc.slam` / `rc.nav` and the FlySky auto-start fix. The FlySky RC has no START button, so `rc.go()` enters your program without one; the upstream MIT library waits for the Xbox START.
 
+The `rc.*` API matches MIT's RACECAR Neo, so a lab written for either car runs on the other. Four capabilities have no hardware here and raise `NotImplementedError` naming the missing part rather than returning a placeholder: `rc.camera.get_depth_image()` (monocular webcam, no depth sensor), `rc.physics.get_battery_current()` (no current shunt), `rc.led.*` (no addressable strip), and `rc.display.set_matrix()` / `get_matrix()` / `set_matrix_intensity()` (the 8x8 panel takes text only; `show_text()` works). Topic-level detail is in [docs/architecture.md](docs/architecture.md#topic-contract).
+
 ```sh
 racecar library --list             # valid folders in ~/jupyter_ws
 racecar library --select <folder>  # choose which library is on the Python path
@@ -331,15 +335,18 @@ Two things worth knowing before training on the car:
 
 ## Object detection
 
-`inference_node` runs the frames from `/camera` through a YOLO model and publishes `vision_msgs/Detection2DArray` on `/detections`. Detection happens once, on the graph, so several consumers can read the same boxes instead of each holding its own copy of a model.
+`inference_node` runs the frames from `/camera/color` through a YOLO model and publishes `vision_msgs/Detection2DArray` on `/edgetpu/inference`. Detection happens once, on the graph, so several consumers can read the same boxes instead of each holding its own copy of a model.
 
 ```sh
 racecar launch inference                                   # on its own
-racecar teleop inference_enable:=true                      # with the rest of the stack
-ros2 topic echo /detections
+racecar teleop                                             # with the rest of the stack (on by default)
+racecar teleop inference_enable:=false                     # without it
+ros2 topic echo /edgetpu/inference
 ```
 
-It is the only subsystem in `teleop.launch.py` that defaults to **off**: the model holds GPU memory for the life of the stack, and a car whose student code never reads `/detections` should not pay for it.
+It defaults to **on** in `teleop.launch.py`, so detections are on the graph without a launch argument. It is still the most expensive subsystem: the model holds GPU memory for the life of the stack. Launch with `inference_enable:=false` on a car whose student code never reads `/edgetpu/inference`, or to free the GPU for a `racecar compile` build.
+
+The node exits at startup if `racecar setup ml` has never run on the car (it logs `ultralytics is not importable`). The rest of the stack comes up regardless; only the detection card goes red.
 
 Each `Detection2D` carries a `bbox` in pixels (`center.position` and `size_x`/`size_y`, origin top-left) and one `results` entry with the class name and score. Class names come out of the weights, so a model trained on your own dataset publishes your own labels with no separate labels file:
 
@@ -358,7 +365,7 @@ Settings live in `config/inference.yaml`:
 | `max_detections` | 10 | Cap per frame |
 | `class_filter` | all | Class indices to keep, e.g. `[0, 2]`; omit the key for every class |
 | `max_rate_hz` | 15.0 | Ceiling on inference rate |
-| `publish_annotated` | false | Overlay on `/detections/image`, encoded only while subscribed |
+| `publish_annotated` | false | Overlay on `/edgetpu/inference/image`, encoded only while subscribed |
 
 Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo26n.pt` averages 50.1 ms per frame; the TensorRT engine cuts that to 20.9 ms, which clears the `max_rate_hz` ceiling of 15 Hz with headroom to spare.
 
@@ -411,11 +418,11 @@ racecar launch inference
 racecar launch autonomy
 ```
 
-Any subsystem can be toggled at launch. `lidar`, `camera`, and `led_matrix` default to on; `inference` defaults to off:
+Any subsystem can be toggled at launch. `lidar`, `camera`, `led_matrix`, and `inference` all default to on:
 
 ```sh
 ros2 launch neoracer_ros2_driver teleop.launch.py camera_enable:=false
-ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=true
+ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=false
 ```
 
 The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
@@ -430,9 +437,9 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **Car won't drive.** The mux only forwards commands when the FlySky switch arms manual or autonomy mode. Verify with `ros2 topic echo /joy`. Direction and the m/s mapping are tuned in `config/controller.yaml`.
 
-**`/camera` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
+**`/camera/color` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
 
-**No `/detections`.** The node is off unless launched with `inference_enable:=true`. If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
+**No `/edgetpu/inference`.** The node is on by default; confirm it was not disabled with `inference_enable:=false`. If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
 
 **FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
 
