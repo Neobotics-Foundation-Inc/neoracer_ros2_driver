@@ -242,6 +242,135 @@ racecar() {
             ros2 launch "$pkg" "${name}.launch.py" "$@"
             ;;
 
+        compile)
+            # TensorRT export, .pt -> .engine, for inference_node. The engine is
+            # built against this board's GPU and TensorRT and is not portable;
+            # rebuild after a JetPack, Ultralytics, or hardware change.
+            local src="" imgsz="" device="0" half="True" force=0
+            local cfg="$pkg_dir/config/inference.yaml"
+            for arg in "$@"; do
+                case "$arg" in
+                    --imgsz=*)  imgsz="${arg#*=}" ;;
+                    --device=*) device="${arg#*=}" ;;
+                    --half)     half="True" ;;
+                    --no-half)  half="False" ;;
+                    --force)    force=1 ;;
+                    -h|--help)
+                        cat <<'__RC_COMPILE_HELP__'
+usage: racecar compile [model] [--imgsz=N] [--device=N] [--no-half] [--force]
+
+Exports a YOLO .pt to a TensorRT .engine. With no model, reads model_path and
+imgsz from config/inference.yaml, so the engine matches what the node loads.
+A bare filename resolves against the package's models/ directory.
+
+  racecar compile                       # whatever inference.yaml points at
+  racecar compile yolo26n.pt            # models/yolo26n.pt
+  racecar compile /path/to/custom.pt    # absolute path
+
+The build peaks near 3 GB of the Orin's 8 GB shared memory, so it refuses to
+start while the stack is running. Stop it first (racecar service stop) or pass
+--force. A nano model at 640 takes about 8 minutes on a 25 W Orin Nano.
+__RC_COMPILE_HELP__
+                        return 0
+                        ;;
+                    -*) echo "racecar compile: unknown flag '$arg'" >&2; return 2 ;;
+                    *)  src="$arg" ;;
+                esac
+            done
+
+            # Defaults come from the node's own config so the engine is built at
+            # the imgsz it will be served at; an engine is fixed to that size.
+            if [[ -z "$src" && -f "$cfg" ]]; then
+                src=$(sed -n 's/^[[:space:]]*model_path:[[:space:]]*"\?\([^"#]*\)"\?.*/\1/p' "$cfg" \
+                      | head -1 | tr -d '[:space:]')
+            fi
+            if [[ -z "$imgsz" && -f "$cfg" ]]; then
+                imgsz=$(sed -n 's/^[[:space:]]*imgsz:[[:space:]]*\([0-9]*\).*/\1/p' "$cfg" | head -1)
+            fi
+            imgsz="${imgsz:-640}"
+
+            if [[ -z "$src" ]]; then
+                echo "racecar compile: no model given and none found in $cfg" >&2
+                return 2
+            fi
+            if [[ "$src" == *.engine ]]; then
+                echo "racecar compile: '$src' is already a TensorRT engine." >&2
+                return 2
+            fi
+
+            local resolved="$src"
+            [[ "$src" != /* && "$src" != */* ]] && resolved="$pkg_dir/models/$src"
+            if [[ ! -f "$resolved" ]]; then
+                echo "racecar compile: no such file '$resolved'." >&2
+                echo "Fetch stock weights into models/ first, e.g.:" >&2
+                echo "  cd $pkg_dir/models && python3 -c \"from ultralytics import YOLO; YOLO('$src')\"" >&2
+                return 3
+            fi
+
+            local engine="${resolved%.*}.engine"
+            if [[ -f "$engine" && $force -eq 0 ]]; then
+                echo "racecar compile: $engine already exists. Pass --force to rebuild." >&2
+                return 3
+            fi
+
+            if ! python3 -c "import ultralytics" 2>/dev/null; then
+                echo "racecar compile: ultralytics is not installed. Run: racecar setup ml" >&2
+                return 3
+            fi
+
+            if [[ $force -eq 0 ]]; then
+                local busy=""
+                local unit
+                for unit in neoracer-teleop neoracer-autonomy; do
+                    systemctl is-active --quiet "$unit" 2>/dev/null && busy+="$unit "
+                done
+                if [[ -n "$busy" ]]; then
+                    echo "racecar compile: ${busy% } running; the export peaks near 3 GB." >&2
+                    echo "Stop the stack first (racecar service stop), or pass --force." >&2
+                    return 3
+                fi
+            fi
+
+            echo "Exporting $(basename "$resolved") -> $(basename "$engine")"
+            echo "  imgsz=$imgsz device=$device half=$half"
+            echo "  ONNX pass then a TensorRT builder pass; do not interrupt."
+            if ! RC_SRC="$resolved" RC_IMGSZ="$imgsz" RC_DEVICE="$device" RC_HALF="$half" \
+                 python3 - <<'__RC_COMPILE__'
+import os
+from ultralytics import YOLO
+
+YOLO(os.environ['RC_SRC'], task='detect').export(
+    format='engine',
+    imgsz=int(os.environ['RC_IMGSZ']),
+    half=os.environ['RC_HALF'] == 'True',
+    device=os.environ['RC_DEVICE'],
+)
+__RC_COMPILE__
+            then
+                echo "racecar compile: export failed." >&2
+                return 1
+            fi
+
+            if [[ ! -f "$engine" ]]; then
+                echo "racecar compile: export reported success but $engine is missing." >&2
+                return 1
+            fi
+
+            # Ultralytics writes the engine beside its source; the node looks in
+            # models/, so a model compiled from elsewhere gets placed there.
+            local models_dir="$pkg_dir/models"
+            if [[ "$(dirname "$engine")" != "$models_dir" ]]; then
+                cp "$engine" "$models_dir/" && echo "Copied to $models_dir/"
+            fi
+
+            echo
+            echo "Built $engine"
+            echo "To serve it:"
+            echo "  1. set model_path: \"$(basename "$engine")\" in config/inference.yaml"
+            echo "  2. racecar build"
+            echo "  3. racecar service start   (or: racecar launch inference)"
+            ;;
+
         clear)
             local target=""
             for arg in "$@"; do
@@ -796,6 +925,15 @@ Commands:
                         Examples: racecar launch lidar
                                   racecar launch camera
                                   racecar launch led_matrix
+    compile [model]     Export a YOLO .pt to a TensorRT .engine for inference_node.
+                        With no model, uses model_path and imgsz from
+                        config/inference.yaml. A bare name resolves in models/.
+                          --imgsz=N    override the export size (default: config)
+                          --device=N   CUDA index (default 0)
+                          --no-half    export FP32 instead of FP16
+                          --force      rebuild over an existing engine; skip the
+                                       stack-is-running guard
+                        Peaks near 3 GB; stop the stack first. ~8 min at 640.
     clear --led         Clear the 8x8 LED matrix display.
     udev                Re-install the udev rules (refreshes /dev/osrbot_* etc.).
     watchdog            Run the node watchdog (restart-on-failure supervisor).
@@ -851,14 +989,14 @@ __RC_HELP__
 }
 
 # Bash completion: subcommands at position 1, launch-file names after `launch`,
-# `--led` after `clear`.
+# weights in models/ after `compile`, `--led` after `clear`.
 _racecar_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -870,6 +1008,14 @@ _racecar_complete() {
                 names=$(cd "$launch_dir" && ls *.launch.py 2>/dev/null | sed 's/\.launch\.py$//')
                 COMPREPLY=( $(compgen -W "$names" -- "$cur") )
             fi
+            ;;
+        compile)
+            local models_dir="$HOME/ros2_ws/src/neoracer_ros2_driver/models"
+            local weights=""
+            if [[ -d "$models_dir" ]]; then
+                weights=$(cd "$models_dir" && ls *.pt 2>/dev/null)
+            fi
+            COMPREPLY=( $(compgen -W "$weights --imgsz= --device= --half --no-half --force --help" -- "$cur") )
             ;;
         ws)
             COMPREPLY=( $(compgen -W "neoracer osracer status" -- "$cur") )

@@ -167,6 +167,8 @@ racecar source              # source the workspace overlay
 racecar cd                  # chdir to the package source root
 racecar teleop              # full stack in the foreground via launch_teleop.sh
 racecar launch lidar        # ros2 launch neoracer_ros2_driver lidar.launch.py
+racecar compile             # TensorRT-export the weights inference.yaml points at
+racecar compile custom.pt   # ...or a specific .pt, resolved in models/
 racecar watchdog            # run the supervisor in the foreground
 
 racecar service status      # active/enabled snapshot for all units
@@ -296,20 +298,31 @@ python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device
 Deployment goes through TensorRT. Export once, then load the `.engine` the same way as the `.pt`:
 
 ```sh
-yolo export model=yolo11n.pt format=engine half=True imgsz=640 device=0
-yolo predict model=yolo11n.engine source=bus.jpg
+racecar service stop        # the builder needs the memory the stack is holding
+racecar compile             # exports what config/inference.yaml points at
 ```
 
-The export runs ONNX first and then a TensorRT builder pass. Budget the time: YOLO11n at 640 took 8m 17s to build on a 25 W Orin Nano, peaking at 2.6 GB. The resulting engine is tied to this board and this TensorRT version, so rebuild it after a JetPack upgrade rather than copying it between cars.
+`racecar compile` reads `model_path` and `imgsz` from [`config/inference.yaml`](config/inference.yaml), so the engine is built at the size it will be served at; an engine is fixed to its export size. Give it a filename (`racecar compile yolo26n.pt`, resolved in `models/`) or a path to override. `--imgsz=`, `--device=`, and `--no-half` override the rest; `--force` rebuilds over an existing engine and skips the stack-is-running guard. The engine lands in `models/` either way.
 
-What the engine buys, measured on YOLO11n at 640 with the teleop stack running:
+The equivalent by hand:
 
-| Backend | Inference | End-to-end |
-| --- | --- | --- |
-| PyTorch fp32 | 30.2 ms | 45.8 ms (21.8 fps) |
-| TensorRT fp16 | 12.7 ms | 29.2 ms (34.3 fps) |
+```sh
+yolo export model=yolo26n.pt format=engine half=True imgsz=640 device=0
+yolo predict model=yolo26n.engine source=bus.jpg
+```
 
-End-to-end includes letterboxing and NMS, which run on the CPU and dominate what TensorRT leaves behind.
+The export runs ONNX first and then a TensorRT builder pass. Budget the time: YOLO26n at 640 took 471.6 s (7m 52s) to build on a 25 W Orin Nano, and YOLO11n 8m 17s, both peaking near 2.6 GB. The resulting engine is tied to this board and this TensorRT version, so rebuild it after a JetPack upgrade rather than copying it between cars.
+
+What the engine buys, measured on YOLO26n at 640:
+
+| Backend | Inference | End-to-end, idle | `avg_inference_ms`, full stack |
+| --- | --- | --- | --- |
+| PyTorch fp32 | 35.5 ms | 39.6 ms (25.2 fps) | 50.1 ms |
+| TensorRT fp16 | 12.7 ms | 19.5 ms (51.2 fps) | 20.9 ms |
+
+Inference alone is 2.8x faster; end-to-end 2.0x, because letterboxing and NMS run on the CPU and dominate what TensorRT leaves behind. The last column is the node's own `/diagnostics` average with the whole teleop stack loaded, which is the number that matters in service.
+
+FP16 costs nothing visible at this scale: the engine reproduces the fp32 boxes to within a pixel or two and scores them slightly higher.
 
 Two things worth knowing before training on the car:
 
@@ -347,9 +360,9 @@ Settings live in `config/inference.yaml`:
 | `max_rate_hz` | 15.0 | Ceiling on inference rate |
 | `publish_annotated` | false | Overlay on `/detections/image`, encoded only while subscribed |
 
-Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo11n.pt` gives ~45 ms per frame and ~11 Hz on `/detections`; the TensorRT engine roughly halves the inference half of that.
+Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo26n.pt` averages 50.1 ms per frame; the TensorRT engine cuts that to 20.9 ms, which clears the `max_rate_hz` ceiling of 15 Hz with headroom to spare.
 
-Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. Engines are tied to the board and the TensorRT version that built them, so `models/` is a per-car drop point and its weights are gitignored.
+Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. The `.pt` weights are committed, so a fresh clone runs inference without a download. Engines are tied to the board and the TensorRT version that built them, so each car builds its own with `racecar compile` and `models/*.engine` stays gitignored.
 
 Health lands on `/diagnostics` (latency, detection counts, frame staleness) and on the dashboard as a **YOLO inference** card.
 

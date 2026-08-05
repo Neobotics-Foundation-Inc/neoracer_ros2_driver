@@ -3,7 +3,7 @@ inference_node:
     # Weights: absolute path, a filename inside the package's share/models,
     # or a bare Ultralytics name that it fetches and caches on first run.
     # A TensorRT .engine exported on this car is several times faster than .pt.
-    model_path: "yolo11n.pt"
+    model_path: "yolo26n.pt"
     device: "0"          # CUDA device index, or "cpu"
     imgsz: 640
     half: false          # FP16 for .pt on GPU; an .engine carries its own precision

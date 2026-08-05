@@ -48,7 +48,8 @@ COLCON_IGNORE
 # Local-only configuration overrides
 neoracer_ros2_driver/config/*.local.yaml
 
-# Model weights: .pt files are large, .engine files are built per car
-models/*.pt
+# Model artifacts. .pt weights are committed so a fresh clone can run inference
+# without a download. The ONNX is an export intermediate, and an .engine is
+# built against one board's GPU and TensorRT; neither is portable or shared.
 models/*.onnx
 models/*.engine
