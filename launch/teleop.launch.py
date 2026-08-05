@@ -23,9 +23,12 @@ Optional sensors/display, each gated by ``<name>_enable:=true|false``:
 lidar (Lakibeam -> /scan), camera (-> /camera/color), led_matrix (/dotmatrix/text),
 inference (/camera/color -> /edgetpu/inference).
 
-``inference`` is the one subsystem defaulting to false: it holds a YOLO model on
-the GPU for the life of the stack, which is wasted on a car whose student code
-never reads ``/edgetpu/inference``.
+Every subsystem defaults to true, so ``/edgetpu/inference`` is on the graph
+without a launch argument. ``inference`` is the expensive one: it holds a YOLO
+model on the GPU for the life of the stack, and it exits at startup on a car
+where ``racecar setup ml`` has not run. Disable it with
+``inference_enable:=false`` on a car that never reads detections, or to free the
+GPU for a TensorRT build.
 """
 
 import os
@@ -43,7 +46,7 @@ _SUBSYSTEMS = {
     'lidar': 'true',
     'camera': 'true',
     'led_matrix': 'true',
-    'inference': 'false',
+    'inference': 'true',
 }
 
 

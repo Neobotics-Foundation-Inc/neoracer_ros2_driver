@@ -37,8 +37,11 @@ MONITORED = {
     'joy': {'topic': '/joy', 'label': 'FlySky RC (/joy)', 'supervised': False},
     'lidar': {'topic': '/scan', 'label': 'Lakibeam lidar', 'supervised': True},
     'camera': {'topic': '/camera/color', 'label': 'USB camera', 'supervised': True},
+    # Part of the default teleop stack, so absent is a fault, not a normal
+    # state. Still unsupervised: the watchdog does not restart it, and a car
+    # without the ML stack installed will show this red until `racecar setup ml`.
     'inference': {'topic': '/edgetpu/inference', 'label': 'YOLO inference',
-                  'supervised': False, 'optional': True},
+                  'supervised': False},
     # Autonomy layer (neoracer-autonomy service). `optional`: absent is a
     # normal state (service off), shown as OFF rather than DEAD.
     'slam': {'topic': '/map', 'label': 'SLAM', 'supervised': False, 'optional': True},
