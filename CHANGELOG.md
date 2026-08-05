@@ -29,6 +29,9 @@ NeoRacer has no matching hardware, the API is present and says so.
 - README benchmark table re-measured on YOLO26n, replacing the YOLO11n figures, and split into idle and full-stack columns since the two differ by more than the backend does.
 - Export documentation in `README.md` and `models/README.md` leads with `racecar compile` and keeps the raw `yolo export` line as the manual equivalent; both switch from `yolo11n` to `yolo26n`.
 
+### Fixed
+- `neoracer-jupyter.service` sources `setup.bash` instead of hardcoding the ROS environment, matching the dashboard and watchdog units. The hardcoded `PYTHONPATH` listed `/opt/ros/humble/lib/python3.10/site-packages` but not `/opt/ros/humble/local/lib/python3.10/dist-packages`, where `rclpy` actually is, so every notebook failed on `import rclpy` unless its kernel happened to inherit a sourced shell. Predates this release; found while testing the topic rename from a notebook.
+
 ## [0.3.1] - 2026-08-04
 
 Puts the 0.3.0 GPU stack to work: a detection node turns camera frames into
