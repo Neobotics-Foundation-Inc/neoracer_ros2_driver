@@ -13,12 +13,12 @@ firmware streamed IMU and odometry as separate lines. The driver parses both.
 
 | Prefix | Format | Meaning | Published as |
 |--------|--------|---------|--------------|
-| `s` | `s px py pz vx vy vz yaw qx qy qz qw ax ay az gx gy gz` | state @ ~200 Hz: odometry + IMU in one frame (V1.1) | `/odom` + `/imu/fused` |
-| `b` | `b volts` | battery voltage @ ~0.5 Hz (V1.1) | `/battery` (sensor_msgs/BatteryState, with a 3S charge fraction) |
+| `s` | `s px py pz vx vy vz yaw qx qy qz qw ax ay az gx gy gz` | state @ ~200 Hz: odometry + IMU in one frame (V1.1) | `/odom` + `/imu/fused` + `/encoder/speed` |
+| `b` | `b volts` | battery voltage @ ~0.5 Hz (V1.1) | `/battery` (sensor_msgs/BatteryState, with a 3S charge fraction) + `/battery/voltage` |
 | `i` | `i qx qy qz qw ax ay az gx gy gz` | IMU: quaternion, accel (m/s^2), gyro (rad/s) (legacy, pre-V1.1) | `/imu/fused` (sensor_msgs/Imu) |
-| `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) (legacy, pre-V1.1) | `/odom` (nav_msgs/Odometry) |
-| `r` | `r c1 c2 ... c10` | FlySky RC channels (ints; `-1` = no signal) | `/joy` (sensor_msgs/Joy) |
-| `m` | `m x y z` | magnetometer (Gauss) | `/mag` (optional, off by default) |
+| `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) (legacy, pre-V1.1) | `/odom` (nav_msgs/Odometry) + `/encoder/speed` |
+| `r` | `r c1 c2 ... c10` | FlySky RC channels (ints; `-1` = no signal) | `/joy` (sensor_msgs/Joy) + `/rc/channels` |
+| `m` | `m x y z` | magnetometer (Gauss) | `/mag` (sensor_msgs/MagneticField) |
 
 The firmware also emits admin chatter (`FW...`, `DIAG...`, `LINK...`, `link`
 acks, `OK`, `ERROR`); the driver ignores it. Any other unknown prefix is

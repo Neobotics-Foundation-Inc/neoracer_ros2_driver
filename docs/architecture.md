@@ -12,7 +12,7 @@ student-library contract.
 
 | Module (path) | Responsibility | Depends on |
 | --- | --- | --- |
-| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/joy` | controller_lib, pyserial |
+| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/joy`, `/mag`, `/battery`, and the scalar `rc.physics` topics | controller_lib, pyserial |
 | `controller_lib` (neoracer_ros2_driver/controller_lib.py) | pure parsing + FlySky-to-Joy mapping (unit-tested) | - |
 | `gamepad_node` (neoracer_ros2_driver/gamepad_node.py) | `/joy` to `/gamepad_drive` | ackermann_msgs |
 | `mux_node` (neoracer_ros2_driver/mux_node.py) | gate `/gamepad_drive` (manual) or `/drive` (autonomy) to `/mux_out` | - |
@@ -44,8 +44,9 @@ student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
   `docs/esp32_protocol.md`.
 - Network: Lakibeam lidar over UDP at `192.168.8.2` (launch/lidar.launch.py).
 - USB video: camera at `/dev/osrbot_usb_cam` (camera.py).
-- Topics: `/motor`, `/imu/fused`, `/odom`, `/joy`, `/scan`, `/camera/color`,
-  `/edgetpu/inference`, `/dotmatrix/text`, `/drive`.
+- Topics: `/motor`, `/imu/fused`, `/odom`, `/joy`, `/mag`, `/battery`, `/scan`,
+  `/camera/color`, `/edgetpu/inference`, `/dotmatrix/text`, `/drive`, and the
+  scalar `/encoder/speed`, `/battery/voltage`, `/rc/channels`.
 - Weights: `share/neoracer_ros2_driver/models/`, searched before the working
   directory and before Ultralytics' own cache (inference_lib.resolve_model_path).
 

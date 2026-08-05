@@ -57,6 +57,8 @@ Published topics:
 
 - `/imu/fused` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery`: from the ESP32 V1.1 firmware state frame
 - `/joy` (sensor_msgs/Joy): synthesized from FlySky RC channels
+- `/mag` (sensor_msgs/MagneticField): ESP32 magnetometer, Gauss converted to Tesla
+- `/encoder/speed`, `/battery/voltage` (std_msgs/Float32), `/rc/channels` (std_msgs/Float32MultiArray): the scalar racecar_neo sensor topics the student library's `rc.physics` reads. Same data as `/odom`, `/battery`, and `/joy`, under the names the reference platform publishes
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 - `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. Off by default; see [Object detection](#object-detection).

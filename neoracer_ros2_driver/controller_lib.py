@@ -185,6 +185,22 @@ def _set_button(buttons, idx, value=1):
         buttons[idx] = value
 
 
+def rc_to_channels(channels, cfg):
+    """
+    Normalize every FlySky channel to ``[-1, 1]`` for ``/rc/channels``.
+
+    The same calibration ``rc_to_joy`` applies, but with no axis/button mapping
+    on top: channels stay in firmware order so the student library and a
+    ``ros2 topic echo`` both see the transmitter as it is wired. A no-signal
+    channel reads ``0.0``, matching the Joy failsafe.
+    """
+    return [
+        normalize_channel(raw, cfg['rc_min'], cfg['rc_center'], cfg['rc_max'],
+                          cfg['rc_deadband'], cfg['rc_failsafe_below'])
+        for raw in (channels or [])
+    ]
+
+
 def rc_to_joy(channels, cfg):
     """
     Convert FlySky RC channels into ``(axes, buttons)`` for a sensor_msgs/Joy.
