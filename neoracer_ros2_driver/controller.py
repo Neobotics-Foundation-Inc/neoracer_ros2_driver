@@ -9,7 +9,7 @@ IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
 - subscribes to ``/motor`` (ackermann_msgs/AckermannDriveStamped, normalized
   [-1, 1]) from the throttle node and writes the firmware drive command
   ``v <speed_mps> <steer_deg>``,
-- publishes ``/imu`` (sensor_msgs/Imu) and ``/odom`` (nav_msgs/Odometry) parsed
+- publishes ``/imu/fused`` (sensor_msgs/Imu) and ``/odom`` (nav_msgs/Odometry) parsed
   from the board, and
 - publishes ``/joy`` (sensor_msgs/Joy) synthesized from the FlySky RC channels,
   so the same software pipeline (gamepad -> mux -> throttle) and the student
@@ -117,11 +117,11 @@ class ControllerNode(Node):
             qos_profile_sensor_data)
 
         # ===== SET UP PUBLISHERS =====
-        # /imu and /odom are RELIABLE: the EKF (robot_localization) and the
+        # /imu/fused and /odom are RELIABLE: the EKF (robot_localization) and the
         # complementary filter subscribe reliable, and a reliable publisher
         # still satisfies every BEST_EFFORT subscriber (student library,
         # dashboard, rviz).
-        self.imu_pub = self.create_publisher(Imu, '/imu', 10)
+        self.imu_pub = self.create_publisher(Imu, '/imu/fused', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
         self.battery_pub = self.create_publisher(

@@ -1,4 +1,4 @@
-"""Standalone YOLO inference launch - camera frames to /detections."""
+"""Standalone YOLO inference launch - camera frames to /edgetpu/inference."""
 
 from neoracer_ros2_driver.launch_common import single_node_launch
 

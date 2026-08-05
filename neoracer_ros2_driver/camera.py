@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 """
-Stream a USB camera to ``/camera`` as a JPEG-encoded sensor_msgs/Image.
+Stream a USB camera to ``/camera/color`` as a JPEG-encoded sensor_msgs/Image.
 
 The camera is an MJPG source: it already delivers JPEG-compressed frames over
-USB. This node passes those native bytes straight through to ``/camera``
+USB. This node passes those native bytes straight through to ``/camera/color``
 (``encoding = 'jpeg'``) without decoding and re-encoding them. The student
 library reads the frame with ``cv2.imdecode(np.frombuffer(msg.data, np.uint8))``.
 
@@ -63,7 +63,7 @@ def _is_jpeg(frame):
 
 
 class CameraNode(Node):
-    """Publish MJPG frames from a USB camera onto ``/camera``."""
+    """Publish MJPG frames from a USB camera onto ``/camera/color``."""
 
     def __init__(self):
         super().__init__('camera_node')
@@ -76,7 +76,7 @@ class CameraNode(Node):
         self.frame_id = self.declare_parameter('frame_id', 'camera_link').value
         self.scan_max = self.declare_parameter('scan_max_index', 10).value
 
-        self.pub = self.create_publisher(Image, '/camera', qos_profile_sensor_data)
+        self.pub = self.create_publisher(Image, '/camera/color', qos_profile_sensor_data)
         self.cap = None
         self._fail_count = 0
         self._open_camera()
@@ -84,7 +84,7 @@ class CameraNode(Node):
         # Drive the capture loop slightly faster than the target rate so we never
         # starve the stream; the camera itself caps the true frame rate.
         self.timer = self.create_timer(1.0 / max(1.0, self.fps), self._tick)
-        self.get_logger().info('[INFO] Camera node ready, publishing /camera')
+        self.get_logger().info('[INFO] Camera node ready, publishing /camera/color')
 
     def _open_camera(self):
         """(Re)open the capture device, trying the configured path then a scan."""
@@ -121,7 +121,7 @@ class CameraNode(Node):
             throttle_duration_sec=5.0)
 
     def _tick(self):
-        """Grab one native MJPG frame and publish it to ``/camera`` unchanged."""
+        """Grab one native MJPG frame and publish it to ``/camera/color`` unchanged."""
         if self.cap is None:
             self._open_camera()
             return

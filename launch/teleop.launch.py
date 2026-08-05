@@ -5,7 +5,7 @@ Full Neoracer teleop stack.
 
 Always-on control pipeline (FlySky RC and autonomy both flow through it):
 
-    controller (ESP32 bridge)  -- publishes /joy, /imu, /odom; subscribes /motor
+    controller (ESP32 bridge)  -- publishes /joy, /imu/fused, /odom; subscribes /motor
         |  /joy
         v
     gamepad_node               -- /joy -> /gamepad_drive
@@ -20,12 +20,12 @@ Always-on control pipeline (FlySky RC and autonomy both flow through it):
     controller -> ESP32 serial "v <m/s> <deg>"
 
 Optional sensors/display, each gated by ``<name>_enable:=true|false``:
-lidar (Lakibeam -> /scan), camera (-> /camera), led_matrix (/led_matrix/command),
-inference (/camera -> /detections).
+lidar (Lakibeam -> /scan), camera (-> /camera/color), led_matrix (/dotmatrix/text),
+inference (/camera/color -> /edgetpu/inference).
 
 ``inference`` is the one subsystem defaulting to false: it holds a YOLO model on
 the GPU for the life of the stack, which is wasted on a car whose student code
-never reads ``/detections``.
+never reads ``/edgetpu/inference``.
 """
 
 import os

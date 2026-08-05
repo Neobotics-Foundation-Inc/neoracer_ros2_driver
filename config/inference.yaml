@@ -14,15 +14,15 @@ inference_node:
     # Omit the key entirely to keep every class the model knows.
     # class_filter: [0]
 
-    image_topic: "/camera"
-    detections_topic: "/detections"
+    image_topic: "/camera/color"
+    detections_topic: "/edgetpu/inference"
     # Cap inference below the camera's 60 fps; the newest frame always wins.
     max_rate_hz: 15.0
 
     # Overlay for the dashboard and for `ros2 run rqt_image_view`. Encoded only
     # while something is subscribed, so leaving it on costs nothing idle.
     publish_annotated: false
-    annotated_topic: "/detections/image"
+    annotated_topic: "/edgetpu/inference/image"
     annotated_quality: 80
 
     diagnostics_period_sec: 1.0

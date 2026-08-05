@@ -29,15 +29,15 @@ RATE_WINDOW_SEC = 3.0
 # the card may go red without any recovery - surface that to the operator so
 # the asymmetry isn't silent.
 MONITORED = {
-    'controller': {'topic': '/imu', 'label': 'ESP32 (IMU/odom/joy)', 'supervised': True},
+    'controller': {'topic': '/imu/fused', 'label': 'ESP32 (IMU/odom/joy)', 'supervised': True},
     'throttle': {'topic': '/motor', 'label': 'Throttle (clamping)', 'supervised': True},
     'mux': {'topic': '/mux_out', 'label': 'Mux (arbitrator)', 'supervised': True},
     'gamepad': {'topic': '/gamepad_drive', 'label': 'Gamepad', 'supervised': True},
     'odom': {'topic': '/odom', 'label': 'Odometry', 'supervised': False},
     'joy': {'topic': '/joy', 'label': 'FlySky RC (/joy)', 'supervised': False},
     'lidar': {'topic': '/scan', 'label': 'Lakibeam lidar', 'supervised': True},
-    'camera': {'topic': '/camera', 'label': 'USB camera', 'supervised': True},
-    'inference': {'topic': '/detections', 'label': 'YOLO inference',
+    'camera': {'topic': '/camera/color', 'label': 'USB camera', 'supervised': True},
+    'inference': {'topic': '/edgetpu/inference', 'label': 'YOLO inference',
                   'supervised': False, 'optional': True},
     # Autonomy layer (neoracer-autonomy service). `optional`: absent is a
     # normal state (service off), shown as OFF rather than DEAD.
@@ -58,12 +58,12 @@ MONITORED = {
 RATE_TOPICS = [
     '/motor',
     '/mux_out',
-    '/imu',
+    '/imu/fused',
     '/odom',
     '/joy',
     '/scan',
-    '/camera',
-    '/detections',
+    '/camera/color',
+    '/edgetpu/inference',
     '/drive',
     '/cmd_vel',
     '/imu_filter',

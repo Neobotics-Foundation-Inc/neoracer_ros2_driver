@@ -13,17 +13,17 @@ racecar test                     # controller_lib + linters green
 ## 2. Per-node smoke tests
 - [ ] **ESP32 / controller** - `racecar launch controller`, then:
   ```sh
-  ros2 topic hz /imu              # ~170 Hz
+  ros2 topic hz /imu/fused              # ~170 Hz
   ros2 topic echo --once /odom    # live position
   ros2 topic echo /joy            # move FlySky sticks/switches; see section 4
   ```
 - [ ] **Lidar** - `racecar launch lidar`, then `ros2 topic hz /scan` (~30 Hz)
   and `ros2 topic echo --once /scan` -> `frame_id: laser`, ~1440 ranges.
   If unreachable: `ping 192.168.8.2`.
-- [ ] **Camera** - `racecar launch camera`, then `ros2 topic hz /camera`.
+- [ ] **Camera** - `racecar launch camera`, then `ros2 topic hz /camera/color`.
   Confirm a student `get_color_image()` returns a decoded frame.
 - [ ] **Display** - `racecar launch led_matrix`, then
-  `ros2 topic pub --once /led_matrix/command std_msgs/String "{data: 'HELLO'}"`.
+  `ros2 topic pub --once /dotmatrix/text std_msgs/String "{data: 'HELLO'}"`.
 
 ## 3. Full stack
 ```sh
@@ -56,7 +56,7 @@ Adjust `throttle_channel` / `steering_channel` / `mode_channel` in
 racecar watchdog &               # or: racecar service start
 pkill -f neoracer_ros2_driver/lib/.*/controller
 ```
-- [ ] watchdog logs a restart and `/imu` resumes.
+- [ ] watchdog logs a restart and `/imu/fused` resumes.
 
 ## 7. Services / dashboard / jupyter
 ```sh

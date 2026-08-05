@@ -67,9 +67,9 @@ def _is_running(path_substring: str):
 NODES = {
     # ----- Control pipeline (safety-critical) -----
     'controller': {
-        # ESP32 bridge: publishes /imu (~170 Hz), /odom, /joy; drives /motor.
-        # Monitoring /imu freshness catches a stalled or unplugged serial link.
-        'topic': '/imu',
+        # ESP32 bridge: publishes /imu/fused (~170 Hz), /odom, /joy; drives /motor.
+        # Monitoring /imu/fused freshness catches a stalled or unplugged serial link.
+        'topic': '/imu/fused',
         'launch': 'controller.launch.py',
         'device_check': lambda: os.path.exists('/dev/osrbot_base'),
         'device_label': '/dev/osrbot_base (ESP32)',
@@ -116,7 +116,7 @@ NODES = {
         'freshness_sec': 5.0,
     },
     'camera': {
-        'topic': '/camera',
+        'topic': '/camera/color',
         'launch': 'camera.launch.py',
         'device_check': lambda: os.path.exists('/dev/osrbot_usb_cam'),
         'device_label': '/dev/osrbot_usb_cam (USB camera)',

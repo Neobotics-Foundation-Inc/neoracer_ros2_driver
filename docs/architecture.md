@@ -12,15 +12,15 @@ student-library contract.
 
 | Module (path) | Responsibility | Depends on |
 | --- | --- | --- |
-| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu`, `/odom`, `/joy` | controller_lib, pyserial |
+| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/joy` | controller_lib, pyserial |
 | `controller_lib` (neoracer_ros2_driver/controller_lib.py) | pure parsing + FlySky-to-Joy mapping (unit-tested) | - |
 | `gamepad_node` (neoracer_ros2_driver/gamepad_node.py) | `/joy` to `/gamepad_drive` | ackermann_msgs |
 | `mux_node` (neoracer_ros2_driver/mux_node.py) | gate `/gamepad_drive` (manual) or `/drive` (autonomy) to `/mux_out` | - |
 | `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps; `/mux_out` to `/motor` | - |
-| `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera` (JPEG-in-Image) | opencv, numpy |
-| `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera` frames to `/detections` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
+| `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera/color` (JPEG-in-Image) | opencv, numpy |
+| `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
-| `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/led_matrix/command` to USB-UART 8x8 | pyserial |
+| `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/dotmatrix/text` to USB-UART 8x8 | pyserial |
 | `lakibeam1` (pinned fork, cloned to `src/`) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
 
 ## Data pipeline
@@ -29,12 +29,12 @@ student-library contract.
 FlySky RC -> controller -> /joy -> gamepad_node -> /gamepad_drive ->
    mux_node -> /mux_out -> throttle_node -> /motor -> controller -> ESP32 ESC
 student lib -> /drive ------------------------^  (autonomy; gated by FlySky switch)
-ESP32 -> /imu, /odom     Lakibeam -> /scan     USB cam -> /camera
-student lib -> /led_matrix/command -> led_matrix -> 8x8 display
+ESP32 -> /imu/fused, /odom   Lakibeam -> /scan   USB cam -> /camera/color
+student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
 
-/camera -> inference_node -> /detections -> student lib / downstream perception
+/camera/color -> inference_node -> /edgetpu/inference -> student lib / downstream perception
                 |
-                +-> /detections/image (annotated overlay; only while subscribed)
+                +-> /edgetpu/inference/image (annotated overlay; only while subscribed)
 ```
 
 ## Interfaces
@@ -44,8 +44,8 @@ student lib -> /led_matrix/command -> led_matrix -> 8x8 display
   `docs/esp32_protocol.md`.
 - Network: Lakibeam lidar over UDP at `192.168.8.2` (launch/lidar.launch.py).
 - USB video: camera at `/dev/osrbot_usb_cam` (camera.py).
-- Topics: `/motor`, `/imu`, `/odom`, `/joy`, `/scan`, `/camera`, `/detections`,
-  `/led_matrix/command`, `/drive`.
+- Topics: `/motor`, `/imu/fused`, `/odom`, `/joy`, `/scan`, `/camera/color`,
+  `/edgetpu/inference`, `/dotmatrix/text`, `/drive`.
 - Weights: `share/neoracer_ros2_driver/models/`, searched before the working
   directory and before Ultralytics' own cache (inference_lib.resolve_model_path).
 
@@ -69,7 +69,7 @@ Tegra. Engines are not portable across boards or TensorRT versions.
 
 ## Constraints
 
-- The ESP32 USB-CDC port ignores baud. `/imu` streams ~170 Hz; `/scan` ~30 Hz.
+- The ESP32 USB-CDC port ignores baud. `/imu/fused` streams ~170 Hz; `/scan` ~30 Hz.
 - The ESP32 fails over to direct RC control on serial timeout, so the pipeline
   must stream `/motor` continuously to retain authority.
 - All drive topics are normalized to `[-1, 1]`; the physical mapping lives in

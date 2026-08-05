@@ -3,5 +3,5 @@ led_matrix_node:
     # Stable udev symlink to the 8x8 display's USB-UART adapter.
     port: "/dev/osrbot_led_matrix"
     baud: 115200
-    input_topic: "/led_matrix/command"
+    input_topic: "/dotmatrix/text"
     append_newline: true

@@ -3,10 +3,11 @@
 """
 Run camera frames through a YOLO model and publish the detections.
 
-Subscribes to ``/camera`` (the driver's native MJPG passthrough,
+Subscribes to ``/camera/color`` (the driver's native MJPG passthrough,
 ``encoding = 'jpeg'``) and publishes ``vision_msgs/Detection2DArray`` on
-``/detections``, so student code and any downstream perception node read boxes
-from the graph instead of each re-running a detector on the same frames.
+``/edgetpu/inference``, so student code and any downstream perception node
+read boxes from the graph instead of each re-running a detector on the same
+frames.
 
 The model runs through Ultralytics on the Orin's integrated GPU. Both weight
 formats it loads are useful here: a ``.pt`` file runs anywhere and is what a
@@ -83,12 +84,12 @@ class InferenceNode(Node):
         self.declare_parameter('class_filter', rclpy.Parameter.Type.INTEGER_ARRAY)
         self.class_filter = self.get_parameter_or('class_filter').value or None
 
-        image_topic = self.declare_parameter('image_topic', '/camera').value
-        det_topic = self.declare_parameter('detections_topic', '/detections').value
+        image_topic = self.declare_parameter('image_topic', '/camera/color').value
+        det_topic = self.declare_parameter('detections_topic', '/edgetpu/inference').value
         max_rate = self.declare_parameter('max_rate_hz', 15.0).value
         self.publish_annotated = self.declare_parameter('publish_annotated', False).value
         annotated_topic = self.declare_parameter(
-            'annotated_topic', '/detections/image').value
+            'annotated_topic', '/edgetpu/inference/image').value
         self.annotated_quality = self.declare_parameter('annotated_quality', 80).value
         diag_period = self.declare_parameter('diagnostics_period_sec', 1.0).value
         self.image_timeout = self.declare_parameter('image_timeout_sec', 5.0).value
