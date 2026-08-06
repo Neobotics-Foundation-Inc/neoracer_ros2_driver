@@ -48,6 +48,12 @@ COLCON_IGNORE
 # Local-only configuration overrides
 neoracer_ros2_driver/config/*.local.yaml
 
+# Lab dashboards. Each is a repository of its own, cloned here by
+# setup_services.sh and tracking its default branch, so the driver ships the
+# wiring rather than a vendored copy. The checkouts carry a car's tuned
+# dashboard yaml, which is why setup fast-forwards them instead of resetting.
+scripts/dashboards/
+
 # Model artifacts. .pt weights and the .engine are committed so a fresh clone
 # runs inference at full speed without a what is close to eight-minute build.
 # The engine is valid only for this fleet's exact configuration: SM 8.7 (Orin),

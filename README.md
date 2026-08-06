@@ -11,6 +11,7 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [Networking (optional)](#networking-optional)
 - [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
 - [Web dashboard](#web-dashboard)
+- [Lab dashboards](#lab-dashboards)
 - [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library)
 - [GPU stack](#gpu-stack)
 - [Object detection](#object-detection)
@@ -69,7 +70,7 @@ Safety and uptime layers:
 
 - **Mux** gates commands behind the arming switch and zeroes output when the RC link drops.
 - **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
-- **Five systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter,autonomy}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down.
+- **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` is held and not installed; see [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2).
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
 
 ## Quickstart (fresh JetPack 6.2 install)
@@ -152,7 +153,7 @@ Eight phases, all under `scripts/`:
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
 6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
 7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
-8. **`setup_services.sh`**: installs and enables the systemd units
+8. **`setup_services.sh`**: installs the systemd units; core stack enabled, lab dashboards cloned into `scripts/dashboards/` and left disabled
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
@@ -173,10 +174,12 @@ racecar compile             # TensorRT-export the weights inference.yaml points 
 racecar compile custom.pt   # ...or a specific .pt, resolved in models/
 racecar watchdog            # run the supervisor in the foreground
 
-racecar service status      # active/enabled snapshot for all units
-racecar service install     # drop unit files in /etc/systemd/system/ + enable
-racecar service start       # default: start teleop (watchdog follows)
-racecar service stop        # default: stop teleop
+racecar service status      # active/enabled snapshot for every unit
+racecar service install     # install units: core enabled, dashboards disabled
+racecar service start       # no name: the core stack
+racecar service stop        # no name: the core stack
+racecar service restart     # every enabled unit; never starts a disabled one
+racecar service start camlabel   # a lab dashboard, for this session
 racecar service logs teleop # journalctl -u neoracer-teleop -f
 
 racecar mapping             # SLAM to build a map (slam_toolbox default)
@@ -199,7 +202,7 @@ racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
 
-`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every service. Requires internet.
+`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
 
 ## Networking (optional)
 
@@ -238,7 +241,13 @@ Run `--reset` before capturing a golden image, so the clone ships with no active
 
 ## Autonomy: SLAM and Nav2
 
-SLAM and navigation run on demand, not as services. The always-on autonomy base (`autonomy.launch.py`, `neoracer-autonomy.service`) runs only TF, the EKF, and the twist bridge.
+SLAM and navigation run on demand, not as services. The autonomy base (`autonomy.launch.py`) runs only TF, the EKF, and the twist bridge.
+
+`neoracer-autonomy.service` is **held**: the unit file stays in `scripts/`, but setup does not install it, and a setup run removes it from a car that has it from an earlier release. The service does not work yet and development is paused until further notice. Start the base by hand while it is held:
+
+```sh
+bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+```
 
 ```sh
 racecar mapping                 # slam_toolbox (also: gmapping, cartographer)
@@ -260,6 +269,28 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 - **Topic rates**: live Hz for the control and sensor topics, yellow when stale, red when missing
 - **Node graph**: live rqt-style view of the running graph
 - **Watchdog log**: tail of `~/logs/latest/watchdog.log`, so restart events are visible
+
+## Lab dashboards
+
+Three lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
+
+| Dashboard | Port | Repository | Purpose |
+| --- | --- | --- | --- |
+| camlabel | 8082 | [camlabel_dashboard](https://github.com/Neobotics-Foundation-Inc/camlabel_dashboard) | capture frames and drag boxes; writes a YOLO dataset to `~/data/camlabel` |
+| wallfollow | 8081 | [wallfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/wallfollow_dashboard) | wall following on `/scan` with live PD tuning |
+| pursuit | 8083 | [pursuit_dashboard](https://github.com/Neobotics-Foundation-Inc/pursuit_dashboard) | target following on `/edgetpu/inference` |
+
+Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow and pursuit both publish `/drive`, so they are started one at a time for a session:
+
+```sh
+racecar service start camlabel     # on for this session
+racecar service stop camlabel
+racecar service enable camlabel    # only if this car should boot into it
+```
+
+`racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone.
+
+The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml` or `pursuit.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
 
 ## Jupyter notebooks and the student library
 
@@ -440,6 +471,8 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 **`/camera/color` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
 
 **No `/edgetpu/inference`.** The node is on by default; confirm it was not disabled with `inference_enable:=false`. If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
+
+**A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 
 **FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
 

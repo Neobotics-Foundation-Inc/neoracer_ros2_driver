@@ -19,9 +19,50 @@ _rc_autonomy_env() {
     [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
     systemctl is-active --quiet neoracer-teleop 2>/dev/null || \
         echo "warning: teleop service not active; /scan and /odom are missing" >&2
-    systemctl is-active --quiet neoracer-autonomy 2>/dev/null || \
-        echo "warning: autonomy base not active (TF + bridge); run: racecar service start autonomy" >&2
+    # The autonomy base ran as neoracer-autonomy.service until that unit was
+    # held; until it returns, the base is started in a terminal of its own.
+    pgrep -f launch_autonomy.sh >/dev/null 2>&1 || \
+        echo "warning: autonomy base not running (TF + bridge); start it with:" \
+             "bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh" >&2
     return 0
+}
+
+# Core stack, enabled at boot by setup_services.sh. neoracer-autonomy is not
+# here: the unit is held and setup no longer installs it.
+_RC_CORE_UNITS=(neoracer-teleop neoracer-watchdog neoracer-dashboard
+                neoracer-jupyter)
+
+# Lab dashboards, installed disabled and started per session. Each holds the
+# camera or the GPU for its whole run, so they are opt-in rather than part of
+# the stack that comes up on boot.
+_RC_DASH_UNITS=(neoracer-camlabel neoracer-wallfollow neoracer-pursuit)
+
+# Units that would come back on their own after a reboot. `restart` with no
+# unit named uses this so it never promotes a disabled service into a running
+# one; systemctl restart starts a stopped unit, which would otherwise put a
+# lab dashboard on the graph behind the student's back.
+_rc_enabled_units() {
+    local u
+    for u in "${_RC_CORE_UNITS[@]}" "${_RC_DASH_UNITS[@]}"; do
+        systemctl is-enabled --quiet "$u" 2>/dev/null && echo "$u"
+    done
+}
+
+_rc_unit_installed() {
+    systemctl list-unit-files "$1.service" 2>/dev/null | grep -q "^$1.service"
+}
+
+# One status line. An absent unit reports as such rather than passing
+# systemd's "Failed to get unit file state" through to the column.
+_rc_unit_status_line() {
+    local u="$1" state enabled
+    if ! _rc_unit_installed "$u"; then
+        printf "  %-22s  not installed\n" "$u"
+        return
+    fi
+    state=$(systemctl is-active "$u" 2>&1 || true)
+    enabled=$(systemctl is-enabled "$u" 2>&1 || true)
+    printf "  %-22s  active=%-12s enabled=%s\n" "$u" "$state" "$enabled"
 }
 
 racecar() {
@@ -219,9 +260,13 @@ racecar() {
             echo "Updating $pkg_dir to latest origin/main..."
             ( cd "$pkg_dir" && git fetch origin && git reset --hard origin/main ) || return 1
             bash "$pkg_dir/scripts/setup_all.sh" || return 1
+            # Restart only what was already enabled, so a field update brings
+            # back the services this car runs without starting a lab dashboard
+            # nobody asked for.
             echo "Restarting services..."
-            sudo systemctl restart neoracer-teleop neoracer-watchdog \
-                neoracer-dashboard neoracer-jupyter neoracer-autonomy
+            local -a live
+            mapfile -t live < <(_rc_enabled_units)
+            [[ ${#live[@]} -gt 0 ]] && sudo systemctl restart "${live[@]}"
             echo "Update complete. Open a new terminal (or run: racecar source)"
             echo "so this shell picks up the new environment and racecar tool."
             ;;
@@ -320,10 +365,11 @@ __RC_COMPILE_HELP__
 
             if [[ $force -eq 0 ]]; then
                 local busy=""
-                local unit
-                for unit in neoracer-teleop neoracer-autonomy; do
-                    systemctl is-active --quiet "$unit" 2>/dev/null && busy+="$unit "
-                done
+                systemctl is-active --quiet neoracer-teleop 2>/dev/null \
+                    && busy+="neoracer-teleop "
+                # The autonomy base holds GPU memory too, and now runs as a
+                # plain process rather than a unit.
+                pgrep -f launch_autonomy.sh >/dev/null 2>&1 && busy+="autonomy "
                 if [[ -n "$busy" ]]; then
                     echo "racecar compile: ${busy% } running; the export peaks near 3 GB." >&2
                     echo "Stop the stack first (racecar service stop), or pass --force." >&2
@@ -405,52 +451,83 @@ __RC_COMPILE__
         service)
             local action="${1:-status}"
             shift || true
-            local -a units=("neoracer-teleop" "neoracer-watchdog"
-                            "neoracer-dashboard" "neoracer-jupyter"
-                            "neoracer-autonomy")
+            local -a units=("${_RC_CORE_UNITS[@]}")
             case "$action" in
                 install)
                     bash "$pkg_dir/scripts/setup_services.sh"
                     ;;
                 start|stop|restart)
                     if [[ -n "$1" ]]; then
-                        sudo systemctl "$action" "neoracer-$1"
+                        local unit="neoracer-$1"
+                        if ! _rc_unit_installed "$unit"; then
+                            echo "racecar service: $unit is not installed." >&2
+                            echo "Run 'racecar service install' first." >&2
+                            return 1
+                        fi
+                        sudo systemctl "$action" "$unit"
+                    elif [[ "$action" == restart ]]; then
+                        # Restart what is already enabled, dashboards included,
+                        # and leave every disabled unit where it is.
+                        local -a live
+                        mapfile -t live < <(_rc_enabled_units)
+                        if [[ ${#live[@]} -eq 0 ]]; then
+                            echo "No enabled services to restart." >&2
+                        else
+                            sudo systemctl restart "${live[@]}"
+                            printf 'restarted: %s\n' "${live[*]}"
+                        fi
                     else
                         sudo systemctl "$action" "${units[@]}"
                     fi
                     ;;
                 enable|disable)
-                    for u in "${units[@]}"; do
-                        sudo systemctl "$action" "$u"
-                    done
+                    # Blanket enable/disable covers the core stack only. A lab
+                    # dashboard is turned on by name, so a car that wants one
+                    # at boot says so: `racecar service enable camlabel`.
+                    if [[ -n "$1" ]]; then
+                        sudo systemctl "$action" "neoracer-$1"
+                    else
+                        for u in "${units[@]}"; do
+                            sudo systemctl "$action" "$u"
+                        done
+                    fi
                     ;;
                 logs)
                     local unit="${1:-teleop}"
                     sudo journalctl -u "neoracer-$unit" -f
                     ;;
                 status|"")
-                    for u in "${units[@]}"; do
-                        local state
-                        state=$(systemctl is-active "$u" 2>&1 || true)
-                        local enabled
-                        enabled=$(systemctl is-enabled "$u" 2>&1 || true)
-                        printf "  %-22s  active=%-12s enabled=%s\n" \
-                            "$u" "$state" "$enabled"
+                    local u
+                    for u in "${_RC_CORE_UNITS[@]}"; do
+                        _rc_unit_status_line "$u"
+                    done
+                    echo "  -- lab dashboards (off unless started) --"
+                    for u in "${_RC_DASH_UNITS[@]}"; do
+                        _rc_unit_status_line "$u"
                     done
                     ;;
                 -h|--help|help)
                     cat <<'__RC_SVC_HELP__'
 usage: racecar service <action> [unit]
 actions:
-  install        Drop unit files in /etc/systemd/system/ + daemon-reload + enable
-  start [name]   Start neoracer-<name>; default = teleop (watchdog follows via BindsTo)
-  stop [name]    Stop neoracer-<name>; default = teleop
-  restart [name] Restart neoracer-<name>; default = teleop
-  enable         Enable all neoracer-* units (auto-start on boot)
-  disable        Disable all neoracer-* units
+  install        Install units: core stack enabled, lab dashboards disabled
+  start [name]   Start neoracer-<name>; no name = the core stack
+  stop [name]    Stop neoracer-<name>; no name = the core stack
+  restart [name] Restart neoracer-<name>; no name = every enabled unit,
+                 dashboards included. Never starts a disabled one.
+  enable [name]  Enable neoracer-<name>; no name = the core stack
+  disable [name] Disable neoracer-<name>; no name = the core stack
   logs [name]    journalctl -u neoracer-<name> -f; default = teleop
-  status         active/enabled snapshot for all units (default)
-units: teleop, watchdog, dashboard, jupyter, autonomy (TF + twist bridge)
+  status         active/enabled snapshot for every unit (default)
+core units:      teleop, watchdog, dashboard, jupyter
+lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083)
+
+neoracer-autonomy is held and no longer installed. Run the base in a terminal:
+  bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+
+Dashboards install disabled and are started for a session:
+  racecar service start camlabel
+Each holds the camera or the GPU while it runs, so run one at a time.
 __RC_SVC_HELP__
                     ;;
                 *)
@@ -952,14 +1029,19 @@ Commands:
                                            --lidar-host=CIDR (default 192.168.8.1/24)
                                            --show / --reset
     service <action>    systemd service control. Actions:
-                          install              setup_services.sh (drop + enable units)
-                          start [name]         default: teleop (watchdog follows)
-                          stop [name]          default: teleop
-                          restart [name]       default: teleop
-                          enable|disable       all units
+                          install              setup_services.sh (core enabled,
+                                               dashboards installed disabled)
+                          start [name]         no name: the core stack
+                          stop [name]          no name: the core stack
+                          restart [name]       no name: every enabled unit;
+                                               never starts a disabled one
+                          enable|disable [name]  no name: the core stack
                           logs [name]          journalctl -f for neoracer-<name>
                           status               active/enabled summary (default)
-                        Units: teleop, watchdog, dashboard, jupyter
+                        Core units: teleop, watchdog, dashboard, jupyter
+                        Lab dashboards, off until started, one at a time:
+                          camlabel (8082), wallfollow (8081), pursuit (8083)
+                        neoracer-autonomy is held; setup no longer installs it.
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
                           --list              show valid folders in ~/jupyter_ws
@@ -1077,8 +1159,8 @@ _racecar_complete() {
             elif [[ $COMP_CWORD -eq 3 ]]; then
                 local action="${COMP_WORDS[2]}"
                 case "$action" in
-                    start|stop|restart|logs)
-                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter autonomy" -- "$cur") )
+                    start|stop|restart|logs|enable|disable)
+                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit" -- "$cur") )
                         ;;
                 esac
             fi

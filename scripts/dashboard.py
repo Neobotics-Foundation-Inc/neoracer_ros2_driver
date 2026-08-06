@@ -42,8 +42,9 @@ MONITORED = {
     # without the ML stack installed will show this red until `racecar setup ml`.
     'inference': {'topic': '/edgetpu/inference', 'label': 'YOLO inference',
                   'supervised': False},
-    # Autonomy layer (neoracer-autonomy service). `optional`: absent is a
-    # normal state (service off), shown as OFF rather than DEAD.
+    # Autonomy layer, started from scripts/launch_autonomy.sh while
+    # neoracer-autonomy.service is held. `optional`: absent is a normal state,
+    # shown as OFF rather than DEAD.
     'slam': {'topic': '/map', 'label': 'SLAM', 'supervised': False, 'optional': True},
     # /drive: the bridge's publisher endpoint exists exactly while the node
     # lives. /odometry/filtered belongs to the EKF now, not the bridge relay.
