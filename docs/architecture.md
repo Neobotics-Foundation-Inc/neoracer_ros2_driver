@@ -99,6 +99,37 @@ committed one covers the fleet's stock configuration (SM 8.7, TensorRT
 10.3.0.30, JetPack L4T R36.4.3). A car outside it falls back to the `.pt`
 rather than failing, and logs that it did.
 
+## Lab dashboards
+
+Three lab tools live in repositories of their own and are cloned into
+`scripts/dashboards/` by `scripts/setup_services.sh`, each tracking its default
+branch. The driver ships the wiring, not the code: the checkouts are gitignored,
+so a car's tuned dashboard yaml survives an update and a lab can be revised
+without a driver release.
+
+```
+setup_services.sh
+    |
+    |-- core units -> /etc/systemd/system/ -> enabled at boot
+    |
+    `-- scripts/dashboards/<name>_dashboard/   (git clone, default branch)
+              |
+              `-- setup.sh -> renders neoracer-<name>.service.in with its own
+                              path -> /etc/systemd/system/ -> installed disabled
+```
+
+Each dashboard is a single process that subscribes to driver topics and serves
+its own web UI: camlabel (8082) on `/camera/color`, wallfollow (8081) on
+`/scan`, pursuit (8083) on `/edgetpu/inference`. They stay off by default
+because each holds the camera or the GPU for its whole run, and wallfollow and
+pursuit both publish `/drive`, where a second publisher fights the mux. One at a
+time, started per session through `racecar service start <name>`.
+
+The unit is a template rather than a fixed file so the service follows the
+checkout; that is what lets the driver own the install path without vendoring
+the dashboards. `racecar service restart` acts only on enabled units, so a
+field update never brings a dashboard up on its own.
+
 ## Constraints
 
 - The ESP32 USB-CDC port ignores baud. `/imu/fused` streams ~170 Hz; `/scan` ~30 Hz.

@@ -51,7 +51,7 @@ echo "==> [7/8] JupyterLab + workspace"
 bash "$SCRIPT_DIR/setup_jupyter.sh"
 
 echo
-echo "==> [8/8] systemd services (teleop, watchdog, dashboard, jupyter)"
+echo "==> [8/8] systemd services (core stack enabled, lab dashboards installed off)"
 bash "$SCRIPT_DIR/setup_services.sh"
 
 echo

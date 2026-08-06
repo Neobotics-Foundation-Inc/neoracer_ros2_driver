@@ -5,6 +5,37 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
+Brings the three lab dashboards onto the car as part of setup. They were
+installed by hand per car, each from a `scp` of its repository, which left every
+car's set of labs slightly different and none of them visible to the driver.
+Setup now clones them and installs their units; `racecar service` drives them
+like any other service.
+
+### Added
+- `scripts/setup_services.sh` clones `camlabel_dashboard`, `wallfollow_dashboard`, and `pursuit_dashboard` into `scripts/dashboards/` and runs each one's `setup.sh` to install its unit. Each checkout tracks its default branch, so a lab is revised without a driver release.
+- `racecar service start|stop|restart|enable|disable|logs <name>` accepts `camlabel`, `wallfollow`, and `pursuit` alongside the core units, and `racecar service status` lists them under their own heading. Tab completion covers the new names.
+- `_rc_enabled_units` and `_rc_unit_installed` in `racecar-tool.sh`, the enable-state and installed-state queries the service actions share.
+
+### Removed
+- `neoracer-autonomy.service` is held: setup no longer installs it, and a setup run disables and removes it from a car that has it from an earlier release. The service does not work yet, so leaving it enabled meant every car booting a unit that fails; development is paused until further notice. The unit file stays in `scripts/`, and the hold lifts by moving the name from `HELD` back into `SERVICES`. SLAM and Nav2 are unaffected, still on demand through `racecar mapping` and `racecar navigation`; the base runs from `scripts/launch_autonomy.sh` in a terminal meanwhile.
+- `autonomy` drops out of the `racecar service` unit list, its tab completion, and the blanket start/stop/enable/disable set. The autonomy checks in `racecar compile` and the SLAM/Nav2 environment now look for the `launch_autonomy.sh` process rather than the unit.
+
+### Changed
+- The dashboards install disabled and are started per session. Each holds the camera or the GPU for its whole run, and wallfollow and pursuit both publish `/drive`, where a second publisher fights the mux; one at a time is the working assumption, so none of them belong on the boot path.
+- `racecar service restart` with no unit named now restarts only units that are enabled, dashboards included, instead of every unit in the list. `systemctl restart` starts a stopped unit, so the old behavior would have put a disabled lab dashboard on the graph on every field update.
+- `racecar update` restarts the same enabled-only set rather than a hardcoded list of five.
+- `racecar service enable` and `disable` with no unit named still cover the core stack only. A dashboard is enabled by name, which keeps the opt-in explicit: `racecar service enable camlabel`.
+- `racecar service start|stop|restart <name>` reports an uninstalled unit and points at `racecar service install`, rather than passing systemd's error through.
+- `racecar service status` prints `not installed` for an absent unit instead of systemd's "Failed to get unit file state" string.
+- The dashboard checkouts are fast-forwarded, never reset. A car's tuned `wallfollow.yaml` or `pursuit.yaml` lives in the checkout, and a checkout that cannot fast-forward is reported and left alone rather than overwritten.
+- `scripts/dashboards/` is gitignored. The driver ships the wiring rather than a vendored copy, and `racecar update`'s `git reset --hard` leaves the untracked checkouts in place.
+- A dashboard that fails to clone or install no longer fails the setup run: the core stack finishes and the run ends by naming what to re-run once the car has internet.
+
+### Fixed
+- `pursuit.py` exits on SIGTERM instead of blocking in `serve_forever()` until systemd's stop timeout SIGKILLs it. Fixed in `pursuit_dashboard` and carried here as the version the driver installs; camlabel and wallfollow already had it.
+
 ## [0.3.2] - 2026-08-05
 
 Aligns the topic contract with `MITRacecarNeo/racecar_neo_ros2_driver`, the

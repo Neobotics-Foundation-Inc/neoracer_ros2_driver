@@ -10,7 +10,9 @@
 #
 # Usage:
 #   ./scripts/launch_autonomy.sh [extra launch args...]
-#   systemctl start neoracer-autonomy   (calls this script)
+#
+# neoracer-autonomy.service used to call this script. That unit is held and no
+# longer installed, so run this in a terminal of its own for now.
 
 set -eo pipefail
 
