@@ -5,6 +5,18 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-07
+
+Adds `smartfollow_dashboard` to the labs setup clones. It is the fifth lab and
+the first that composes two earlier ones: students tune wallfollow and pursuit,
+then run both gains together in one controller.
+
+### Added
+- `smartfollow` (port 8085), the fifth lab dashboard: `scripts/setup_services.sh` clones `smartfollow_dashboard` into `scripts/dashboards/` and runs its `setup.sh`, and `racecar service start|stop|restart|enable|disable|logs smartfollow` drives it like the others. Tab completion and `racecar service status` cover it. It runs the wallfollow dynamic gap follower on `/scan` and the pursuit controller on `/edgetpu/inference` at once, arbitrating between them: a target seen within `target_hold` seconds gets the car, otherwise the wall follower drives. It reads `/scan`, `/odom`, `/camera/color`, and `/edgetpu/inference` and publishes `/drive`.
+
+### Changed
+- The one-at-a-time rule now names four `/drive` publishers rather than three. smartfollow drives the car whenever it is up, so wallfollow, pursuit, eps, and smartfollow each exclude the other three.
+
 ## [0.4.1] - 2026-08-07
 
 Adds `eps_dashboard` to the labs setup clones. It follows the contract the

@@ -14,10 +14,11 @@
 # run on demand through `racecar mapping` / `racecar navigation`.
 #
 # Lab dashboards, cloned into scripts/dashboards/ and installed disabled:
-#   neoracer-camlabel.service   - image capture and labeling (port 8082)
-#   neoracer-wallfollow.service - wall following (port 8081)
-#   neoracer-pursuit.service    - target following (port 8083)
-#   neoracer-eps.service        - episodic policy search (port 8084)
+#   neoracer-camlabel.service    - image capture and labeling (port 8082)
+#   neoracer-wallfollow.service  - wall following (port 8081)
+#   neoracer-pursuit.service     - target following (port 8083)
+#   neoracer-eps.service         - episodic policy search (port 8084)
+#   neoracer-smartfollow.service - wall and car following (port 8085)
 #
 # Each dashboard is a repository of its own; its setup.sh writes the unit
 # pointing at the checkout here. A dashboard holds the GPU or the camera for
@@ -51,6 +52,7 @@ DASHBOARDS=(
     wallfollow:wallfollow_dashboard
     pursuit:pursuit_dashboard
     eps:eps_dashboard
+    smartfollow:smartfollow_dashboard
 )
 
 echo "Core services:"
@@ -121,9 +123,9 @@ done
 # first install stopped and disabled.
 #
 # A fast-forward is used rather than a reset: a car's tuned wallfollow.yaml,
-# pursuit.yaml, or eps.yaml lives in the checkout, and discarding it on every
-# setup run would cost the tuning the lab was built around. A checkout that
-# cannot fast-forward is reported and left alone.
+# pursuit.yaml, eps.yaml, or smartfollow.yaml lives in the checkout, and
+# discarding it on every setup run would cost the tuning the lab was built
+# around. A checkout that cannot fast-forward is reported and left alone.
 sync_dashboard() {
     local name="$1" repo="$2" dir="$DASHBOARDS_DIR/$2"
     if [[ ! -d "$dir/.git" ]]; then
@@ -162,4 +164,4 @@ echo "  sudo systemctl start neoracer-teleop"
 echo "Or reboot to bring everything up automatically."
 echo
 echo "Dashboards are installed but off. Start one for a session with:"
-echo "  racecar service start camlabel     # or wallfollow, pursuit, eps"
+echo "  racecar service start camlabel     # or wallfollow, pursuit, eps, smartfollow"

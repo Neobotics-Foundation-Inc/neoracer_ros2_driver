@@ -36,7 +36,7 @@ _RC_CORE_UNITS=(neoracer-teleop neoracer-watchdog neoracer-dashboard
 # camera or the GPU for its whole run, so they are opt-in rather than part of
 # the stack that comes up on boot.
 _RC_DASH_UNITS=(neoracer-camlabel neoracer-wallfollow neoracer-pursuit
-                neoracer-eps)
+                neoracer-eps neoracer-smartfollow)
 
 # Units that would come back on their own after a reboot. `restart` with no
 # unit named uses this so it never promotes a disabled service into a running
@@ -522,7 +522,7 @@ actions:
   status         active/enabled snapshot for every unit (default)
 core units:      teleop, watchdog, dashboard, jupyter
 lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083),
-                 eps (8084)
+                 eps (8084), smartfollow (8085)
 
 neoracer-autonomy is held and no longer installed. Run the base in a terminal:
   bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
@@ -1043,7 +1043,7 @@ Commands:
                         Core units: teleop, watchdog, dashboard, jupyter
                         Lab dashboards, off until started, one at a time:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
-                          eps (8084)
+                          eps (8084), smartfollow (8085)
                         neoracer-autonomy is held; setup no longer installs it.
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
@@ -1163,7 +1163,7 @@ _racecar_complete() {
                 local action="${COMP_WORDS[2]}"
                 case "$action" in
                     start|stop|restart|logs|enable|disable)
-                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit eps" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit eps smartfollow" -- "$cur") )
                         ;;
                 esac
             fi
