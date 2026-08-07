@@ -101,7 +101,7 @@ rather than failing, and logs that it did.
 
 ## Lab dashboards
 
-Three lab tools live in repositories of their own and are cloned into
+Four lab tools live in repositories of their own and are cloned into
 `scripts/dashboards/` by `scripts/setup_services.sh`, each tracking its default
 branch. The driver ships the wiring, not the code: the checkouts are gitignored,
 so a car's tuned dashboard yaml survives an update and a lab can be revised
@@ -120,10 +120,11 @@ setup_services.sh
 
 Each dashboard is a single process that subscribes to driver topics and serves
 its own web UI: camlabel (8082) on `/camera/color`, wallfollow (8081) on
-`/scan`, pursuit (8083) on `/edgetpu/inference`. They stay off by default
-because each holds the camera or the GPU for its whole run, and wallfollow and
-pursuit both publish `/drive`, where a second publisher fights the mux. One at a
-time, started per session through `racecar service start <name>`.
+`/scan`, pursuit (8083) on `/edgetpu/inference`, eps (8084) on `/scan` and
+`/odom`. They stay off by default because each holds the camera or the GPU for
+its whole run, and wallfollow, pursuit, and eps all publish `/drive`, where a
+second publisher fights the mux. One at a time, started per session through
+`racecar service start <name>`.
 
 The unit is a template rather than a fixed file so the service follows the
 checkout; that is what lets the driver own the install path without vendoring

@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>neoracer_ros2_driver</name>
-  <version>0.4.0</version>
+  <version>0.4.1</version>
   <description>Backend ROS2 driver for neoracer v1 with support for OSRbot software stack in collaboration with Seeed Studio</description>
   <maintainer email="chrisclai02@gmail.com">chrisclai</maintainer>
   <license>GPL-3.0-only</license>

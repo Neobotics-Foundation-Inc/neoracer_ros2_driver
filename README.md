@@ -272,15 +272,16 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
 ## Lab dashboards
 
-Three lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
+Four lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
 
 | Dashboard | Port | Repository | Purpose |
 | --- | --- | --- | --- |
 | camlabel | 8082 | [camlabel_dashboard](https://github.com/Neobotics-Foundation-Inc/camlabel_dashboard) | capture frames and drag boxes; writes a YOLO dataset to `~/data/camlabel` |
 | wallfollow | 8081 | [wallfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/wallfollow_dashboard) | wall following on `/scan` with live PD tuning |
 | pursuit | 8083 | [pursuit_dashboard](https://github.com/Neobotics-Foundation-Inc/pursuit_dashboard) | target following on `/edgetpu/inference` |
+| eps | 8084 | [eps_dashboard](https://github.com/Neobotics-Foundation-Inc/eps_dashboard) | episodic policy search; a (1+1)-ES tunes the gap follower's gains from one success or fail press per run |
 
-Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow and pursuit both publish `/drive`, so they are started one at a time for a session:
+Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow, pursuit, and eps all publish `/drive`, so they are started one at a time for a session:
 
 ```sh
 racecar service start camlabel     # on for this session
@@ -290,7 +291,7 @@ racecar service enable camlabel    # only if this car should boot into it
 
 `racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone.
 
-The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml` or `pursuit.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
+The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml`, `pursuit.yaml`, or `eps.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
 
 ## Jupyter notebooks and the student library
 

@@ -5,6 +5,21 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-07
+
+Adds `eps_dashboard` to the labs setup clones. It follows the contract the
+other three already meet, so the driver's side of it is the service name, the
+port, and the entry in the clone list.
+
+### Added
+- `eps` (port 8084), the fourth lab dashboard: `scripts/setup_services.sh` clones `eps_dashboard` into `scripts/dashboards/` and runs its `setup.sh`, and `racecar service start|stop|restart|enable|disable|logs eps` drives it like the others. Tab completion and `racecar service status` cover it. A (1+1) evolution strategy tunes the gap follower's four PID coefficients from one success or fail press per episode; it reads `/scan` and `/odom` and publishes `/drive`.
+
+### Changed
+- The one-at-a-time rule now names three `/drive` publishers rather than two. eps drives the car for the length of an episode, so wallfollow, pursuit, and eps each exclude the other two.
+
+### Fixed
+- `test_flake8` and `test_pep257` exclude `scripts/dashboards/`. The linters walked the dashboard checkouts, so a car that had run setup failed the driver's suite on style in code this repository does not own; each dashboard is linted in its own repository. Present since the checkouts landed in 0.4.0, and eps would have been a fourth source of it.
+
 ## [0.4.0] - 2026-08-06
 
 Brings the three lab dashboards onto the car as part of setup. They were
