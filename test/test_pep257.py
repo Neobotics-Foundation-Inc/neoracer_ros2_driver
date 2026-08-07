@@ -12,12 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 from ament_pep257.main import main
 import pytest
+
+# The lab dashboards are checkouts of their own repositories, dropped here by
+# setup_services.sh and gitignored. They are linted where they are maintained.
+DASHBOARDS = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'scripts', 'dashboards')
 
 
 @pytest.mark.linter
 @pytest.mark.pep257
 def test_pep257():
-    rc = main(argv=['.', 'test'])
+    rc = main(argv=['.', 'test', '--exclude', DASHBOARDS])
     assert rc == 0, 'Found code style errors / warnings'
