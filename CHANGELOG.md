@@ -5,6 +5,10 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+### Changed
+- The `idle_text` comments in `led_matrix_node`, `config/led_matrix.yaml`, and `test/test_led_matrix.py` are cut to the point each one makes. No behavior change.
+- The README's unsupported-hardware paragraph names `rc.display.clear()` alongside `show_text()` as a call that works on this panel. `clear()` returns it to the idle frame; the student library added it in `racecar-neo-library`.
+
 ## [0.4.3] - 2026-08-11
 
 Gives the dot-matrix panel's idle frame an owner. The `N` on an untouched car

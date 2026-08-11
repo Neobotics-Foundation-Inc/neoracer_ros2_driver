@@ -9,11 +9,8 @@ to ``/dotmatrix/text`` (std_msgs/String) - the topic the student library's
 ``display.show_text()`` publishes to - and writes each message to the serial
 port, appending a newline so the firmware knows the line is complete.
 
-The panel latches whatever was written last and the port stays open for the life
-of the node, so the firmware's power-on frame is gone as soon as anything
-publishes. ``idle_text`` is the frame the panel carries when no lab owns it: it
-is written once the port is open and again on shutdown, so a session that ends
-leaves the display where it started instead of on the last lab's output.
+The panel holds the last frame written, so ``idle_text`` is written once the
+port is open and again on shutdown to leave the display in a known state.
 
 Dependencies: pyserial (``serial``).
 """
@@ -40,10 +37,8 @@ class LedMatrixNode(Node):
         self.input_topic = self.declare_parameter(
             'input_topic', '/dotmatrix/text').value
         self.append_newline = self.declare_parameter('append_newline', True).value
-        # The panel's own power-on frame; nothing else in the stack writes it,
-        # so it has to be restated here to survive the first show_text(). An
-        # override that parses to no value at all leaves the panel untouched;
-        # " " is the way to ask for a blank idle panel.
+        # The panel's power-on frame, restated here because nothing else in the
+        # stack writes it. " " for a blank idle panel.
         self.idle_text = self.declare_parameter('idle_text', 'N').value
 
         try:
@@ -94,11 +89,8 @@ class LedMatrixNode(Node):
 
 def main(args=None):
     """Spin the LED matrix node until shutdown."""
-    # systemd and `ros2 launch` stop this node with SIGTERM, whose default
-    # action ends the process without running the teardown below, leaving the
-    # panel on whatever a lab wrote last. ALL puts SIGTERM on rclpy's own
-    # handler, which breaks the wait set and takes the same path SIGINT does; a
-    # plain signal.signal() handler would not run until rcl_wait returned.
+    # ALL puts SIGTERM on rclpy's handler so the teardown below runs under
+    # systemd; a signal.signal() handler would not run until rcl_wait returned.
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.ALL)
     node = LedMatrixNode()
     try:
