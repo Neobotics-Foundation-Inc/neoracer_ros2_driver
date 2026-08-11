@@ -107,8 +107,8 @@ def test_idle_text_is_configurable(monkeypatch):
 
 
 def test_main_routes_sigterm_through_rclpy(monkeypatch):
-    # systemd stops the node with SIGTERM. Only rclpy's own handler breaks the
-    # wait set, so anything else leaves the shutdown idle write unreached.
+    # Only rclpy's handler breaks the wait set, so anything else leaves the
+    # shutdown idle write unreached under systemd.
     FakeSerial.instances.clear()
     monkeypatch.setattr(lm.serial, 'Serial', FakeSerial)
     captured = {}
@@ -130,9 +130,7 @@ def test_main_routes_sigterm_through_rclpy(monkeypatch):
 
 
 def test_valueless_idle_text_leaves_the_panel_alone(monkeypatch):
-    # rcl rejects an empty parameter in a params file, but an override that
-    # parses to no value reaches declare_parameter() as None. Startup must not
-    # die on it.
+    # An override that parses to no value reaches declare_parameter() as None.
     try:
         node = _node_with_args(monkeypatch, ['--ros-args', '-p', 'idle_text:= '])
         node._on_text(_msg('HELLO'))
