@@ -195,7 +195,7 @@ racecar ws [neoracer|osracer]   # switch this shell between workspaces
 racecar library --list          # student library folders in ~/jupyter_ws
 racecar library --select <dir>  # point the student library at a notebook tree
 racecar selftest --led[=TEXT]   # send test text to the 8x8 display
-racecar clear --led             # clear the display
+racecar clear --led             # blank the display until something writes to it
 racecar udev                    # re-install the udev rules
 racecar status                  # peripherals + symlinks + running nodes
 racecar cleanup [--force]       # list / kill stale processes + SHM orphans

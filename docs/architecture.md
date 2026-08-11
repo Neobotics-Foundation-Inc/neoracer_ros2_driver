@@ -21,7 +21,7 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera/color` (JPEG-in-Image) | opencv, numpy |
 | `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
-| `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/dotmatrix/text` to USB-UART 8x8 | pyserial |
+| `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/dotmatrix/text` to USB-UART 8x8; writes `idle_text` on startup and shutdown | pyserial |
 | `lakibeam1` (pinned fork, cloned to `src/`) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
 
 ## Data pipeline

@@ -9,11 +9,19 @@ to ``/dotmatrix/text`` (std_msgs/String) - the topic the student library's
 ``display.show_text()`` publishes to - and writes each message to the serial
 port, appending a newline so the firmware knows the line is complete.
 
+The panel latches whatever was written last and the port stays open for the life
+of the node, so the firmware's power-on frame is gone as soon as anything
+publishes. ``idle_text`` is the frame the panel carries when no lab owns it: it
+is written once the port is open and again on shutdown, so a session that ends
+leaves the display where it started instead of on the last lab's output.
+
 Dependencies: pyserial (``serial``).
 """
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
 from std_msgs.msg import String
 
 import serial
@@ -32,6 +40,11 @@ class LedMatrixNode(Node):
         self.input_topic = self.declare_parameter(
             'input_topic', '/dotmatrix/text').value
         self.append_newline = self.declare_parameter('append_newline', True).value
+        # The panel's own power-on frame; nothing else in the stack writes it,
+        # so it has to be restated here to survive the first show_text(). An
+        # override that parses to no value at all leaves the panel untouched;
+        # " " is the way to ask for a blank idle panel.
+        self.idle_text = self.declare_parameter('idle_text', 'N').value
 
         try:
             self.serial = serial.Serial(
@@ -45,34 +58,52 @@ class LedMatrixNode(Node):
             rclpy.shutdown()
             return
 
+        self._write_idle()
+
         self.create_subscription(String, self.input_topic, self._on_text, 10)
         self.get_logger().info(
             f'[INFO] LED matrix node ready, subscribed to {self.input_topic}')
 
-    def _on_text(self, msg: String):
-        """Write an incoming string to the display, newline-terminated."""
-        data = msg.data
-        if self.append_newline and (not data or data[-1] != '\n'):
-            data += '\n'
+    def _write(self, text: str):
+        """Write one string to the display, newline-terminated."""
+        if getattr(self, 'serial', None) is None or not self.serial.is_open:
+            return
+        if self.append_newline and (not text or text[-1] != '\n'):
+            text += '\n'
         try:
-            self.serial.write(data.encode('utf-8'))
+            self.serial.write(text.encode('utf-8'))
         except serial.SerialException as e:
             self.get_logger().error(f'[ERROR] Could not write to display: {e}')
 
+    def _write_idle(self):
+        """Write the idle frame, unless ``idle_text`` resolved to no value."""
+        if self.idle_text is not None:
+            self._write(self.idle_text)
+
+    def _on_text(self, msg: String):
+        """Write an incoming string to the display."""
+        self._write(msg.data)
+
     def destroy_node(self):
-        """Close the serial port on shutdown."""
+        """Restore the idle frame, then close the serial port."""
         if getattr(self, 'serial', None) is not None and self.serial.is_open:
+            self._write_idle()
             self.serial.close()
         super().destroy_node()
 
 
 def main(args=None):
     """Spin the LED matrix node until shutdown."""
-    rclpy.init(args=args)
+    # systemd and `ros2 launch` stop this node with SIGTERM, whose default
+    # action ends the process without running the teardown below, leaving the
+    # panel on whatever a lab wrote last. ALL puts SIGTERM on rclpy's own
+    # handler, which breaks the wait set and takes the same path SIGINT does; a
+    # plain signal.signal() handler would not run until rcl_wait returned.
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.ALL)
     node = LedMatrixNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

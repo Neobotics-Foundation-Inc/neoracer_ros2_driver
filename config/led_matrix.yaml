@@ -5,3 +5,6 @@ led_matrix_node:
     baud: 115200
     input_topic: "/dotmatrix/text"
     append_newline: true
+    # Frame the panel carries when no lab is driving it. Written on startup and
+    # on shutdown; set to " " for a blank idle panel.
+    idle_text: "N"
