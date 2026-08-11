@@ -5,6 +5,26 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-11
+
+Gives the dot-matrix panel's idle frame an owner. The `N` on an untouched car
+was the panel firmware's power-on state, not anything the stack maintained: the
+node held the port open and wrote only what arrived on `/dotmatrix/text`, so the
+first `show_text()` of a session replaced `N` for good and a lab that ended on a
+blank frame left the car blank until the panel was power-cycled.
+
+### Added
+- `idle_text` parameter on `led_matrix_node` (default `"N"`, set in `config/led_matrix.yaml`): the frame the panel carries when no lab is driving it. Written once the serial port is open and again in `destroy_node()` before the port closes, so a stack restart returns the display to a known state. Set it to `" "` for a blank idle panel.
+- `_write()` on `led_matrix_node`, the single serial path the subscription callback and both idle writes share. It no-ops when the port is closed, so an idle write during teardown cannot raise past `destroy_node()`.
+- `test/test_led_matrix.py`: nine tests over a fake serial port, covering the startup and shutdown idle writes, newline handling, a write failure mid-session, the parameter overrides, and the signal handling `main()` installs.
+
+### Fixed
+- `led_matrix_node` exits on SIGTERM instead of running to systemd's stop timeout and dying on SIGKILL. `rclpy.init` now takes `signal_handler_options=ALL`, so SIGTERM goes through rclpy's handler and breaks the executor's wait set; `main()` catches `ExternalShutdownException` alongside `KeyboardInterrupt`. Without this the shutdown idle write is unreachable in service use, since only an interactive Ctrl-C reached `destroy_node()`. A plain `signal.signal()` handler does not work here: the Python handler does not run until `rcl_wait` returns, which for an idle node is never.
+
+### Notes
+- The idle frame is restored at node startup and shutdown only; there is no timeout that reclaims the panel from a running lab. A lab that intentionally holds a blank frame, such as `ultimate-wall-follower`, keeps it. Restoring mid-session is `racecar service restart led_matrix`, or a `show_text()` from the lab itself.
+- rcl rejects a valueless parameter in a params file, so `idle_text:` with nothing after it is a launch failure rather than a way to switch the idle writes off; `" "` is how to ask for a blank panel. A `-p idle_text:=` style override can still resolve to no value, and the node treats that as "leave the panel alone" instead of failing at startup.
+
 ## [0.4.2] - 2026-08-07
 
 Adds `smartfollow_dashboard` to the labs setup clones. It is the fifth lab and
