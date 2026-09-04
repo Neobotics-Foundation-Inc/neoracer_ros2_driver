@@ -19,6 +19,7 @@
 #   neoracer-pursuit.service     - target following (port 8083)
 #   neoracer-eps.service         - episodic policy search (port 8084)
 #   neoracer-smartfollow.service - wall and car following (port 8085)
+#   neoracer-linefollow.service  - line following (port 8086)
 #
 # Each dashboard is a repository of its own; its setup.sh writes the unit
 # pointing at the checkout here. A dashboard holds the GPU or the camera for
@@ -53,6 +54,7 @@ DASHBOARDS=(
     pursuit:pursuit_dashboard
     eps:eps_dashboard
     smartfollow:smartfollow_dashboard
+    linefollow:linefollow_dashboard
 )
 
 echo "Core services:"
@@ -123,9 +125,10 @@ done
 # first install stopped and disabled.
 #
 # A fast-forward is used rather than a reset: a car's tuned wallfollow.yaml,
-# pursuit.yaml, eps.yaml, or smartfollow.yaml lives in the checkout, and
-# discarding it on every setup run would cost the tuning the lab was built
-# around. A checkout that cannot fast-forward is reported and left alone.
+# pursuit.yaml, eps.yaml, smartfollow.yaml, or linefollow.yaml lives in the
+# checkout, and discarding it on every setup run would cost the tuning the lab
+# was built around. A checkout that cannot fast-forward is reported and left
+# alone.
 sync_dashboard() {
     local name="$1" repo="$2" dir="$DASHBOARDS_DIR/$2"
     if [[ ! -d "$dir/.git" ]]; then
@@ -164,4 +167,4 @@ echo "  sudo systemctl start neoracer-teleop"
 echo "Or reboot to bring everything up automatically."
 echo
 echo "Dashboards are installed but off. Start one for a session with:"
-echo "  racecar service start camlabel     # or wallfollow, pursuit, eps, smartfollow"
+echo "  racecar service start camlabel     # or wallfollow, pursuit, eps, smartfollow, linefollow"

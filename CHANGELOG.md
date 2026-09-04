@@ -5,7 +5,19 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-04
+
+Adds `linefollow_dashboard` to the labs setup clones. It is the sixth lab and
+the first driven by the camera alone: the oneshot lab's `hsv-p_tuner.py` served
+as a web page, so a student tunes the color threshold, the crop band, and the PD
+steering from trackbars and reads the follower's stability off a live trace
+instead of the car's desktop.
+
+### Added
+- `linefollow` (port 8086), the sixth lab dashboard: `scripts/setup_services.sh` clones `linefollow_dashboard` into `scripts/dashboards/` and runs its `setup.sh`, and `racecar service start|stop|restart|enable|disable|logs linefollow` drives it like the others. Tab completion and `racecar service status` cover it. It thresholds `/camera/color` in HSV, crops a band across the floor, takes the largest contour's center as the line, and steers with a PD on its offset from the frame center; throttle is constant or bled off in proportion to the offset. It reads `/camera/color` and `/odom` and publishes `/drive`.
+
 ### Changed
+- The one-at-a-time rule now names five `/drive` publishers rather than four. linefollow drives the car whenever it is up, so wallfollow, pursuit, eps, smartfollow, and linefollow each exclude the other four.
 - The `idle_text` comments in `led_matrix_node`, `config/led_matrix.yaml`, and `test/test_led_matrix.py` are cut to the point each one makes. No behavior change.
 - The README's unsupported-hardware paragraph names `rc.display.clear()` alongside `show_text()` as a call that works on this panel. `clear()` returns it to the idle frame; the student library added it in `racecar-neo-library`.
 
