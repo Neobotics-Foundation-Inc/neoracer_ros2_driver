@@ -101,7 +101,7 @@ rather than failing, and logs that it did.
 
 ## Lab dashboards
 
-Six lab tools live in repositories of their own and are cloned into
+Seven lab tools live in repositories of their own and are cloned into
 `scripts/dashboards/` by `scripts/setup_services.sh`, each tracking its default
 branch. The driver ships the wiring, not the code: the checkouts are gitignored,
 so a car's tuned dashboard yaml survives an update and a lab can be revised
@@ -122,9 +122,10 @@ Each dashboard is a single process that subscribes to driver topics and serves
 its own web UI: camlabel (8082) on `/camera/color`, wallfollow (8081) on
 `/scan`, pursuit (8083) on `/edgetpu/inference`, eps (8084) on `/scan` and
 `/odom`, smartfollow (8085) on all four of those topics at once, linefollow
-(8086) on `/camera/color` and `/odom`. They stay off by default because each
-holds the camera or the GPU for its whole run, and wallfollow, pursuit, eps,
-smartfollow, and linefollow all publish `/drive`, where a second publisher
+(8086) on `/camera/color` and `/odom`, webteleop (8087) on `/camera/color`,
+`/scan`, and `/odom`. They stay off by default because each holds the camera
+or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow,
+linefollow, and webteleop all publish `/drive`, where a second publisher
 fights the mux. One at a time, started per session through
 `racecar service start <name>`.
 
