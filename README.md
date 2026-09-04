@@ -272,7 +272,7 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
 ## Lab dashboards
 
-Six lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
+Seven lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
 
 | Dashboard | Port | Repository | Purpose |
 | --- | --- | --- | --- |
@@ -282,8 +282,9 @@ Six lab tools ship as repositories of their own and are cloned into `scripts/das
 | eps | 8084 | [eps_dashboard](https://github.com/Neobotics-Foundation-Inc/eps_dashboard) | episodic policy search; a (1+1)-ES tunes the gap follower's gains from one success or fail press per run |
 | smartfollow | 8085 | [smartfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/smartfollow_dashboard) | wallfollow and pursuit combined; follows a detected car, falls back to wall following |
 | linefollow | 8086 | [linefollow_dashboard](https://github.com/Neobotics-Foundation-Inc/linefollow_dashboard) | line following on `/camera/color`; HSV threshold, crop band, and PD steering tuned from trackbars, with a mask view and a stability trace |
+| webteleop | 8087 | [teleop_dashboard](https://github.com/Neobotics-Foundation-Inc/teleop_dashboard) | manual driving from the browser: WASD, arrow keys, or buttons, two at once; camera, lidar, and encoder views; a command timeout drives zero when the browser goes quiet |
 
-Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow, and linefollow all publish `/drive`, so they are started one at a time for a session:
+Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow, linefollow, and webteleop all publish `/drive`, so they are started one at a time for a session:
 
 ```sh
 racecar service start camlabel     # on for this session
@@ -293,7 +294,7 @@ racecar service enable camlabel    # only if this car should boot into it
 
 `racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone.
 
-The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml`, `pursuit.yaml`, `eps.yaml`, `smartfollow.yaml`, or `linefollow.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
+The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml`, `pursuit.yaml`, `eps.yaml`, `smartfollow.yaml`, `linefollow.yaml`, or `teleop.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
 
 ## Jupyter notebooks and the student library
 

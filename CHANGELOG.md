@@ -5,6 +5,22 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-04
+
+Adds `teleop_dashboard` to the labs setup clones. It is the seventh lab and the
+first that drives the car by hand: buttons and keys in a browser instead of a
+controller, with the camera, the lidar, and the encoder on the same page, so a
+student can feel out a track and read the car's response before automating it.
+
+### Added
+- `webteleop` (port 8087), the seventh lab dashboard: `scripts/setup_services.sh` clones `teleop_dashboard` into `scripts/dashboards/` and runs its `setup.sh`, and `racecar service start|stop|restart|enable|disable|logs webteleop` drives it like the others. Tab completion and `racecar service status` cover it. Four pad buttons, bound to WASD and the arrow keys and pressable two at once, set a forward/back and left/right command scaled by `speed` and `angle` sliders; a command older than `cmd_timeout` drives zero, so a closed tab or a dropped link coasts to a stop. It reads `/camera/color`, `/scan`, and `/odom` and publishes `/drive`.
+
+### Changed
+- The one-at-a-time rule now names six `/drive` publishers rather than five. webteleop drives the car whenever a button is down, so wallfollow, pursuit, eps, smartfollow, linefollow, and webteleop each exclude the other five.
+
+### Notes
+- The unit and CLI name is `webteleop`, not `teleop`, because `neoracer-teleop.service` is the core stack this dashboard rides on and `racecar service start <name>` maps straight to `neoracer-<name>`. The repository keeps the `teleop_dashboard` name; the `name:repo` pair in `DASHBOARDS` is what joins the two.
+
 ## [0.5.0] - 2026-09-04
 
 Adds `linefollow_dashboard` to the labs setup clones. It is the sixth lab and
