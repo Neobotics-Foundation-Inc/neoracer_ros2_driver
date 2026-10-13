@@ -109,6 +109,13 @@ class ControllerNode(Node):
         # ===== INITIALIZE SERIAL PORT =====
         try:
             self.serial = serial.Serial(self.port_name, self.baud_rate, timeout=0.1)
+            # Ask for the telemetry this driver parses. It is the firmware's
+            # boot default, but another program on this port can leave it off:
+            # the osracer chassis node sends `stream off` while it reads the
+            # firmware version, so one stopped at that moment leaves the ESP32
+            # silent until a power cycle (`racecar mode neoracer` hands the
+            # port back after osracer).
+            self.serial.write(b'stream sync\n')
             self.get_logger().info(f"[DEBUG] Connected to: {self.port_name}")
         except serial.SerialException as e:
             self.get_logger().fatal(
@@ -192,8 +199,9 @@ class ControllerNode(Node):
         return cfg
 
     # Firmware lines that are expected but carry nothing we publish: admin
-    # chatter (FW/DIAG/LINK banners, link acks).
-    _IGNORED_EXACT = frozenset({'link', 'OK', 'ERROR'})
+    # chatter (FW/DIAG/LINK banners, link acks, and the command acks, which
+    # V1.2 firmware writes as `OK: stream sync` where V1.1 wrote `OK`).
+    _IGNORED_EXACT = frozenset({'link', 'OK', 'OK:', 'ERROR', 'ERROR:'})
     _IGNORED_PREFIXES = ('FW', 'DIAG', 'LINK')
 
     # 3S LiPo bounds for the reported charge fraction (matches the vendor

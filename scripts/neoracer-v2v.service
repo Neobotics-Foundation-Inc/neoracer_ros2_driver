@@ -1,0 +1,24 @@
+[Unit]
+Description=Neoracer V2V (car-to-car state broadcast, UDP 4747)
+After=network-online.target neoracer-teleop.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+# NEORACER_CAR_ID and ROS_DOMAIN_ID arrive through the neoracer-.service.d
+# drop-in that `racecar v2v id N` writes for every neoracer-* unit.
+ExecStart=/bin/bash -c '\
+    source /opt/ros/humble/setup.bash && \
+    source /home/racecar/ros2_ws/install/setup.bash && \
+    exec ros2 launch neoracer_ros2_driver v2v.launch.py'
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/racecar
+WorkingDirectory=/home/racecar/ros2_ws
+KillMode=control-group
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

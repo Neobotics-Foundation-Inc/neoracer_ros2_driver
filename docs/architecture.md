@@ -22,6 +22,8 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 | `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
 | `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/dotmatrix/text` to USB-UART 8x8; writes `idle_text` on startup and shutdown | pyserial |
+| `v2v_node` (neoracer_ros2_driver/v2v_node.py) | hello broadcast for discovery; this car's state unicast to every car heard (UDP 4747); other cars' state to `/v2v/carN/odom`, `/v2v/peers`; acked messages and pings through `/v2v/send`, `/v2v/recv`, `/v2v/ping` | v2v_lib |
+| `v2v_lib` (neoracer_ros2_driver/v2v_lib.py) | pure packet validation, address book, peer table, message sender and receiver (exactly once, in order), interface enumeration (unit-tested) | - |
 | `lakibeam1` (pinned fork, cloned to `src/`) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
 
 ## Data pipeline
@@ -43,7 +45,10 @@ student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
 - Serial: ESP32 on `/dev/osrbot_base` (controller.py); 8x8 display on
   `/dev/osrbot_led_matrix` (led_matrix_node.py). Wire protocol in
   `docs/esp32_protocol.md`.
-- Network: Lakibeam lidar over UDP at `192.168.8.2` (launch/lidar.launch.py).
+- Network: Lakibeam lidar over UDP at `192.168.8.2` (launch/lidar.launch.py);
+  car-to-car JSON on UDP 4747 (v2v_node): a hello broadcast on every
+  interface that is up, everything else unicast; each car in its own ROS
+  domain so nothing crosses through DDS.
 - USB video: camera at `/dev/osrbot_usb_cam` (camera.py).
 - Topics: `/motor`, `/imu/fused`, `/odom`, `/joy`, `/mag`, `/battery`, `/scan`,
   `/camera/color`, `/edgetpu/inference`, `/dotmatrix/text`, `/drive`, and the

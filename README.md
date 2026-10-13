@@ -9,6 +9,8 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [Quickstart (fresh JetPack 6.2 install)](#quickstart-fresh-jetpack-62-install)
 - [The `racecar` shell tool](#the-racecar-shell-tool)
 - [Networking (optional)](#networking-optional)
+- [Car-to-car (V2V)](#car-to-car-v2v)
+- [Localization and navigation (osracer)](#localization-and-navigation-osracer)
 - [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
 - [Web dashboard](#web-dashboard)
 - [Lab dashboards](#lab-dashboards)
@@ -63,6 +65,7 @@ Published topics:
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 - `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. On by default; see [Object detection](#object-detection).
+- `/v2v/peers` (std_msgs/String), `/v2v/carN/odom` (nav_msgs/Odometry), `/v2v/recv` (std_msgs/String): the other cars on the network, once this car is stamped; see [Car-to-car (V2V)](#car-to-car-v2v).
 
 The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) enforces speed caps, arming, and manual/autonomy arbitration, so RC driving and autonomous code share one speed-limited path. A 3-position FlySky switch selects **idle / manual / autonomy**, mapped to the `/joy` buttons the mux reads. Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
@@ -182,6 +185,11 @@ racecar service restart     # every enabled unit; never starts a disabled one
 racecar service start camlabel   # a lab dashboard, for this session
 racecar service logs teleop # journalctl -u neoracer-teleop -f
 
+racecar v2v id 1            # stamp this car as car 1: identity + ROS domain + v2v service
+racecar v2v status          # the other cars on the network
+racecar v2v ping 2          # round trip to car 2
+racecar v2v send slow down  # one message to every car
+
 racecar mapping             # SLAM to build a map (slam_toolbox default)
 racecar mapping save <name> # save the current map
 racecar navigation          # Nav2 on a saved map (teb default)
@@ -192,6 +200,7 @@ racecar setup networking    # WiFi AP + Ethernet + lidar subnet
 racecar update              # repo to latest main + full setup + service restart
 
 racecar ws [neoracer|osracer]   # switch this shell between workspaces
+racecar mode [osracer|neoracer] # which stack owns the ESP32 and the lidar, across reboots
 racecar library --list          # student library folders in ~/jupyter_ws
 racecar library --select <dir>  # point the student library at a notebook tree
 racecar selftest --led[=TEXT]   # send test text to the 8x8 display
@@ -239,9 +248,75 @@ racecar setup networking --reset    # disable the AP + clear the saved car ID
 
 Run `--reset` before capturing a golden image, so the clone ships with no active AP and no baked-in SSID.
 
+## Car-to-car (V2V)
+
+Every car sends its state to every other car ten times a second: pose in its own odom frame, speed, yaw rate, commanded speed and steering, battery. Cars also exchange text messages that arrive exactly once and in order. It runs as JSON on UDP 4747: a 1 Hz broadcast finds the cars and everything else goes unicast, which Wi-Fi delivers without loss. Each car runs its own ROS domain, so one car's `/drive` can never reach another.
+
+Once per car, with every car on one network:
+
+```sh
+sudo nmcli dev wifi connect <ssid> password <psk>   # or Ethernet
+racecar v2v id 1          # unique per car (2, 3, ...): sets the ROS domain, starts neoracer-v2v
+```
+
+Use it:
+
+```sh
+racecar v2v status            # other cars: age, loss, pose, speed, battery
+racecar v2v ping 2            # round trip to car 2
+racecar v2v send slow down    # to every car; prints delivered or NOT delivered per car
+racecar v2v recv              # messages as they arrive
+```
+
+| Topic | Use |
+| --- | --- |
+| `/v2v/peers` | every other car as JSON, 10 Hz |
+| `/v2v/carN/odom` | car N's pose (nav_msgs/Odometry, frame `carN/odom`) |
+| `/v2v/send`, `/v2v/recv` | send text (std_msgs/String); messages and delivery reports come back on `recv` |
+| `/v2v/ping` | a car id to ping (std_msgs/Int32) |
+
+Signing is optional: `racecar v2v key new` on one car, then `racecar v2v key set <hex>` on the others, and cars reject unsigned, forged and replayed packets. A laptop on the network joins as a virtual car with `python3 scripts/v2v_peer.py --as-car 9 --broadcast <subnet broadcast>`, or only listens with `--watch 90`. Positions are each car's own odometry: there is no shared frame yet.
+
+## Localization and navigation (osracer)
+
+Mapping, localization and Nav2 run on the vendor stack, [osrbot/osracer](https://github.com/osrbot/osracer), in `~/osracer_ws`. Keep its checkout at commit `c70eb50`: upstream `main` launches its chassis from an `osracer_base` package the repository does not ship. osracer drives the same ESP32 and lidar as this driver, so switch the car first:
+
+```sh
+racecar mode osracer     # teleop off, ESP32 and lidar free, every terminal on ~/osracer_ws; survives reboots
+racecar mode neoracer    # back to this driver
+racecar mode             # current mode and who holds the ESP32 and the lidar
+```
+
+V2V keeps running in both modes. osracer drives the motors directly, outside the FlySky arming switch, so try navigation with the wheels off the ground first.
+
+```sh
+# 1. Base: chassis, TF, lidar (the lidar takes about 30 s)
+ros2 launch osracer_bringup bringup.launch.py
+
+# 2. Map: push or drive the car around the room and finish where you started
+ros2 launch osracer_slam slam_toolbox.launch.py
+ros2 launch osracer_debug debug_mapping.launch.py     # RViz, on the car's desktop (RustDesk or a monitor)
+mkdir -p ~/maps
+ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap "{name: {data: /home/racecar/maps/room}}"
+
+# 3. Localize: stop slam_toolbox, put the car back at the start
+ros2 launch osracer_navigation nav2.launch.py use_planner:=teb map:=/home/racecar/maps/room.yaml use_rviz:=False
+ros2 topic pub -t 3 -r 1 /initialpose geometry_msgs/msg/PoseWithCovarianceStamped "{header: {frame_id: map}, pose: {pose: {orientation: {w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.07]}}"
+ros2 topic echo /amcl_pose --once
+
+# 4. Navigate: 1 m ahead of the start
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0}, orientation: {w: 1.0}}}"
+```
+
+- Over SSH keep `use_rviz:=False`: RViz cannot open a window there, and its exit stops the whole launch. At the car's desktop leave it on and use RViz's 2D Pose Estimate and Nav2 Goal instead of the two `topic pub` lines.
+- osracer's README writes `use_map:=/path/to/map.yaml`, but `use_map` takes a map name. Pass a path with `map:=`.
+- "Timed out waiting for transform from base_link to map" repeats until AMCL has an initial pose.
+- Mapping and navigation in one launch: `ros2 launch osracer_navigation bringup_launch.py slam:=True planner:=teb`.
+- osracer's scripts in `~/osracer_ws/src/osracer/osracer_demo/scripts/` (`start_mapping_demo.sh`, `start_navigation_demo.sh`, `save_map_demo.sh`, `stop_all_demo.sh`) wrap the same steps.
+
 ## Autonomy: SLAM and Nav2
 
-SLAM and navigation run on demand, not as services. The autonomy base (`autonomy.launch.py`) runs only TF, the EKF, and the twist bridge.
+For working mapping, localization and Nav2 today, see [Localization and navigation (osracer)](#localization-and-navigation-osracer). SLAM and navigation run on demand, not as services. The autonomy base (`autonomy.launch.py`) runs only TF, the EKF, and the twist bridge.
 
 `neoracer-autonomy.service` is **held**: the unit file stays in `scripts/`, but setup does not install it, and a setup run removes it from a car that has it from an earlier release. The service does not work yet and development is paused until further notice. Start the base by hand while it is held:
 

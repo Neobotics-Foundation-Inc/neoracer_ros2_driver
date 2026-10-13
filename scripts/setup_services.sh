@@ -62,6 +62,7 @@ DASHBOARDS=(
 echo "Core services:"
 
 changed=0
+first_install=()
 for svc in "${SERVICES[@]}"; do
     src="${SCRIPT_DIR}/${svc}"
     dst="/etc/systemd/system/${svc}"
@@ -69,6 +70,7 @@ for svc in "${SERVICES[@]}"; do
         echo "Missing $src - skipping" >&2
         continue
     fi
+    [[ -f "$dst" ]] || first_install+=("$svc")
     if cmp -s "$src" "$dst" 2>/dev/null; then
         echo "  $svc: already up to date"
     else
@@ -110,16 +112,18 @@ if [[ $held_removed -eq 1 ]]; then
     sudo systemctl daemon-reload
 fi
 
-# Enable so they auto-start on boot. `enable` is idempotent - no-op if
-# already enabled. We deliberately don't `start` here; the user controls
-# when the stack first comes up (avoids surprise launch during install).
+# Enable on the first install only, so they auto-start on boot. A unit that
+# was here before keeps the enable state it has: `racecar mode osracer`
+# disables teleop and the watchdog on purpose, and `racecar update` must not
+# turn them back on under a running osracer stack. We deliberately don't
+# `start` here; the user controls when the stack first comes up.
+for svc in "${first_install[@]}"; do
+    sudo systemctl enable "$svc"
+    echo "  $svc: enabled (first install)"
+done
 for svc in "${SERVICES[@]}"; do
-    if systemctl is-enabled --quiet "$svc"; then
-        echo "  $svc: already enabled"
-    else
-        sudo systemctl enable "$svc"
-        echo "  $svc: enabled"
-    fi
+    [[ " ${first_install[*]} " == *" $svc "* ]] && continue
+    echo "  $svc: $(systemctl is-enabled "$svc"), left as it is"
 done
 
 # Bring one dashboard checkout to the tip of its default branch, then hand off

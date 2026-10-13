@@ -6,7 +6,7 @@ package_name = 'neoracer_ros2_driver'
 
 setup(
     name=package_name,
-    version='0.6.0',
+    version='0.7.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -40,6 +40,7 @@ setup(
             'throttle_node = neoracer_ros2_driver.throttle_node:main',
             'led_matrix = neoracer_ros2_driver.led_matrix_node:main',
             'twist_bridge = neoracer_ros2_driver.twist_bridge_node:main',
+            'v2v_node = neoracer_ros2_driver.v2v_node:main',
         ],
     },
 )

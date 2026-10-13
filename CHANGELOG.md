@@ -5,6 +5,33 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-13
+
+Adds car-to-car communication. Stamped cars find each other with a broadcast
+hello, send a J2735-shaped state packet to each other ten times a second, and
+mirror each other's state into their own ROS graphs. Text messages are
+delivered exactly once and in order, or reported undelivered. Built for
+Purdue's cyber transportation testbed, where the packets must be plain enough
+to sniff, replay, and forge on purpose.
+
+### Added
+- `v2v_node` (`neoracer_ros2_driver/v2v_node.py`, pure logic in `v2v_lib.py`): a `hello` broadcast once a second on every interface that is up finds the other cars; `/odom`, `/imu/fused`, `/mux_out`, and `/battery` go as JSON over UDP port 4747, unicast at 10 Hz to every car heard in the last 3 s; peers come back as `/v2v/carN/odom` and a `/v2v/peers` table; `/v2v/send` sends a message to every car sending state, numbered per recipient, acked, resent every 0.1 s until acked, and reported `delivered` or `undelivered` (after 10 s) on `/v2v/recv`, where received messages arrive once and in order; `/v2v/ping` is answered by the other car's node with the round trip on `/v2v/recv`. Every packet from the network is validated first, and a stale own input goes out as null rather than as its last value.
+- `racecar v2v id N` (`scripts/setup_v2v.sh`): stamps the car with `NEORACER_CAR_ID` and `ROS_DOMAIN_ID` in `~/.neoracer/env`, sourced by `~/.bashrc` and handed to every `neoracer-*` service through one drop-in under `/etc/systemd/system/neoracer-.service.d/`, then installs and enables `neoracer-v2v.service` and restarts the enabled units. `racecar v2v status|ping|send|recv` (`scripts/v2v_tool.py`) drive the running node; `racecar service status` lists the unit under optional, and `racecar service start|stop|logs v2v` work as for any unit.
+- `scripts/v2v_peer.py`: observer (`--watch N`) and virtual car (`--as-car N`) for any laptop on the network, run from a clone with nothing but Python.
+- `test/test_v2v.py`: packet validation, the address book, the peer table's loss and restart accounting, in-order exactly-once delivery through a link that drops half the frames each way, retransmit and give-up timing, interface enumeration.
+- V2V signing, off until a car holds a fleet key: `racecar v2v key new|set|show|off` (`scripts/v2v_key.sh`) manages `~/.neoracer/v2v.key`. With it, `v2v_node` appends an HMAC-SHA256 tag (128 bits, over the exact bytes sent) to every packet and rejects unsigned and forged ones; every packet carries its sender's per-start epoch, and with a key a `ReplayGuard` rejects packets from a replaced epoch and hello or state packets whose sequence does not advance. `/v2v/peers` reports signing on/off with the key's fingerprint and counts rejections by reason. `v2v_peer.py --key` signs and verifies.
+- `racecar mode osracer|neoracer|status` (`scripts/racecar_mode.sh`): hands the ESP32 and the lidar between the neoracer driver and the vendor osracer stack in `~/osracer_ws`. osracer mode stops and disables `neoracer-teleop` and `neoracer-watchdog`, stops and disables any lab dashboard (they are off at boot by policy; one enabled by hand would come back after a reboot and hold the camera), and waits until `/dev/osrbot_base` and UDP 2368 are free; neoracer mode runs osracer's `stop_all_demo.sh` and brings teleop and the watchdog back. The mode is the enable state of `neoracer-teleop`, so it survives a reboot; the shell moves to the matching workspace, and a block the first switch adds to `~/.bashrc` opens every new terminal on it too. `racecar service start` refuses to start teleop in osracer mode.
+
+### Changed
+- Cars on one network no longer share a ROS graph once stamped: each runs in its own domain, so one car's `/drive` cannot steer another. A shell opened before the stamp keeps domain 0 and sees nothing until it is reopened. The stamp also links `~/.config/environment.d/10-neoracer.conf` to the identity file, so programs started from the car's desktop join the same domain after the next login.
+- `controller` sends `stream sync` when it opens the ESP32, so the telemetry it parses is on even when another program left it off (the osracer chassis node sends `stream off` while it reads the firmware version).
+- `setup_services.sh` enables a core unit only when it installs it for the first time, as its header always said. A re-run used to re-enable a unit that had been disabled on purpose, which would turn an osracer-mode car back to neoracer on `racecar update`.
+
+### Notes
+- Positions are each car's own odometry; the cars share no frame until a map or external positioning provides one. Ages and round trips are measured on one clock, because the cars' wall clocks are not synchronized.
+- The id doubles as the ROS domain and is limited to 1..101, the range DDS maps to ports on every host.
+- Only discovery is broadcast because 802.11 sends a broadcast frame once without an ack and retries a unicast one. On Halo at 2.4 GHz a broadcast state stream lost 4.8% of its packets; the unicast stream lost none in 5 minutes, and 300 messages each way at 20 a second all arrived once and in order (ack median 14.5 ms, worst 353 ms).
+
 ## [0.6.0] - 2026-09-04
 
 Adds `teleop_dashboard` to the labs setup clones. It is the seventh lab and the

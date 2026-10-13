@@ -1,0 +1,40 @@
+v2v_node:
+  ros__parameters:
+    # This car's number on the wire. 0 means unset and the node refuses to
+    # start. launch/v2v.launch.py fills it from NEORACER_CAR_ID, which
+    # `racecar v2v id N` writes to ~/.neoracer/env together with ROS_DOMAIN_ID.
+    car_id: 0
+
+    # UDP port. Every car on the network uses the same one.
+    port: 4747
+
+    # State packets per second, unicast to every car heard within
+    # addr_timeout_sec. J2735 BSMs go out at 10 Hz on real V2X radios.
+    state_rate_hz: 10.0
+
+    # Discovery: a hello broadcast on every interface this often. The only
+    # broadcast; 802.11 sends broadcasts once without an ack, so the data
+    # itself goes unicast.
+    hello_rate_hz: 1.0
+
+    # A car not heard from for this long gets no more state from this car.
+    addr_timeout_sec: 3.0
+
+    # /v2v/peers table publish rate, also how often silent peers are checked.
+    peers_rate_hz: 10.0
+
+    # A peer whose state stops for longer than this is dropped from the table.
+    peer_timeout_sec: 1.0
+
+    # Messages: resent every msg_retry_sec until acked, reported undelivered
+    # after msg_timeout_sec. Round trips on Halo 2.4 GHz measured 2 to 390 ms.
+    msg_retry_sec: 0.1
+    msg_timeout_sec: 10.0
+
+    # An own sensor input older than this is sent as null rather than as a
+    # stale reading, so a peer never mistakes a dead topic for a stopped car.
+    # /odom, /imu/fused and /mux_out run at 50 Hz and above.
+    input_timeout_sec: 1.0
+
+    # /battery arrives every 2.5 s from the firmware and changes slowly.
+    battery_timeout_sec: 10.0

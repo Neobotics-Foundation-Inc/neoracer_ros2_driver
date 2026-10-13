@@ -39,19 +39,25 @@ _RC_DASH_UNITS=(neoracer-camlabel neoracer-wallfollow neoracer-pursuit
                 neoracer-eps neoracer-smartfollow neoracer-linefollow
                 neoracer-webteleop)
 
+# Optional units a car opts into by name. neoracer-v2v is installed and
+# enabled by `racecar v2v id N`; nothing else installs it.
+_RC_OPT_UNITS=(neoracer-v2v)
+
 # Units that would come back on their own after a reboot. `restart` with no
 # unit named uses this so it never promotes a disabled service into a running
 # one; systemctl restart starts a stopped unit, which would otherwise put a
 # lab dashboard on the graph behind the student's back.
 _rc_enabled_units() {
     local u
-    for u in "${_RC_CORE_UNITS[@]}" "${_RC_DASH_UNITS[@]}"; do
+    for u in "${_RC_CORE_UNITS[@]}" "${_RC_DASH_UNITS[@]}" "${_RC_OPT_UNITS[@]}"; do
         systemctl is-enabled --quiet "$u" 2>/dev/null && echo "$u"
     done
 }
 
+# No pipe into `grep -q`: it exits at the first match, systemctl dies on
+# SIGPIPE, and a shell with pipefail on would read an installed unit as absent.
 _rc_unit_installed() {
-    systemctl list-unit-files "$1.service" 2>/dev/null | grep -q "^$1.service"
+    systemctl cat "$1.service" > /dev/null 2>&1
 }
 
 # One status line. An absent unit reports as such rather than passing
@@ -459,6 +465,17 @@ __RC_COMPILE__
                     bash "$pkg_dir/scripts/setup_services.sh"
                     ;;
                 start|stop|restart)
+                    # In osracer mode teleop is disabled on purpose and the
+                    # vendor stack may own the ESP32 and the lidar; starting
+                    # teleop by hand would put two drivers on both.
+                    if [[ "$action" == start ]] \
+                        && [[ -z "$1" || "$1" == teleop || "$1" == watchdog ]] \
+                        && _rc_unit_installed neoracer-teleop \
+                        && ! systemctl is-enabled --quiet neoracer-teleop; then
+                        echo "racecar service: this car is in osracer mode (neoracer-teleop is disabled)." >&2
+                        echo "Switch back with: racecar mode neoracer" >&2
+                        return 1
+                    fi
                     if [[ -n "$1" ]]; then
                         local unit="neoracer-$1"
                         if ! _rc_unit_installed "$unit"; then
@@ -507,6 +524,10 @@ __RC_COMPILE__
                     for u in "${_RC_DASH_UNITS[@]}"; do
                         _rc_unit_status_line "$u"
                     done
+                    echo "  -- optional (racecar v2v id N installs v2v) --"
+                    for u in "${_RC_OPT_UNITS[@]}"; do
+                        _rc_unit_status_line "$u"
+                    done
                     ;;
                 -h|--help|help)
                     cat <<'__RC_SVC_HELP__'
@@ -522,6 +543,7 @@ actions:
   logs [name]    journalctl -u neoracer-<name> -f; default = teleop
   status         active/enabled snapshot for every unit (default)
 core units:      teleop, watchdog, dashboard, jupyter
+optional:        v2v (installed and enabled by racecar v2v id N)
 lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083),
                  eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
 
@@ -535,6 +557,96 @@ __RC_SVC_HELP__
                     ;;
                 *)
                     echo "racecar service: unknown action '$action'" >&2
+                    return 2
+                    ;;
+            esac
+            ;;
+
+        mode)
+            # Which stack owns the ESP32 and the lidar: the neoracer driver
+            # (neoracer-teleop) or the vendor osracer stack in ~/osracer_ws.
+            # The switch persists across reboots; this shell also moves to the
+            # matching workspace.
+            local target="${1:-status}"
+            case "$target" in
+                osracer|neoracer)
+                    bash "$pkg_dir/scripts/racecar_mode.sh" "$target" || return $?
+                    racecar ws "$target"
+                    ;;
+                status)
+                    bash "$pkg_dir/scripts/racecar_mode.sh" status
+                    ;;
+                -h|--help|help)
+                    cat <<'__RC_MODE_HELP__'
+usage: racecar mode [osracer|neoracer|status]
+  osracer   Stop and disable neoracer-teleop and neoracer-watchdog (and any
+            running lab dashboard), wait until /dev/osrbot_base and lidar UDP
+            2368 are free, and switch this shell to ~/osracer_ws. osracer's
+            own launch files then own the hardware, across reboots too.
+  neoracer  Run osracer's stop_all_demo.sh, wait until the hardware is free,
+            enable and start neoracer-teleop and neoracer-watchdog, and switch
+            this shell back to the neoracer workspace.
+  status    The mode, this shell's ROS domain, and who holds the ESP32 and
+            the lidar port right now (default).
+neoracer-v2v, the web dashboard and Jupyter keep running in both modes.
+osracer drives the ESP32 directly, outside the neoracer mux and the FlySky
+arming switch: test a new osracer setup with the wheels off the ground.
+__RC_MODE_HELP__
+                    ;;
+                *)
+                    echo "usage: racecar mode [osracer|neoracer|status]" >&2
+                    return 2
+                    ;;
+            esac
+            ;;
+
+        v2v)
+            # Car-to-car state exchange. `id N` stamps the car (identity, ROS
+            # domain, service); the other actions talk to the running v2v_node.
+            local action="${1:-status}"
+            shift || true
+            case "$action" in
+                id)
+                    bash "$pkg_dir/scripts/setup_v2v.sh" "$@" || return $?
+                    # The calling shell takes the new identity now; new shells
+                    # read it from ~/.bashrc.
+                    set -a
+                    # shellcheck disable=SC1091
+                    . "$HOME/.neoracer/env"
+                    set +a
+                    ;;
+                status|ping|send|recv)
+                    python3 "$pkg_dir/scripts/v2v_tool.py" "$action" "$@"
+                    ;;
+                key)
+                    bash "$pkg_dir/scripts/v2v_key.sh" "$@"
+                    ;;
+                -h|--help|help)
+                    cat <<'__RC_V2V_HELP__'
+usage: racecar v2v <action> [args]
+actions:
+  id <N>           Stamp this car as car N: NEORACER_CAR_ID and ROS_DOMAIN_ID in
+                   ~/.neoracer/env, handed to every neoracer-* service through one
+                   systemd drop-in, neoracer-v2v installed and enabled, the stack
+                   restarted. Keep the car still. Re-run to renumber.
+  status [-w]      Peer table from this car's v2v_node (-w keeps printing).
+  ping <N> [-c K]  Round trip to car N through both cars' v2v_node (default 20).
+  send <text>      Message to every car; they show it under `racecar v2v recv`.
+  recv             Print messages and pongs as they arrive (Ctrl-C to stop).
+  key new          Make a fleet signing key on this car and print the `set`
+                   line for the others. With a key, the car signs every packet
+                   and rejects unsigned, forged and replayed ones.
+  key set <hex>    Install the fleet key made by `key new` on another car.
+  key show         Signing on or off, and the key's fingerprint (equal on every
+                   car that shares the key).
+  key off          Remove the key: signing off.
+Topics on every car: /v2v/peers, /v2v/carN/odom, /v2v/send, /v2v/recv, /v2v/ping.
+Wire: JSON over UDP broadcast on port 4747. scripts/v2v_peer.py watches it from
+a laptop on the same network, or joins as a virtual car.
+__RC_V2V_HELP__
+                    ;;
+                *)
+                    echo "racecar v2v: unknown action '$action'" >&2
                     return 2
                     ;;
             esac
@@ -1046,6 +1158,16 @@ Commands:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
                           eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
                         neoracer-autonomy is held; setup no longer installs it.
+    mode [osracer|neoracer|status]
+                        Which stack owns the ESP32 and the lidar. osracer stops
+                        and disables teleop + watchdog so ~/osracer_ws launch
+                        files can run; neoracer stops osracer and brings teleop
+                        back. Persists across reboots (`racecar mode help`).
+    v2v <action>        Car-to-car communication (`racecar v2v help` for details):
+                          id <N>       stamp this car: identity + ROS domain + service
+                          status [-w]  peer table from this car's v2v_node
+                          ping <N>     round trip to car N
+                          send <text>  message every car; `recv` prints arrivals
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
                           --list              show valid folders in ~/jupyter_ws
@@ -1082,7 +1204,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch compile clear udev watchdog service mode v2v setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -1105,6 +1227,9 @@ _racecar_complete() {
             ;;
         ws)
             COMPREPLY=( $(compgen -W "neoracer osracer status" -- "$cur") )
+            ;;
+        mode)
+            COMPREPLY=( $(compgen -W "osracer neoracer status help" -- "$cur") )
             ;;
         clear)
             COMPREPLY=( $(compgen -W "--led" -- "$cur") )
@@ -1164,9 +1289,14 @@ _racecar_complete() {
                 local action="${COMP_WORDS[2]}"
                 case "$action" in
                     start|stop|restart|logs|enable|disable)
-                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit eps smartfollow linefollow webteleop" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit eps smartfollow linefollow webteleop v2v" -- "$cur") )
                         ;;
                 esac
+            fi
+            ;;
+        v2v)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "id status ping send recv key help" -- "$cur") )
             fi
             ;;
         selftest)
