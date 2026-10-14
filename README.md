@@ -6,7 +6,9 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 
 This is the development branch for car-to-car communication (V2V) and the osracer mode switch. It is not merged into main.
 
-Do not run `racecar update` on this branch. That command resets the car to main, which removes V2V. To update a car on this branch:
+A new car: follow the Getting Started guide as written. The installer puts the car on main. After the reboot, run the commands below once to move it to this branch.
+
+Do not run `racecar update` on this branch. That command resets the car to main, which removes V2V. To update a car on this branch, or to move a freshly installed car onto it:
 
 ```sh
 cd ~/ros2_ws/src/neoracer_ros2_driver
