@@ -5,8 +5,6 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-10-13
-
 Adds car-to-car communication. Stamped cars find each other with a broadcast
 hello, send a J2735-shaped state packet to each other ten times a second, and
 mirror each other's state into their own ROS graphs. Text messages are

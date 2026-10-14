@@ -2,8 +2,30 @@
 
 ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering racing robot built by [Neobotics Foundation](https://github.com/Neobotics-Foundation-Inc) in collaboration with Seeed Studio.
 
+## This branch
+
+This is the development branch for car-to-car communication (V2V) and the osracer mode switch. It is not merged into main.
+
+Do not run `racecar update` on this branch. That command resets the car to main, which removes V2V. To update a car on this branch:
+
+```sh
+cd ~/ros2_ws/src/neoracer_ros2_driver
+git fetch origin
+git checkout neoracer_ros2_driver_purdue
+git reset --hard origin/neoracer_ros2_driver_purdue
+bash scripts/setup_all.sh
+```
+
+TODO before merging into main:
+
+- Test `stream sync` on a car with V1.1 firmware: restart teleop, check its log for the firmware's reply, and confirm `ros2 topic hz /odom` still publishes.
+- Document the `stream` command in docs/esp32_protocol.md.
+- Call out the two changes that affect every car in the PR: the controller sending `stream sync` on start, and setup_services.sh enabling units only on first install.
+- Remove this section.
+
 ## Contents
 
+- [This branch](#this-branch)
 - [Hardware](#hardware)
 - [Architecture](#architecture)
 - [Quickstart (fresh JetPack 6.2 install)](#quickstart-fresh-jetpack-62-install)
