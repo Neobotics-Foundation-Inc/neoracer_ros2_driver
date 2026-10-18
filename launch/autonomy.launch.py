@@ -73,17 +73,21 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('slam')),
     )
 
-    # use_namespace/use_rviz must be Python-cased: Nav2's bringup evaluates
-    # them in a PythonExpression, and the vendor's lowercase defaults throw
-    # NameError. RViz stays off; this runs headless under systemd.
     nav = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('osracer_navigation'),
-            'launch', 'nav2.launch.py')),
+            'launch', 'bringup_launch.py')),
         condition=IfCondition(LaunchConfiguration('nav')),
         launch_arguments={
             'use_namespace': 'False',
-            'use_rviz': 'False',
+            'use_composition': 'False',
+            'slam': 'False',
+            'map': os.path.join(
+                get_package_share_directory('osracer_slam'),
+                'maps', 'map.yaml'),
+            'params_file': os.path.join(
+                get_package_share_directory('osracer_navigation'),
+                'params', 'teb_nav2_params.yaml'),
         }.items(),
     )
 
