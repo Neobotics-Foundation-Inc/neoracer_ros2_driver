@@ -48,7 +48,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from neoracer_ros2_driver import v2v_lib as v2v  # noqa: E402,I100
 
-PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'v2v_view.html')
+# The page, the Playground's top-down NeoRacer sprite, and the sprite's rear
+# wing and front bumper as a paint layer the page tints in each car's colour.
+FILES = {'/': ('v2v_view.html', 'text/html; charset=utf-8'),
+         '/car.png': ('v2v_view_car.png', 'image/png'),
+         '/car-paint.png': ('v2v_view_car_paint.png', 'image/png')}
 HELLO_SEC = 1.0
 # The path drawn behind a car: a point every TRAIL_STEP m, the last
 # TRAIL_KEEP of them (75 m).
@@ -283,14 +287,17 @@ class Observer:
 
 def serve_page(fleet, port):
     """Serve the bird's-eye page and the cars' state on this port."""
-    with open(PAGE, 'rb') as f:
-        page = f.read()
+    here = os.path.dirname(os.path.abspath(__file__))
+    files = {}
+    for path, (name, kind) in FILES.items():
+        with open(os.path.join(here, name), 'rb') as f:
+            files[path] = (f.read(), kind)
 
     class Handler(BaseHTTPRequestHandler):
 
         def do_GET(self):
-            if self.path == '/':
-                body, kind = page, 'text/html; charset=utf-8'
+            if self.path in files:
+                body, kind = files[self.path]
             elif self.path == '/state':
                 body = json.dumps({'cars': fleet.snapshot(time.monotonic())}).encode('utf-8')
                 kind = 'application/json'

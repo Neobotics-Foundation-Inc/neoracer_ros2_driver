@@ -49,19 +49,51 @@
 <div id="scale"></div>
 <script>
 const COLOURS = ['#FF0033', '#E2E2E2', '#3FA7D6', '#F2A541', '#7BD389', '#B48EF0'];
-// The car as drawn: its body (metres, lidar to tail and either side) and
-// the stale age (s) after which its row greys out.
-const CAR_LONG = 0.48, CAR_WIDE = 0.27, STALE = 1.0;
+// The Playground's top-down NeoRacer sprite: 512 px square, nose to the
+// right, 956 px a metre (its 275 px wheelbase is the model's 0.2876 m). A
+// car's odometry tracks its rear axle centre, at this pixel of the sprite.
+const SPRITE = 512, SPRITE_PX_PER_M = 956, AXLE_PX = [118.5, 256.5];
+// From the rear axle to the middle of the car, and the label's offset from there (m).
+const MID = 0.144, LABEL = 0.25;
+// The age (s) after which a car's row greys out.
+const STALE = 1.0;
 const canvas = document.getElementById('map');
 const ctx = canvas.getContext('2d');
+const sprite = new Image(), paint = new Image();
+sprite.src = '/car.png';
+paint.src = '/car-paint.png';
+const liveries = {};
 let cars = {};
 let view = { fit: true, scale: 60, cx: 0, cy: 0 };
 let showPaths = true;
 let drag = null;
 
+// A car keeps its colour by its id, whoever else is on the network.
 function colour(id) {
-  const ids = Object.keys(cars).sort((a, b) => a - b);
-  return COLOURS[ids.indexOf(id) % COLOURS.length];
+  return COLOURS[(id - 1) % COLOURS.length];
+}
+
+// The sprite with its rear wing and front bumper (the Playground's "wings"
+// paint zone) in a car's colour: the zone's shading times the colour.
+function livery(c) {
+  if (!liveries[c]) {
+    const layer = document.createElement('canvas');
+    layer.width = layer.height = SPRITE;
+    const g = layer.getContext('2d');
+    g.drawImage(paint, 0, 0);
+    g.globalCompositeOperation = 'multiply';
+    g.fillStyle = c;
+    g.fillRect(0, 0, SPRITE, SPRITE);
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(paint, 0, 0);
+    const car = document.createElement('canvas');
+    car.width = car.height = SPRITE;
+    const h = car.getContext('2d');
+    h.drawImage(sprite, 0, 0);
+    h.drawImage(layer, 0, 0);
+    liveries[c] = car;
+  }
+  return liveries[c];
 }
 
 function fitView(w, h) {
@@ -128,29 +160,23 @@ function draw() {
       });
       ctx.stroke(); ctx.globalAlpha = 1;
     }
-    if (!car.pose) continue;
+    if (!car.pose || !paint.complete || !sprite.complete) continue;
     const [sx, sy] = toScreen(car.pose[0], car.pose[1], w, h);
+    // the car to scale, but never under 40 px a metre so it stays legible zoomed out
     const k = Math.max(view.scale, 40);
-    const len = CAR_LONG * k, wide = CAR_WIDE * k;
+    const s = k / SPRITE_PX_PER_M;
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(-car.pose[2]);
     ctx.globalAlpha = car.age > STALE ? 0.4 : 1;
-    ctx.fillStyle = c;
-    ctx.beginPath();
-    // body: tail to nose along +x, the nose a point so the heading reads
-    ctx.moveTo(-len * 0.5, -wide / 2);
-    ctx.lineTo(len * 0.3, -wide / 2);
-    ctx.lineTo(len * 0.5, 0);
-    ctx.lineTo(len * 0.3, wide / 2);
-    ctx.lineTo(-len * 0.5, wide / 2);
-    ctx.closePath();
-    ctx.fill();
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(livery(c), -AXLE_PX[0] * s, -AXLE_PX[1] * s, SPRITE * s, SPRITE * s);
     ctx.restore();
     ctx.globalAlpha = 1;
+    const mx = sx + Math.cos(car.pose[2]) * MID * k, my = sy - Math.sin(car.pose[2]) * MID * k;
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
-    ctx.fillText('Car ' + id, sx + wide * 0.8, sy - wide * 0.8);
+    ctx.fillText('Car ' + id, mx + LABEL * k, my - LABEL * k);
   }
   document.getElementById('scale').textContent = 'grid ' + step + ' m';
 }
