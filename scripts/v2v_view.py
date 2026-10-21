@@ -19,7 +19,8 @@ and sends no state itself, so no car lists it as a peer.
         also car 2 in AutoDRIVE: open the simulator's NeoRacer scene on this
         computer and press Connect. The simulated NeoRacer starts where it
         stands and moves as car 2 moves, through AutoDRIVE's co-simulation
-        input; its Bird's Eye camera follows it from above.
+        input, one state packet (a tenth of a second) behind so that it moves
+        smoothly every frame; its Bird's Eye camera follows it from above.
 
 --broadcast is the cars' subnet broadcast address (Windows sends
 255.255.255.255 on one interface only). --autodrive needs the Socket.IO stack
@@ -55,6 +56,10 @@ TRAIL_STEP = 0.05
 TRAIL_KEEP = 1500
 # AutoDRIVE's simulator connects to this port on the computer it runs on.
 AUTODRIVE_PORT = 4567
+# AutoDRIVE's NeoRacer reports V1 Position at its "Rear Axle Center"
+# transform, this far above the vehicle origin that a co-simulation pose
+# places (NeoRacer.prefab).
+AUTODRIVE_GPS_HEIGHT = 0.0455
 
 
 def stamp():
@@ -62,11 +67,35 @@ def stamp():
     return time.strftime('%H:%M:%S')
 
 
+def degrees(yaw):
+    """Return a heading in degrees, -180 to 180."""
+    return math.degrees(math.atan2(math.sin(yaw), math.cos(yaw)))
+
+
 def place(origin, x, y, yaw):
     """Return a pose in a car's odometry frame in the view's frame."""
     ox, oy, oyaw = origin
     c, s = math.cos(oyaw), math.sin(oyaw)
     return ox + x * c - y * s, oy + x * s + y * c, oyaw + yaw
+
+
+def drawn(car, now):
+    """Return a car's odometry one packet behind its latest, for every frame.
+
+    A car sends its pose ten times a second; the simulator draws many more
+    frames. Each frame shows the move from the pose before the latest to the
+    latest, as far along as the time since the latest came in, over their
+    spacing by the car's clock.
+    """
+    if car['before'] is None:
+        return car['odom']
+    (x0, y0, yaw0), t0 = car['before']
+    x1, y1, yaw1 = car['odom']
+    span = car['odom_t'] - t0
+    # The car's clock stepped back (a time sync): show the latest.
+    f = 1.0 if span <= 0 else min(1.0, (now - car['posed']) / span)
+    turn = math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0))
+    return x0 + f * (x1 - x0), y0 + f * (y1 - y0), yaw0 + f * turn
 
 
 class Fleet:
@@ -80,13 +109,22 @@ class Fleet:
     def update(self, packet, addr, now):
         """Record one state packet; one with no pose keeps the last pose."""
         with self.lock:
-            car = self.cars.setdefault(packet['id'], {'trail': [], 'odom': None, 'pose': None})
+            car = self.cars.setdefault(packet['id'], {'trail': [], 'odom': None, 'pose': None,
+                                                      'before': None, 'bsm': None})
+            last = car['bsm']
+            if (last is not None and last['epoch'] == packet['epoch']
+                    and packet['seq'] <= last['seq']):
+                # Late or repeated: the car has already sent newer state.
+                return
             car['addr'] = addr
             car['seen'] = now
             car['bsm'] = packet
             if None in (packet['x'], packet['y'], packet['yaw']):
                 return
+            if car['odom'] is not None:
+                car['before'] = (car['odom'], car['odom_t'])
             car['odom'] = (packet['x'], packet['y'], packet['yaw'])
+            car['odom_t'] = packet['t']
             car['pose'] = place(self.places.get(packet['id'], (0.0, 0.0, 0.0)), *car['odom'])
             car['posed'] = now
             trail = car['trail']
@@ -139,18 +177,20 @@ class Projector:
             yaw = v2v.yaw_from_quaternion(*quaternion)
             if self.at is not None:
                 x, y, yaw = self.at
-            self.sim_origin = (x, y, z, yaw)
+            self.sim_origin = (x, y, z - AUTODRIVE_GPS_HEIGHT, yaw)
             print('%s AutoDRIVE: the simulated NeoRacer starts at x %.2f y %.2f heading %.0f deg'
-                  % (stamp(), x, y, math.degrees(yaw)))
+                  % (stamp(), x, y, degrees(yaw)))
         with self.fleet.lock:
             car = self.fleet.cars.get(self.car_id)
-            odom = car['odom'] if car is not None else None
+            odom = None
+            if car is not None and car['odom'] is not None:
+                odom = drawn(car, time.monotonic())
         command = {'V1 Throttle': '0', 'V1 Steering': '0', 'V1 Reset': 'False', 'V1 CoSim': '0'}
         if odom is not None:
             if self.car_origin is None:
                 self.car_origin = odom
                 print('%s AutoDRIVE: car %d at x %.2f y %.2f heading %.0f deg maps onto that start'
-                      % (stamp(), self.car_id, odom[0], odom[1], math.degrees(odom[2])))
+                      % (stamp(), self.car_id, odom[0], odom[1], degrees(odom[2])))
             self.last = self.project(odom)
         if self.last is not None:
             x, y, z, yaw = self.last
@@ -163,7 +203,7 @@ class Projector:
             if now - self.said >= 5.0:
                 self.said = now
                 print('%s AutoDRIVE: car %d -> x %.2f y %.2f heading %.0f deg'
-                      % (stamp(), self.car_id, x, y, math.degrees(yaw)))
+                      % (stamp(), self.car_id, x, y, degrees(yaw)))
         return command
 
     def project(self, odom):
