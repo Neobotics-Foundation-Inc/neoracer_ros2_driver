@@ -99,11 +99,20 @@ Then SSH in, or work on the console.
 ```sh
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver.git
+git clone -b neoracer_ros2_driver_purdue https://github.com/Neobotics-Foundation-Inc/neoracer_ros2_driver.git
 bash neoracer_ros2_driver/scripts/setup_all.sh
 ```
 
 `setup_all.sh` is idempotent. Each phase checks for existing state and skips when already applied, so re-running is safe.
+
+A car already set up from `main` moves to this branch once (this discards local edits in the driver repo):
+
+```sh
+racecar cd
+git fetch origin && git checkout -f neoracer_ros2_driver_purdue
+source scripts/racecar-tool.sh   # this branch's racecar tool in this shell
+racecar update                   # full setup and restart; stays on this branch from now on
+```
 
 ### 4. Apply group memberships
 
@@ -197,7 +206,7 @@ racecar navigation rviz     # goal-setting RViz view (car desktop only)
 
 racecar setup all           # the 7-phase orchestrator
 racecar setup networking    # WiFi AP + Ethernet + lidar subnet
-racecar update              # repo to latest main + full setup + service restart
+racecar update              # repo to the latest of its branch + full setup + service restart
 
 racecar ws [neoracer|osracer]   # switch this shell between workspaces
 racecar mode [osracer|neoracer] # which stack owns the ESP32 and the lidar, across reboots
@@ -211,7 +220,7 @@ racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
 
-`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
+`racecar update` resets the repo to the latest commit of the branch it is on (`origin/neoracer_ros2_driver_purdue` here, `origin/main` on a stock car), discarding local edits, runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
 
 ## Networking (optional)
 
@@ -287,7 +296,7 @@ python3 scripts/v2v_view.py --broadcast 10.0.0.255 --autodrive 2   # and car 2 i
 ```
 
 - The bird's-eye view draws every car to scale as the Playground's top-down NeoRacer, its rear wing and front bumper in the car's own colour, with its heading and the path it has driven, and lists speed, battery and how fresh its data is. Each car starts at 0, 0 where its driver started; `--place 2:1.5,0,90` puts car 2's start at x 1.5 m, y 0, facing 90 degrees, to line several cars up.
-- `--autodrive CAR` also drives the NeoRacer in the AutoDRIVE simulator on the same computer: open the NeoRacer scene, press Connect, and the simulated car moves as the real one does (it starts where it stands; `--at X Y HEADING` puts it elsewhere). It uses AutoDRIVE's co-simulation input, so the simulated car follows the real car's pose rather than its own physics; the scene's Bird's Eye camera follows it from above. It needs AutoDRIVE's devkit Python stack (Python 3.8, python-socketio 4.2.0, python-engineio 3.13.0, eventlet 0.33.3), and three changes to upstream's `NeoRacer - AuE-X930` scene (as of `75b7df52`): the socket lists the NeoRacer's co-simulation component (upstream leaves the list empty, so the pose is ignored), the posed car is kinematic (otherwise it falls and springs between poses, and respawns at a checkpoint wherever its pose crosses a wall), and its wheels roll and steer from its motion (`CoSimWheels`).
+- `--autodrive CAR` also drives the NeoRacer in the AutoDRIVE simulator on the same computer: open the NeoRacer scene, press Connect, and the simulated car moves as the real one does (it starts where it stands; `--at X Y HEADING` puts it elsewhere). It uses AutoDRIVE's co-simulation input, so the simulated car follows the real car's pose rather than its own physics; the scene's Bird's Eye camera follows it from above. It needs AutoDRIVE's devkit Python stack (Python 3.8, python-socketio 4.2.0, python-engineio 3.13.0, eventlet 0.33.3), and three changes to upstream's `NeoRacer - AuE-X930` scene (as of `75b7df52`), all on the `purdue-cosim` branch of [Neobotics-Foundation-Inc/AutoDRIVE](https://github.com/Neobotics-Foundation-Inc/AutoDRIVE/tree/purdue-cosim) (Unity 2022.3.52f1; run `Tools/unzip-and-clean.sh` after cloning, as upstream does): the socket lists the NeoRacer's co-simulation component (upstream leaves the list empty, so the pose is ignored), the posed car is kinematic (otherwise it falls and springs between poses, and respawns at a checkpoint wherever its pose crosses a wall), and its wheels roll and steer from its motion (`CoSimWheels`).
 - One program per computer can listen for V2V: run this or `v2v_peer.py`, not both.
 
 ## Localization and navigation (osracer)

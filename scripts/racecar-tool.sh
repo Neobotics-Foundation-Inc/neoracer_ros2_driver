@@ -260,13 +260,19 @@ racecar() {
             ;;
 
         update)
-            # One-command field update: repo to latest main, full setup, and
-            # a service restart. The git reset runs BEFORE setup_all so the
-            # script never rewrites itself mid-run; this function is already
-            # loaded in shell memory, so replacing the file under it is safe.
-            # reset --hard discards local edits in the driver repo.
-            echo "Updating $pkg_dir to latest origin/main..."
-            ( cd "$pkg_dir" && git fetch origin && git reset --hard origin/main ) || return 1
+            # One-command field update: repo to the latest of the branch it is
+            # on (main on a stock car), full setup, and a service restart. The
+            # git reset runs BEFORE setup_all so the script never rewrites
+            # itself mid-run; this function is already loaded in shell memory,
+            # so replacing the file under it is safe. reset --hard discards
+            # local edits in the driver repo.
+            local branch
+            branch=$(git -C "$pkg_dir" symbolic-ref --short HEAD) || {
+                echo "$pkg_dir is on no branch; check one out first (git checkout main)" >&2
+                return 1
+            }
+            echo "Updating $pkg_dir to latest origin/$branch..."
+            ( cd "$pkg_dir" && git fetch origin && git reset --hard "origin/$branch" ) || return 1
             bash "$pkg_dir/scripts/setup_all.sh" || return 1
             # Restart only what was already enabled, so a field update brings
             # back the services this car runs without starting a lab dashboard
@@ -275,8 +281,8 @@ racecar() {
             local -a live
             mapfile -t live < <(_rc_enabled_units)
             [[ ${#live[@]} -gt 0 ]] && sudo systemctl restart "${live[@]}"
-            echo "Update complete. Open a new terminal (or run: racecar source)"
-            echo "so this shell picks up the new environment and racecar tool."
+            echo "Update complete. Open a new terminal so this shell picks up"
+            echo "the new environment and racecar tool."
             ;;
 
         cd)
@@ -1110,9 +1116,10 @@ Commands:
                         Planner: teb (default) or dwb. Default map name: map.
                         `racecar navigation rviz` opens the goal-setting RViz
                         view (car desktop only).
-    update              Field update in one command: repo to latest origin/main
-                        (discards local repo edits), full `setup all`, restart
-                        all services. Needs internet.
+    update              Field update in one command: repo to the latest of the
+                        branch it is on, origin/main on a stock car (discards
+                        local repo edits), full `setup all`, restart all
+                        services. Needs internet.
     launch <name>       Shortcut for `ros2 launch neoracer_ros2_driver <name>.launch.py`.
                         Examples: racecar launch lidar
                                   racecar launch camera
