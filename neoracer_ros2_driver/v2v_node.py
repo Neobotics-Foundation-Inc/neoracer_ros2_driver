@@ -8,9 +8,10 @@ find it, then sends its state ten times a second, unicast, to every car it has
 heard from in the last few seconds. Unicast is the point: 802.11 acknowledges
 and retries a unicast frame, and sends a broadcast frame once, unacknowledged.
 The state packet follows the core of the SAE J2735 Basic Safety Message: who,
-when, where (in the car's own odom frame), how fast, which way, what is
-commanded, how much battery. Text messages are delivered exactly once and in
-order: numbered per recipient, acked, retransmitted until acked, and reported
+when, where (in the car's own odom frame, and on the map when the car is
+localized on one), how fast, which way, what is commanded, how much battery.
+Text messages are delivered exactly once and in order: numbered per
+recipient, acked, retransmitted until acked, and reported
 undelivered if the ack never comes. The wire is plain JSON on UDP 4747, so a
 testbed can watch, delay, replay, or forge it on purpose. Packet format,
 validation, and the delivery bookkeeping live in v2v_lib.
@@ -21,6 +22,7 @@ the only bridge:
 
     /odom, /imu/fused, /mux_out, /battery  ->  state to every car, 10 Hz
     state from car N   ->  /v2v/carN/odom (nav_msgs/Odometry, frame carN/odom)
+    car N on the map   ->  /v2v/carN/map_pose (geometry_msgs/PoseStamped, frame map)
     every peer         ->  /v2v/peers (std_msgs/String, JSON table, 10 Hz)
     /v2v/send (std_msgs/String)  ->  message to every car sending state
     message from car N ->  /v2v/recv {"type": "msg", "from", "seq", "text"}
@@ -29,9 +31,11 @@ the only bridge:
     /v2v/ping (std_msgs/Int32, a car id)  ->  ping, answered by that car's node
     pong from car N    ->  /v2v/recv {"type": "pong", "from", "rtt_ms"}
 
-Positions are each car's own odometry, so two cars share no frame until a map
-or external positioning gives them one. Ages in the peer table are measured on
-the receiving car's clock; the cars' wall clocks are not synchronized.
+Positions are each car's own odometry, so two cars share no frame on their
+own. A car localized on a map (AMCL or slam_toolbox publishing map -> odom on
+TF) also sends its pose on that map, so cars localized on the same map share
+one frame. Ages in the peer table are measured on the receiving car's clock;
+the cars' wall clocks are not synchronized.
 """
 
 import functools
@@ -43,16 +47,20 @@ import threading
 import time
 
 from ackermann_msgs.msg import AckermannDriveStamped
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from neoracer_ros2_driver.v2v_lib import (
-    ack_for, AddressBook, broadcast_targets, BSM_FIELDS, encode, key_fingerprint, load_key,
-    MAX_DATAGRAM, MAX_ID, MAX_TEXT, MessageReceiver, MessageSender, parse_packet, PeerTable,
-    PROTOCOL_VERSION, quaternion_from_yaw, ReplayGuard, sign, verify, yaw_from_quaternion)
+    ack_for, AddressBook, broadcast_targets, BSM_FIELDS, compose, encode, key_fingerprint,
+    load_key, MAX_DATAGRAM, MAX_ID, MAX_TEXT, MessageReceiver, MessageSender, parse_packet,
+    PeerTable, PROTOCOL_VERSION, quaternion_from_yaw, ReplayGuard, sign, verify,
+    yaw_from_quaternion)
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import BatteryState, Imu
 from std_msgs.msg import Int32, String
+from tf2_ros import Buffer, TransformException, TransformListener
 
 # A ping unanswered for this long counts as lost and is forgotten.
 PING_TIMEOUT_SEC = 5.0
@@ -82,6 +90,8 @@ class V2VNode(Node):
         self.addr_timeout = self.declare_parameter('addr_timeout_sec', 3.0).value
         self.input_timeout = self.declare_parameter('input_timeout_sec', 1.0).value
         self.battery_timeout = self.declare_parameter('battery_timeout_sec', 10.0).value
+        # The frame a localizer (AMCL, slam_toolbox) publishes map -> odom from.
+        self.map_frame = self.declare_parameter('map_frame', 'map').value
         msg_retry = self.declare_parameter('msg_retry_sec', 0.1).value
         self.msg_timeout = self.declare_parameter('msg_timeout_sec', 10.0).value
         # The fleet signing key. Present: sign everything sent, reject anything
@@ -111,6 +121,7 @@ class V2VNode(Node):
         self._receiver = MessageReceiver()
         self._guard = ReplayGuard()
         self._peer_pubs = {}
+        self._peer_map_pubs = {}
         self._pings = {}
         self._targets = []
         self._own_addrs = frozenset()
@@ -144,6 +155,9 @@ class V2VNode(Node):
                 self.create_subscription(
                     types[field], topic, functools.partial(self._on_input, topic),
                     qos_profile_sensor_data)
+
+        self._tf = Buffer()
+        self._tf_listener = TransformListener(self._tf, self)
 
         self._peers_pub = self.create_publisher(String, '/v2v/peers', 10)
         self._recv_pub = self.create_publisher(String, '/v2v/recv', MESSAGE_QUEUE_DEPTH)
@@ -188,10 +202,14 @@ class V2VNode(Node):
         if odom is not None:
             pose = odom.pose.pose
             q = pose.orientation
+            yaw = yaw_from_quaternion(q.x, q.y, q.z, q.w)
             state['x'] = round(pose.position.x, 4)
             state['y'] = round(pose.position.y, 4)
-            state['yaw'] = round(yaw_from_quaternion(q.x, q.y, q.z, q.w), 4)
+            state['yaw'] = round(yaw, 4)
             state['speed'] = round(odom.twist.twist.linear.x, 3)
+            on_map = self._map_pose(odom.header.frame_id, pose.position.x, pose.position.y, yaw)
+            if on_map is not None:
+                state['map_x'], state['map_y'], state['map_yaw'] = (round(v, 4) for v in on_map)
         imu = self._fresh('imu', now, self.input_timeout)
         if imu is not None:
             state['yaw_rate'] = round(imu.angular_velocity.z, 4)
@@ -205,6 +223,21 @@ class V2VNode(Node):
         if batt is not None:
             state['batt'] = round(batt.percentage, 3)
         return state
+
+    def _map_pose(self, odom_frame, x, y, yaw):
+        """Return an odometry pose on the map, or None while nothing localizes the car."""
+        try:
+            tf = self._tf.lookup_transform(self.map_frame, odom_frame, Time())
+        except TransformException:
+            # No map -> odom: no localizer is running, or it has not published yet.
+            return None
+        # A localizer that stopped leaves its last transform in the buffer for
+        # a while; like any other input, an old one is null.
+        age = (self.get_clock().now() - Time.from_msg(tf.header.stamp)).nanoseconds / 1e9
+        if age > self.input_timeout:
+            return None
+        t, q = tf.transform.translation, tf.transform.rotation
+        return compose((t.x, t.y, yaw_from_quaternion(q.x, q.y, q.z, q.w)), x, y, yaw)
 
     def _refresh_targets(self):
         """Re-enumerate the interfaces, so a link that just came up joins at once."""
@@ -369,13 +402,17 @@ class V2VNode(Node):
         with self._lock:
             first, _ = self._peers.update_bsm(packet, addr, now)
             pub = self._peer_pubs.get(packet['id'])
+            map_pub = self._peer_map_pubs.get(packet['id'])
         if first:
             self.get_logger().info(f'[INFO] car {packet["id"]} sending state from {addr}')
-        # The publisher is created by the executor thread on the next peers
-        # tick; until then, and while the peer has no odometry, nothing is
-        # published rather than a zero pose.
+        # The publishers are created by the executor thread on the next peers
+        # tick; until then, and while the peer has no odometry (or is not
+        # localized), nothing is published rather than a zero pose.
         if pub is not None and all(packet[f] is not None for f in ('x', 'y', 'yaw', 'speed')):
             pub.publish(self._peer_odom(packet))
+        if map_pub is not None and all(packet[f] is not None
+                                       for f in ('map_x', 'map_y', 'map_yaw')):
+            map_pub.publish(self._peer_map_pose(packet))
 
     def _on_msg(self, packet, addr):
         try:
@@ -426,6 +463,21 @@ class V2VNode(Node):
             msg.twist.twist.angular.z = packet['yaw_rate']
         return msg
 
+    def _peer_map_pose(self, packet):
+        # The peer's map is taken to be this car's map: cars localized on the
+        # same saved map share its frame.
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.map_frame
+        msg.pose.position.x = packet['map_x']
+        msg.pose.position.y = packet['map_y']
+        qx, qy, qz, qw = quaternion_from_yaw(packet['map_yaw'])
+        msg.pose.orientation.x = qx
+        msg.pose.orientation.y = qy
+        msg.pose.orientation.z = qz
+        msg.pose.orientation.w = qw
+        return msg
+
     def _publish_peers(self):
         if not self._rx_thread.is_alive():
             raise RuntimeError('v2v receive thread died; see the traceback above')
@@ -436,6 +488,8 @@ class V2VNode(Node):
                 if pid not in self._peer_pubs:
                     self._peer_pubs[pid] = self.create_publisher(
                         Odometry, f'/v2v/car{pid}/odom', 10)
+                    self._peer_map_pubs[pid] = self.create_publisher(
+                        PoseStamped, f'/v2v/car{pid}/map_pose', 10)
             table = self._peers.snapshot(now)
             heard = self._book.live(now, self.addr_timeout)
             expired = [seq for seq, (t, _) in self._pings.items()

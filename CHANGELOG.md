@@ -5,6 +5,13 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+### Added
+- V2V state carries the car's pose on the map while it is localized (`map_x`, `map_y`, `map_yaw`: the odometry pose through TF's `map -> odom`, null when no localizer has published it within `input_timeout_sec`); peers' map poses come back as `/v2v/carN/map_pose` (geometry_msgs/PoseStamped, frame `map`). Older cars read the new packets and send theirs without the fields.
+- `scripts/v2v_view.py`: bird's-eye view of every car on V2V in the browser (the Playground's top-down NeoRacer, rear wing and front bumper in each car's colour); `--map` draws a saved map (map_server `.yaml` + PGM) under the cars, localized cars by their map pose; `--autodrive CAR` drives the NeoRacer in AutoDRIVE (Neobotics-Foundation-Inc/AutoDRIVE branch `purdue-cosim`) through its co-simulation input, smoothed between packets, re-anchored without a jump when the car localizes.
+
+### Changed
+- `racecar update` resets the repo to the latest of the branch it is on, not always `origin/main`.
+
 ## [0.7.0] - 2026-10-13
 
 Adds car-to-car communication. Stamped cars find each other with a broadcast

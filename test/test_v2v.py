@@ -12,7 +12,8 @@ import pytest
 def bsm(**overrides):
     packet = {'ver': 1, 'type': 'bsm', 'id': 2, 'epoch': 5, 'seq': 10, 't': 1789267601.38,
               'x': 1.5, 'y': -0.25, 'yaw': 0.3, 'speed': 1.2, 'yaw_rate': 0.01,
-              'ax': 0.0, 'cmd_speed': 0.4, 'cmd_steer': -0.1, 'batt': 0.72}
+              'ax': 0.0, 'cmd_speed': 0.4, 'cmd_steer': -0.1, 'batt': 0.72,
+              'map_x': 4.25, 'map_y': 1.5, 'map_yaw': 1.9}
     packet.update(overrides)
     return packet
 
@@ -90,6 +91,22 @@ def test_extra_fields_are_dropped():
                     'text': 'x'}).encode())
 
 
+def test_older_car_without_map_fields_parses_with_them_null():
+    older = {k: v for k, v in bsm().items() if not k.startswith('map_')}
+    packet = v2v.parse_packet(v2v.encode(older))
+    assert (packet['map_x'], packet['map_y'], packet['map_yaw']) == (None, None, None)
+    assert packet['x'] == 1.5
+
+
+def test_compose_places_a_pose_in_the_outer_frame():
+    # 1 m ahead in a frame turned a quarter left and moved to (2, 3) is (2, 4)
+    x, y, yaw = v2v.compose((2.0, 3.0, math.pi / 2), 1.0, 0.0, 0.5)
+    assert (x, y) == pytest.approx((2.0, 4.0))
+    assert yaw == pytest.approx(math.pi / 2 + 0.5)
+    # headings come back in -pi..pi
+    assert v2v.compose((0.0, 0.0, 3.0), 0.0, 0.0, 0.5)[2] == pytest.approx(3.5 - 2 * math.pi)
+
+
 def test_yaw_quaternion_round_trip():
     for yaw in (-3.0, -1.0, 0.0, 0.3, 2.9):
         assert v2v.yaw_from_quaternion(*v2v.quaternion_from_yaw(yaw)) == pytest.approx(yaw)
@@ -140,6 +157,7 @@ def test_peer_table_snapshot_and_prune():
     assert snap['2']['addr'] == '10.0.0.5'
     assert snap['3']['batt'] is None
     assert math.isclose(snap['3']['yaw'], 0.3)
+    assert (snap['2']['map_x'], snap['2']['map_y']) == (4.25, 1.5)
     assert table.prune(101.2, 1.0) == [2]
     assert list(table.peers) == [3]
     assert table.prune(101.2, 1.0) == []

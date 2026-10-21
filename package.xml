@@ -21,6 +21,7 @@
   <depend>std_msgs</depend>
   <depend>vision_msgs</depend>
   <depend>diagnostic_msgs</depend>
+  <depend>tf2_ros</depend>
 
   <!-- ESP32 + LED-matrix serial bridge -->
   <exec_depend>python3-serial</exec_depend>

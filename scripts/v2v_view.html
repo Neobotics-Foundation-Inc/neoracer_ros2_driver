@@ -36,11 +36,11 @@
 <div id="panel">
   <h1>NeoRacer bird's-eye view</h1>
   <table>
-    <thead><tr><th>Car</th><th>m/s</th><th>Heading</th><th>Battery</th><th>Data</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="5">Waiting for cars on V2V</td></tr></tbody>
+    <thead><tr><th>Car</th><th>Frame</th><th>m/s</th><th>Heading</th><th>Battery</th><th>Data</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">Waiting for cars on V2V</td></tr></tbody>
   </table>
-  <div id="note">Positions are each car's odometry from where its driver started.
-    Scroll to zoom, drag to move.</div>
+  <div id="note">A car localized on the map is drawn on it (frame map); any other on its
+    own odometry from where its driver started (frame odom). Scroll to zoom, drag to move.</div>
 </div>
 <div id="tools">
   <button id="fit" class="on">Fit</button>
@@ -57,6 +57,9 @@ const SPRITE = 512, SPRITE_PX_PER_M = 956, AXLE_PX = [118.5, 256.5];
 const MID = 0.144, LABEL = 0.25;
 // The age (s) after which a car's row greys out.
 const STALE = 1.0;
+// Map cells (v2v_view.py --map): unknown (left clear), free, occupied.
+const MAP_RGBA = [[0, 0, 0, 0], [33, 40, 66, 255], [190, 195, 214, 255]];
+let map = null;
 const canvas = document.getElementById('map');
 const ctx = canvas.getContext('2d');
 const sprite = new Image(), paint = new Image();
@@ -96,12 +99,36 @@ function livery(c) {
   return liveries[c];
 }
 
+// The saved map's corners in metres: its origin is the bottom-left cell's
+// corner, turned by the origin's yaw.
+function mapCorners() {
+  const m = map.meta, [ox, oy, oyaw] = m.origin;
+  const c = Math.cos(oyaw), s = Math.sin(oyaw);
+  return [[0, 0], [m.width, 0], [0, m.height], [m.width, m.height]].map(([i, j]) =>
+    [ox + (i * c - j * s) * m.resolution, oy + (i * s + j * c) * m.resolution]);
+}
+
+async function loadMap() {
+  const r = await fetch('/map.json');
+  if (!r.ok) return;  // no --map
+  const meta = await r.json();
+  const cells = new Uint8Array(await (await fetch('/map.raw')).arrayBuffer());
+  const layer = document.createElement('canvas');
+  layer.width = meta.width; layer.height = meta.height;
+  const g = layer.getContext('2d');
+  const img = g.createImageData(meta.width, meta.height);
+  cells.forEach((v, i) => img.data.set(MAP_RGBA[v], i * 4));
+  g.putImageData(img, 0, 0);
+  map = { meta, layer };
+}
+
 function fitView(w, h) {
   let xs = [], ys = [];
   for (const car of Object.values(cars)) {
     if (car.pose) { xs.push(car.pose[0]); ys.push(car.pose[1]); }
     if (showPaths) for (const p of car.trail) { xs.push(p[0]); ys.push(p[1]); }
   }
+  if (map) for (const [x, y] of mapCorners()) { xs.push(x); ys.push(y); }
   if (!xs.length) { xs = [0]; ys = [0]; }
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   const span = Math.max(x1 - x0, y1 - y0, 4) * 1.3;
@@ -128,6 +155,18 @@ function draw() {
   ctx.fillStyle = '#1B2036';
   ctx.fillRect(0, 0, w, h);
   if (view.fit) fitView(w, h);
+
+  // the saved map, its bottom-left cell at its origin, one cell crisp at any zoom
+  if (map) {
+    const m = map.meta, k = m.resolution * view.scale;
+    const [sx, sy] = toScreen(m.origin[0], m.origin[1], w, h);
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(-m.origin[2]);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(map.layer, 0, -m.height * k, m.width * k, m.height * k);
+    ctx.restore();
+  }
 
   // the grid, a line every `step` metres, the origin's axes brighter
   const step = gridStep();
@@ -183,7 +222,7 @@ function draw() {
 
 function rows() {
   const ids = Object.keys(cars).sort((a, b) => a - b);
-  if (!ids.length) return '<tr><td colspan="5">Waiting for cars on V2V</td></tr>';
+  if (!ids.length) return '<tr><td colspan="6">Waiting for cars on V2V</td></tr>';
   return ids.map(id => {
     const car = cars[id];
     const f = (v, d) => v === null || v === undefined ? '-' : v.toFixed(d);
@@ -191,7 +230,8 @@ function rows() {
     const batt = car.batt === null ? '-' : Math.round(car.batt * 100) + '%';
     const age = car.age > STALE ? 'none for ' + car.age.toFixed(0) + ' s' : car.age.toFixed(1) + ' s';
     return '<tr class="' + (car.age > STALE ? 'stale' : '') + '"><td><span class="swatch" style="background:' +
-      colour(id) + '"></span>Car ' + id + '</td><td>' + f(car.speed, 2) + '</td><td>' + heading +
+      colour(id) + '"></span>Car ' + id + '</td><td>' + (car.frame || '-') + '</td><td>' +
+      f(car.speed, 2) + '</td><td>' + heading +
       '</td><td>' + batt + '</td><td>' + age + '</td></tr>';
   }).join('');
 }
@@ -202,7 +242,7 @@ async function poll() {
     cars = (await r.json()).cars;
     document.getElementById('rows').innerHTML = rows();
   } catch (e) {
-    document.getElementById('rows').innerHTML = '<tr><td colspan="5">v2v_view.py is not running</td></tr>';
+    document.getElementById('rows').innerHTML = '<tr><td colspan="6">v2v_view.py is not running</td></tr>';
   }
   setTimeout(poll, 100);
 }
@@ -240,6 +280,7 @@ document.getElementById('paths').onclick = e => {
   e.target.classList.toggle('on', showPaths);
 };
 
+loadMap();
 poll();
 frame();
 </script>

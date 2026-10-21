@@ -76,8 +76,10 @@ MAX_ID = 101
 MAX_SEQ = 2**53
 MAX_EPOCH = 2**32 - 1
 MAX_TEXT = 1000
+# x, y, yaw are the car's odometry; map_x, map_y, map_yaw its pose on the map
+# it is localized on, null while it is not. Every field may be null.
 BSM_FIELDS = ('x', 'y', 'yaw', 'speed', 'yaw_rate', 'ax',
-              'cmd_speed', 'cmd_steer', 'batt')
+              'cmd_speed', 'cmd_steer', 'batt', 'map_x', 'map_y', 'map_yaw')
 PACKET_TYPES = ('hello', 'bsm', 'msg', 'ack', 'ping', 'pong')
 
 # Linux ioctl numbers and interface flags (linux/sockios.h, linux/if.h).
@@ -257,6 +259,14 @@ def yaw_from_quaternion(x, y, z, w) -> float:
 def quaternion_from_yaw(yaw) -> tuple:
     """Return (x, y, z, w) for a rotation of yaw radians about Z."""
     return (0.0, 0.0, math.sin(yaw / 2.0), math.cos(yaw / 2.0))
+
+
+def compose(origin, x, y, yaw) -> tuple:
+    """Return a planar pose given in a frame, in the frame that places it at origin (x, y, yaw)."""
+    ox, oy, oyaw = origin
+    c, s = math.cos(oyaw), math.sin(oyaw)
+    turned = oyaw + yaw
+    return ox + x * c - y * s, oy + x * s + y * c, math.atan2(math.sin(turned), math.cos(turned))
 
 
 def broadcast_targets(sock) -> list:

@@ -281,10 +281,11 @@ racecar v2v recv              # messages as they arrive
 | --- | --- |
 | `/v2v/peers` | every other car as JSON, 10 Hz |
 | `/v2v/carN/odom` | car N's pose (nav_msgs/Odometry, frame `carN/odom`) |
+| `/v2v/carN/map_pose` | car N's pose on the map while it is localized (geometry_msgs/PoseStamped, frame `map`) |
 | `/v2v/send`, `/v2v/recv` | send text (std_msgs/String); messages and delivery reports come back on `recv` |
 | `/v2v/ping` | a car id to ping (std_msgs/Int32) |
 
-Signing is optional: `racecar v2v key new` on one car, then `racecar v2v key set <hex>` on the others, and cars reject unsigned, forged and replayed packets. A laptop on the network joins as a virtual car with `python3 scripts/v2v_peer.py --as-car 9 --broadcast <subnet broadcast>`, or only listens with `--watch 90`. Positions are each car's own odometry: there is no shared frame yet.
+Signing is optional: `racecar v2v key new` on one car, then `racecar v2v key set <hex>` on the others, and cars reject unsigned, forged and replayed packets. A laptop on the network joins as a virtual car with `python3 scripts/v2v_peer.py --as-car 9 --broadcast <subnet broadcast>`, or only listens with `--watch 90`. Positions are each car's own odometry, plus its pose on the map while it is localized (AMCL or slam_toolbox publishing `map -> odom`, step 3 of [Localization and navigation](#localization-and-navigation-osracer)). Cars localized on the same saved map share its frame: copy one car's map to the others before they localize.
 
 ### Watching the cars from a computer
 
@@ -293,10 +294,14 @@ Signing is optional: `racecar v2v key new` on one car, then `racecar v2v key set
 ```sh
 python3 scripts/v2v_view.py --broadcast 10.0.0.255                 # bird's-eye view at http://localhost:8470
 python3 scripts/v2v_view.py --broadcast 10.0.0.255 --autodrive 2   # and car 2 in AutoDRIVE
+
+scp racecar@<car>:maps/room.yaml racecar@<car>:maps/room.pgm .     # the map the cars localize on
+python3 scripts/v2v_view.py --broadcast 10.0.0.255 --map room.yaml # the cars on that map
 ```
 
-- The bird's-eye view draws every car to scale as the Playground's top-down NeoRacer, its rear wing and front bumper in the car's own colour, with its heading and the path it has driven, and lists speed, battery and how fresh its data is. Each car starts at 0, 0 where its driver started; `--place 2:1.5,0,90` puts car 2's start at x 1.5 m, y 0, facing 90 degrees, to line several cars up.
-- `--autodrive CAR` also drives the NeoRacer in the AutoDRIVE simulator on the same computer: open the NeoRacer scene, press Connect, and the simulated car moves as the real one does (it starts where it stands; `--at X Y HEADING` puts it elsewhere). It uses AutoDRIVE's co-simulation input, so the simulated car follows the real car's pose rather than its own physics; the scene's Bird's Eye camera follows it from above. It needs AutoDRIVE's devkit Python stack (Python 3.8, python-socketio 4.2.0, python-engineio 3.13.0, eventlet 0.33.3), and three changes to upstream's `NeoRacer - AuE-X930` scene (as of `75b7df52`), all on the `purdue-cosim` branch of [Neobotics-Foundation-Inc/AutoDRIVE](https://github.com/Neobotics-Foundation-Inc/AutoDRIVE/tree/purdue-cosim) (Unity 2022.3.52f1; run `Tools/unzip-and-clean.sh` after cloning, as upstream does): the socket lists the NeoRacer's co-simulation component (upstream leaves the list empty, so the pose is ignored), the posed car is kinematic (otherwise it falls and springs between poses, and respawns at a checkpoint wherever its pose crosses a wall), and its wheels roll and steer from its motion (`CoSimWheels`).
+- The bird's-eye view draws every car to scale as the Playground's top-down NeoRacer, its rear wing and front bumper in the car's own colour, with its heading and the path it has driven, and lists speed, battery and how fresh its data is.
+- With `--map`, the saved map is drawn under the cars (walls light, unexplored space dark), and a car localized on it (Frame `map` in the table) is drawn where it is on it. A car that is not (Frame `odom`) is drawn by its odometry from where its driver started; `--place 2:1.5,0,90` puts car 2's start at x 1.5 m, y 0, facing 90 degrees. When a car localizes, its path starts over in the map frame.
+- `--autodrive CAR` also drives the NeoRacer in the AutoDRIVE simulator on the same computer: open the NeoRacer scene, press Connect, and the simulated car moves as the real one does, by its map pose while it is localized (it starts where it stands; `--at X Y HEADING` puts it elsewhere; when the car localizes or loses its map, the simulated car carries on from where it stands). It uses AutoDRIVE's co-simulation input, so the simulated car follows the real car's pose rather than its own physics; the scene's Bird's Eye camera follows it from above. It needs AutoDRIVE's devkit Python stack (Python 3.8, python-socketio 4.2.0, python-engineio 3.13.0, eventlet 0.33.3), and three changes to upstream's `NeoRacer - AuE-X930` scene (as of `75b7df52`), all on the `purdue-cosim` branch of [Neobotics-Foundation-Inc/AutoDRIVE](https://github.com/Neobotics-Foundation-Inc/AutoDRIVE/tree/purdue-cosim) (Unity 2022.3.52f1; run `Tools/unzip-and-clean.sh` after cloning, as upstream does): the socket lists the NeoRacer's co-simulation component (upstream leaves the list empty, so the pose is ignored), the posed car is kinematic (otherwise it falls and springs between poses, and respawns at a checkpoint wherever its pose crosses a wall), and its wheels roll and steer from its motion (`CoSimWheels`).
 - One program per computer can listen for V2V: run this or `v2v_peer.py`, not both.
 
 ## Localization and navigation (osracer)
