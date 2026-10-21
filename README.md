@@ -277,6 +277,19 @@ racecar v2v recv              # messages as they arrive
 
 Signing is optional: `racecar v2v key new` on one car, then `racecar v2v key set <hex>` on the others, and cars reject unsigned, forged and replayed packets. A laptop on the network joins as a virtual car with `python3 scripts/v2v_peer.py --as-car 9 --broadcast <subnet broadcast>`, or only listens with `--watch 90`. Positions are each car's own odometry: there is no shared frame yet.
 
+### Watching the cars from a computer
+
+`scripts/v2v_view.py` runs on any computer on the cars' network and reads their V2V state:
+
+```sh
+python3 scripts/v2v_view.py --broadcast 10.0.0.255                 # bird's-eye view at http://localhost:8470
+python3 scripts/v2v_view.py --broadcast 10.0.0.255 --autodrive 2   # and car 2 in AutoDRIVE
+```
+
+- The bird's-eye view draws every car to scale with its heading and the path it has driven, and lists speed, battery and how fresh its data is. Each car starts at 0, 0 where its driver started; `--place 2:1.5,0,90` puts car 2's start at x 1.5 m, y 0, facing 90 degrees, to line several cars up.
+- `--autodrive CAR` also drives the NeoRacer in the AutoDRIVE simulator on the same computer: open the NeoRacer scene, press Connect, and the simulated car moves as the real one does (it starts where it stands; `--at X Y HEADING` puts it elsewhere). It uses AutoDRIVE's co-simulation input, so the simulated car follows the real car's pose rather than its own physics; the scene's Bird's Eye camera follows it from above. It needs AutoDRIVE's devkit Python stack (Python 3.8, python-socketio 4.2.0, python-engineio 3.13.0, eventlet 0.33.3), and a NeoRacer scene whose socket lists the NeoRacer's co-simulation component: upstream's `NeoRacer - AuE-X930` (as of `75b7df52`) leaves that list empty, so the pose is ignored until it is added.
+- One program per computer can listen for V2V: run this or `v2v_peer.py`, not both.
+
 ## Localization and navigation (osracer)
 
 Mapping, localization and Nav2 run on the vendor stack, [osrbot/osracer](https://github.com/osrbot/osracer), in `~/osracer_ws`. Keep its checkout at commit `c70eb50`: upstream `main` launches its chassis from an `osracer_base` package the repository does not ship. osracer drives the same ESP32 and lidar as this driver, so switch the car first:
