@@ -9,8 +9,15 @@ All notable changes to this project. Format: Keep a Changelog
 - V2V state carries the car's pose on the map while it is localized (`map_x`, `map_y`, `map_yaw`: the odometry pose through TF's `map -> odom`, null when no localizer has published it within `input_timeout_sec`); peers' map poses come back as `/v2v/carN/map_pose` (geometry_msgs/PoseStamped, frame `map`). Older cars read the new packets and send theirs without the fields.
 - `scripts/v2v_view.py`: bird's-eye view of every car on V2V in the browser (the Playground's top-down NeoRacer, rear wing and front bumper in each car's colour); `--map` draws a saved map (map_server `.yaml` + PGM) under the cars, localized cars by their map pose; `--autodrive CAR` drives the NeoRacer in AutoDRIVE (Neobotics-Foundation-Inc/AutoDRIVE branch `purdue-cosim`) through its co-simulation input, smoothed between packets, re-anchored without a jump when the car localizes.
 
+- Lane lock (`neoracer_ros2_driver/lane_lock.py`): where a car is on a taped lane track from its odometry alone, a particle filter over the lanes (lane, distance along it, gyro bias, odometry-to-map scale) weighed by how the car's heading follows each lane's; finds a car with no known start (locked once it has turned 180 degrees and fit for a metre or two), drops a lock that stops fitting and searches again, learns how much the car weaves and shakes.
+- `scripts/lanes/`: the Purdue testbed's lane map (`purdue_testbed.json`, traced from a photo by `trace_track_photo.py`: shape measured, scale assumed at 45 ft until measured), `sim_cars.py` (simulated cars on V2V with gyro drift, shake, weave and encoder error), `bench_lane_lock.py` (the lock scored over simulated drives).
+- `v2v_view.py --lanes MAP`: every car locked onto its lane, the track drawn under the cars, locked cars placed on their lanes in AutoDRIVE's testbed scene (`NeoRacer - Purdue Testbed`, branch `purdue-cosim`); `--start CAR:LANE:S`, `--lane-scale`. `--autodrive 1 2` drives two cars in a two-car scene; cars on one map share it there.
+
 ### Changed
 - `racecar update` resets the repo to the latest of the branch it is on, not always `origin/main`.
+
+### Fixed
+- `v2v_view.py`: a packet arriving early no longer jumps the drawn car forward; a car whose V2V restarts starts a new path and its simulated car carries on where it stands (it jumped back by the whole trip); telemetry without the NeoRacer's pose is refused at the boundary and answered, not left unanswered (which stopped the simulator for good); answers go to the simulator that asked.
 
 ## [0.7.0] - 2026-10-13
 

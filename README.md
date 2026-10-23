@@ -302,7 +302,36 @@ python3 scripts/v2v_view.py --broadcast 10.0.0.255 --map room.yaml # the cars on
 - The bird's-eye view draws every car to scale as the Playground's top-down NeoRacer, its rear wing and front bumper in the car's own colour, with its heading and the path it has driven, and lists speed, battery and how fresh its data is.
 - With `--map`, the saved map is drawn under the cars (walls light, unexplored space dark), and a car localized on it (Frame `map` in the table) is drawn where it is on it. A car that is not (Frame `odom`) is drawn by its odometry from where its driver started; `--place 2:1.5,0,90` puts car 2's start at x 1.5 m, y 0, facing 90 degrees. When a car localizes, its path starts over in the map frame.
 - `--autodrive CAR` also drives the NeoRacer in the AutoDRIVE simulator on the same computer: open the NeoRacer scene, press Connect, and the simulated car moves as the real one does, by its map pose while it is localized (it starts where it stands; `--at X Y HEADING` puts it elsewhere; when the car localizes or loses its map, the simulated car carries on from where it stands). It uses AutoDRIVE's co-simulation input, so the simulated car follows the real car's pose rather than its own physics; the scene's Bird's Eye camera follows it from above. It needs AutoDRIVE's devkit Python stack (Python 3.8, python-socketio 4.2.0, python-engineio 3.13.0, eventlet 0.33.3), and three changes to upstream's `NeoRacer - AuE-X930` scene (as of `75b7df52`), all on the `purdue-cosim` branch of [Neobotics-Foundation-Inc/AutoDRIVE](https://github.com/Neobotics-Foundation-Inc/AutoDRIVE/tree/purdue-cosim) (Unity 2022.3.52f1; run `Tools/unzip-and-clean.sh` after cloning, as upstream does): the socket lists the NeoRacer's co-simulation component (upstream leaves the list empty, so the pose is ignored), the posed car is kinematic (otherwise it falls and springs between poses, and respawns at a checkpoint wherever its pose crosses a wall), and its wheels roll and steer from its motion (`CoSimWheels`).
+- `--autodrive 1 2` drives two cars at once, AutoDRIVE's vehicles 1 and 2, in a two-car scene (`NeoRacer - AuE-X930 - Two Cars`, or the testbed's below). Cars localized on the same map share it in the simulator too: the first pins the map where its simulated car stands, and the other goes where the map puts it.
 - One program per computer can listen for V2V: run this or `v2v_peer.py`, not both.
+
+### Cars locked onto a taped lane track
+
+On a taped track the cars can be drawn on their lanes from their odometry alone, with no localization running on them:
+
+```sh
+python3 scripts/v2v_view.py --broadcast 10.0.0.255 --lanes scripts/lanes/purdue_testbed.json
+python3 scripts/v2v_view.py --broadcast 10.0.0.255 --lanes scripts/lanes/purdue_testbed.json --autodrive 1 2
+```
+
+- A car's odometry drifts (the gyro's bias wanders, so the heading slowly turns, and the position with it) and shakes, but the distance it has driven and how its heading changes over a metre or two stay good, and on a known lane map they say where it is. The lane lock (`neoracer_ros2_driver/lane_lock.py`) is a particle filter over the lanes: each guess is a lane, how far along it, the gyro's bias and the odometry-to-map scale; as the car drives, each moves along its lane (at a junction, one of the ways on) and is weighed by how well the car's heading, less its bias, matches its lane there. Wrong guesses stop fitting at the next bend or turn. The car is always drawn on its lane centre, so drift and vibration cannot put it in the wrong lane or off the road.
+- Without a known start the lock finds the car as it drives, typically within 10 m (it locks once the car has turned 180 degrees and its guess has fit for a metre or two; until then the car is drawn faded, "finding", and stays still in AutoDRIVE). `--start 2:loop2_fwd:3.5` gives car 2's start (lane, metres along it). A lock that stops fitting (a car picked up and put down elsewhere) is dropped within a few metres and the car found again.
+- `--lane-scale` is the map's metres per metre of the cars' odometry (1 when the map is measured true); the lock learns the true ratio within 0.8 to 1.25 of it and the table shows it.
+- The page draws the track itself (mat, white tape, dashed yellow centre lines, red stop lines). In AutoDRIVE, the testbed scene (`NeoRacer - Purdue Testbed`, or `- Two Cars`) is built from the same map in its own frame, so a locked car is placed on its lane as it is, on the `purdue-cosim` branch (menu AutoDRIVE > NeoRacer: Build Purdue Testbed Scene, or `-executeMethod NeoRacerTestbed.Build`).
+
+The Purdue testbed's map was traced from one photo of the track (`scripts/lanes/trace_track_photo.py`): the mat straightened from its corners and tiles into a top view, the tape picked out by colour, the dashed yellow lines linked into each road's centre, two lanes per road (right-hand traffic, half a lane to the right of the centre), lanes ending at their stop lines, and every lane joined to every lane on through a junction but its own road's other way. Its shape and proportions are measured from the photo; its scale is not: the mat is taken as 45 ft on its longer side until the track is measured, and every length scales with it (`--mat-length`). Measured, re-run the tracer with the true size.
+
+`scripts/lanes/sim_cars.py` sends simulated cars over V2V (odometry with gyro drift, shake, weave and encoder error) to try this without cars; `scripts/lanes/bench_lane_lock.py` scores the lock over many simulated drives:
+
+| Simulated drive (6 seeds each, worst seed) | On the right lane | Along the lane, 95% within |
+|---|---|---|
+| Anticlockwise laps, known start | 100% | 0.3 m |
+| Clockwise laps, known start | 100% | 0.4 m |
+| Through both junctions, every turn | 99.9% | 0.3 m |
+| Encoder reading 15% long | 100% | 0.3 m |
+| Unknown start | found within 10 m, then 100% | 0.8 m |
+
+Strong gyro drift (15 degrees a minute) with heavy weaving (12 cm either side) is past it: the car stays on its lane 95% of the time, but the scale it learns wanders and it can be drawn metres along the lane from where it is.
 
 ## Localization and navigation (osracer)
 

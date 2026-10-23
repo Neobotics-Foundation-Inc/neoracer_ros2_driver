@@ -27,10 +27,11 @@ def telemetry(x, y, z, yaw):
             'V1 Orientation Quaternion': '0 0 %.6f %.6f' % (math.sin(yaw / 2), math.cos(yaw / 2))}
 
 
-def sim_pose(command):
-    """Return (x, y, z, yaw) from a CoSim command."""
-    yaw = 2 * math.atan2(float(command['V1 RotZ']), float(command['V1 RotW']))
-    return (float(command['V1 PosX']), float(command['V1 PosY']), float(command['V1 PosZ']),
+def sim_pose(command, vehicle=1):
+    """Return (x, y, z, yaw) of one vehicle from a CoSim command."""
+    v = 'V%d ' % vehicle
+    yaw = 2 * math.atan2(float(command[v + 'RotZ']), float(command[v + 'RotW']))
+    return (float(command[v + 'PosX']), float(command[v + 'PosY']), float(command[v + 'PosZ']),
             yaw)
 
 
@@ -235,6 +236,76 @@ def test_telemetry_without_the_neoracers_pose_is_refused_and_pins_no_start(data)
     assert projector.sim_origin is None
 
 
+# -- two cars, two vehicles ---------------------------------------------------
+
+SECOND = (18.66, -2.65, 0.039, math.radians(-30))  # vehicle 2 beside vehicle 1
+
+
+def telemetry2(first, second):
+    """Return the two-car scene's telemetry: both vehicles' poses."""
+    out = telemetry(*first)
+    other = telemetry(*second)
+    out['V2 Position'] = other['V1 Position']
+    out['V2 Orientation Quaternion'] = other['V1 Orientation Quaternion']
+    return out
+
+
+def two_projectors(fleet):
+    shared = view.MapFrame()
+    return [view.Projector(fleet, 7, None, 1, shared), view.Projector(fleet, 8, None, 2, shared)]
+
+
+def test_every_answer_covers_both_vehicles_even_before_telemetry():
+    reply = view.answer({}, [view.Projector(view.Fleet({}), 7, None)], [])
+    for vehicle in (1, 2):
+        for key in ('Throttle', 'Steering', 'Reset', 'CoSim'):
+            assert reply['V%d %s' % (vehicle, key)] in ('0', 'False')
+
+
+def test_two_cars_drive_two_vehicles_each_from_where_it_stands():
+    fleet = view.Fleet({})
+    projectors = two_projectors(fleet)
+    fleet.update(bsm(1, 100.0, (5.0, 5.0, 0.0), car=7), 'a', 0.0)
+    fleet.update(bsm(1, 100.0, (-3.0, 1.0, 1.0), car=8), 'a', 0.0)
+    reply = view.answer(telemetry2(START, SECOND), projectors, [])
+    assert sim_pose(reply, 1) == pytest.approx(START, abs=1e-4)
+    assert sim_pose(reply, 2) == pytest.approx(SECOND, abs=1e-4)
+    # car 8 drives a metre along its heading: vehicle 2 a metre along its own, vehicle 1 stays
+    fleet.update(bsm(2, 100.1, (-3.0 + math.cos(1.0), 1.0 + math.sin(1.0), 1.0), car=8), 'a', 0.0)
+    reply = view.answer(telemetry2(START, SECOND), projectors, [])
+    assert sim_pose(reply, 1) == pytest.approx(START, abs=1e-4)
+    assert sim_pose(reply, 2)[:2] == pytest.approx(
+        (SECOND[0] + math.cos(SECOND[3]), SECOND[1] + math.sin(SECOND[3])), abs=1e-4)
+
+
+def test_cars_on_one_map_keep_their_real_places_in_the_simulator():
+    fleet = view.Fleet({})
+    projectors = two_projectors(fleet)
+    # both localized on one map, car 8 1.5 m ahead of car 7
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0), on_map=(2.0, 1.0, 0.0), car=7), 'a', 0.0)
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0), on_map=(3.5, 1.0, 0.0), car=8), 'a', 0.0)
+    reply = view.answer(telemetry2(START, SECOND), projectors, [])
+    # the first car on the map pins it where vehicle 1 stands; vehicle 2 goes
+    # where the map puts car 8, 1.5 m ahead of vehicle 1, not to its own start
+    assert sim_pose(reply, 1) == pytest.approx(START, abs=1e-4)
+    x, y, z, yaw = sim_pose(reply, 2)
+    assert (x, y, z) == pytest.approx((START[0] + 1.5 * math.cos(START[3]),
+                                       START[1] + 1.5 * math.sin(START[3]), START[2]), abs=1e-4)
+    assert math.cos(yaw - START[3]) == pytest.approx(1.0)
+
+
+def test_a_one_car_scene_drives_vehicle_1_and_refuses_vehicle_2_once():
+    fleet = view.Fleet({})
+    projectors = two_projectors(fleet)
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0), car=7), 'a', 0.0)
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0), car=8), 'a', 0.0)
+    refused = []
+    for _ in range(3):
+        reply = view.answer(telemetry(*START), projectors, refused)
+    assert reply['V1 CoSim'] == '1' and reply['V2 CoSim'] == '0'
+    assert len(refused) == 1 and 'vehicle 2' in refused[0]
+
+
 # -- saved maps ---------------------------------------------------------------
 
 def write_map(folder, pixels, width, height, yaml_extra=None, header=None):
@@ -284,3 +355,77 @@ def test_parse_place():
     car, (x, y, yaw) = view.parse_place('2:1.5,0,90')
     assert (car, x, y) == (2, 1.5, 0.0)
     assert yaw == pytest.approx(math.pi / 2)
+
+
+# -- a lane map (--lanes) -----------------------------------------------------
+
+LANES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'scripts', 'lanes')
+sys.path.insert(0, LANES_DIR)
+import lane_sim  # noqa: E402,I100
+from neoracer_ros2_driver.lane_lock import LaneMap  # noqa: E402,I100
+
+
+@pytest.fixture(scope='module')
+def lane_map():
+    return LaneMap.load(os.path.join(LANES_DIR, 'purdue_testbed.json'))
+
+
+def odometry_packets(lane_map, start, lanes_on, seconds, epoch=1, turn=0.7, seed=1):
+    """Return a simulated car's state packets: odometry in its own frame, turned by `turn`."""
+    driven = lane_sim.route(lane_map, start, [], lanes_on)
+    out = []
+    c, s = math.cos(turn), math.sin(turn)
+    for i, (t, x, y, yaw, lane, ls) in enumerate(lane_sim.drive(lane_map, driven, seed=seed)):
+        if t > seconds:
+            break
+        out.append((bsm(i, 100.0 + t, (x * c - y * s, x * s + y * c, yaw + turn), epoch=epoch),
+                    10.0 + t, lane, ls))
+    return out
+
+
+def test_a_car_on_a_lane_map_is_found_and_drawn_on_its_lane(lane_map):
+    fleet = view.Fleet({}, lane_map)
+    for packet, now, lane, s in odometry_packets(lane_map, 'loop2_fwd', 6, 30.0):
+        fleet.update(packet, 'a', now)
+    car = fleet.cars[7]
+    x, y, _ = lane.pose(s)
+    assert car['frame'] == 'lane'
+    assert math.hypot(car['pose'][0] - x, car['pose'][1] - y) < 0.5
+    assert fleet.snapshot(now)['7']['lane']['id'] == car['lane']['lane']
+
+
+def test_a_restart_keeps_the_car_on_its_lane(lane_map):
+    fleet = view.Fleet({}, lane_map, starts={7: ('loop2_fwd', 0.0)})
+    packets = odometry_packets(lane_map, 'loop2_fwd', 6, 30.0)
+    for packet, now, _, _ in packets[:150]:
+        fleet.update(packet, 'a', now)
+    # the car's V2V restarts: a new epoch, its odometry from 0 again where it stands
+    x0, y0 = packets[150][0]['x'], packets[150][0]['y']
+    for packet, now, lane, s in packets[150:]:
+        p = dict(packet, epoch=2, x=packet['x'] - x0, y=packet['y'] - y0)
+        fleet.update(p, 'a', now)
+    car = fleet.cars[7]
+    x, y, _ = lane.pose(s)
+    assert car['frame'] == 'lane' and math.hypot(car['pose'][0] - x, car['pose'][1] - y) < 0.5
+
+
+def test_autodrive_places_a_locked_car_where_its_lane_puts_it(lane_map):
+    fleet = view.Fleet({}, lane_map, starts={7: ('loop2_fwd', 0.0)})
+    projector = view.Projector(fleet, 7, None)
+    for packet, now, _, _ in odometry_packets(lane_map, 'loop2_fwd', 6, 10.0):
+        fleet.update(packet, 'a', 0.0)
+    command = projector.reply(telemetry(*START))
+    car = fleet.cars[7]
+    x, y, z, yaw = sim_pose(command)
+    assert (x, y, z) == pytest.approx((car['sent'][0], car['sent'][1], START[2]), abs=1e-3)
+    assert math.cos(yaw - car['sent'][2]) == pytest.approx(1.0)
+
+
+def test_autodrive_keeps_a_car_still_being_found_where_it_stands(lane_map):
+    fleet = view.Fleet({}, lane_map)
+    projector = view.Projector(fleet, 7, None)
+    for packet, now, _, _ in odometry_packets(lane_map, 'loop2_fwd', 6, 0.5):
+        fleet.update(packet, 'a', 0.0)
+    assert fleet.cars[7]['frame'] == 'searching'
+    assert projector.reply(telemetry(*START))['V1 CoSim'] == '0'
