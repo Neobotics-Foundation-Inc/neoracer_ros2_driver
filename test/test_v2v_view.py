@@ -55,14 +55,38 @@ def test_drawn_turns_the_short_way_across_pi():
     assert math.cos(yaw) == pytest.approx(-1.0)
 
 
-def test_packets_together_are_spaced_by_the_cars_clock():
+def test_a_packet_that_comes_early_does_not_jump_the_drawn_car():
+    fleet = view.Fleet({})
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0)), 'a', 10.0)
+    fleet.update(bsm(2, 100.1, (0.1, 0.0, 0.0)), 'a', 10.1)
+    car = fleet.cars[7]
+    shown = view.drawn(car, 10.13)  # 30 % of the way from the first pose to the second
+    fleet.update(bsm(3, 100.2, (0.2, 0.0, 0.0)), 'a', 10.13)  # 70 ms early
+    assert view.drawn(car, 10.13) == pytest.approx(shown)
+    assert view.drawn(car, 10.18)[0] == pytest.approx((0.03 + 0.2) / 2)
+    assert view.drawn(car, 10.5)[0] == pytest.approx(0.2)
+
+
+def test_a_late_packet_goes_on_from_where_the_car_was_held():
+    fleet = view.Fleet({})
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0)), 'a', 10.0)
+    fleet.update(bsm(2, 100.1, (0.1, 0.0, 0.0)), 'a', 10.1)
+    car = fleet.cars[7]
+    assert view.drawn(car, 10.35)[0] == pytest.approx(0.1)  # held at the latest
+    fleet.update(bsm(3, 100.2, (0.2, 0.0, 0.0)), 'a', 10.35)  # 150 ms late
+    assert view.drawn(car, 10.35)[0] == pytest.approx(0.1)
+    assert view.drawn(car, 10.40)[0] == pytest.approx(0.15)
+
+
+def test_packets_together_do_not_jump_the_drawn_car():
     fleet = view.Fleet({})
     fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0)), 'a', 10.0)
     fleet.update(bsm(2, 100.1, (0.1, 0.0, 0.0)), 'a', 10.2)
     fleet.update(bsm(3, 100.2, (0.2, 0.0, 0.0)), 'a', 10.2)  # same receive tick
     car = fleet.cars[7]
-    assert view.drawn(car, 10.2)[0] == pytest.approx(0.1)
-    assert view.drawn(car, 10.25)[0] == pytest.approx(0.15)
+    assert view.drawn(car, 10.2)[0] == pytest.approx(0.0)
+    assert view.drawn(car, 10.25)[0] == pytest.approx(0.1)
+    assert view.drawn(car, 10.3)[0] == pytest.approx(0.2)
 
 
 def test_drawn_shows_the_latest_when_the_cars_clock_steps_back():
@@ -106,6 +130,13 @@ def test_localizing_starts_a_new_path_and_does_not_smooth_across_frames():
     assert view.drawn(car, 10.5) == (3.0, 4.0, 1.0)
     fleet.update(bsm(6, 100.6, (0.6, 0.0, 0.0)), 'a', 10.6)  # lost the map
     assert car['frame'] == 'odom' and car['trail'] == [(0.6, 0.0)]
+
+
+def test_the_page_gets_a_copy_of_the_path():
+    fleet = view.Fleet({})
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0)), 'a', 10.0)
+    trail = fleet.snapshot(10.0)['7']['trail']
+    assert trail == fleet.cars[7]['trail'] and trail is not fleet.cars[7]['trail']
 
 
 def test_a_packet_without_a_pose_keeps_the_last_pose():
@@ -171,6 +202,37 @@ def test_localizing_re_anchors_without_a_jump():
     x, y, _, _ = sim_pose(projector.reply(telemetry(*START)))
     assert (x, y) == pytest.approx((before[0] + 0.5 * math.cos(before[3]),
                                     before[1] + 0.5 * math.sin(before[3])), abs=1e-4)
+
+
+def test_a_restart_starts_a_new_path_and_the_simulated_car_goes_on_from_where_it_stands():
+    fleet = view.Fleet({})
+    projector = view.Projector(fleet, 7, None)
+    fleet.update(bsm(1, 100.0, (0.0, 0.0, 0.0)), 'a', 0.0)
+    projector.reply(telemetry(*START))
+    fleet.update(bsm(2, 100.1, (4.0, 0.0, 0.0)), 'a', 0.0)
+    stood = sim_pose(projector.reply(telemetry(*START)))
+    # The car's V2V restarted: a new epoch, its odometry from 0 again.
+    fleet.update(bsm(0, 200.0, (0.0, 0.0, 0.0), epoch=2), 'a', 0.0)
+    car = fleet.cars[7]
+    assert car['before'] is None and car['trail'] == [(0.0, 0.0)]
+    assert sim_pose(projector.reply(telemetry(*START))) == pytest.approx(stood, abs=1e-4)
+    fleet.update(bsm(1, 200.1, (0.5, 0.0, 0.0), epoch=2), 'a', 0.0)
+    x, y, _, _ = sim_pose(projector.reply(telemetry(*START)))
+    assert (x, y) == pytest.approx((stood[0] + 0.5 * math.cos(stood[3]),
+                                    stood[1] + 0.5 * math.sin(stood[3])), abs=1e-4)
+
+
+@pytest.mark.parametrize('data', [
+    {'foo': 1},
+    'x',
+    {'V1 Position': '', 'V1 Orientation Quaternion': '0 0 0 1'},
+    {'V1 Position': '18,66 -3,25 0,01', 'V1 Orientation Quaternion': '0 0 0 1'},
+])
+def test_telemetry_without_the_neoracers_pose_is_refused_and_pins_no_start(data):
+    projector = view.Projector(view.Fleet({}), 7, None)
+    with pytest.raises(ValueError):
+        projector.reply(data)
+    assert projector.sim_origin is None
 
 
 # -- saved maps ---------------------------------------------------------------

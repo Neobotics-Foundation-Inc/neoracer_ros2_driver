@@ -70,6 +70,8 @@ AUTODRIVE_PORT = 4567
 # transform, this far above the vehicle origin that a co-simulation pose
 # places (NeoRacer.prefab).
 AUTODRIVE_GPS_HEIGHT = 0.0455
+# The answer that leaves the simulated car where it stands.
+IDLE = {'V1 Throttle': '0', 'V1 Steering': '0', 'V1 Reset': 'False', 'V1 CoSim': '0'}
 # The shade nav2's map_saver writes for an unknown cell of a trinary map.
 MAP_SAVER_UNKNOWN = 205
 # A binary PGM's header: P5, width, height, maxval, with # comments between,
@@ -162,6 +164,28 @@ def read_map(path):
             pixels.translate(bytes(table)))
 
 
+def sim_start(data):
+    """Return (x, y, z, yaw) of the simulated NeoRacer from one telemetry message.
+
+    Raise ValueError if the message does not carry V1 Position (x y z) and
+    V1 Orientation Quaternion (x y z w) as numbers: a scene without the
+    NeoRacer as vehicle 1, or a simulator writing decimal commas.
+    """
+    if not isinstance(data, dict):
+        raise ValueError('telemetry is not a JSON object')
+    for key, count in (('V1 Position', 3), ('V1 Orientation Quaternion', 4)):
+        if not isinstance(data.get(key), str) or len(data[key].split()) != count:
+            raise ValueError('telemetry has no %s of %d numbers: is the NeoRacer vehicle 1 in '
+                             'this scene?' % (key, count))
+    try:
+        x, y, z = (float(v) for v in data['V1 Position'].split())
+        quaternion = [float(v) for v in data['V1 Orientation Quaternion'].split()]
+    except ValueError:
+        raise ValueError('telemetry V1 Position "%s" is not numbers (decimal commas?)'
+                         % data['V1 Position']) from None
+    return x, y, z, v2v.yaw_from_quaternion(*quaternion)
+
+
 class Fleet:
     """The latest state of every car heard, and the path each has driven."""
 
@@ -179,7 +203,7 @@ class Fleet:
         with self.lock:
             car = self.cars.setdefault(packet['id'], {'trail': [], 'sent': None, 'pose': None,
                                                       'before': None, 'bsm': None,
-                                                      'frame': None})
+                                                      'frame': None, 'run': None})
             last = car['bsm']
             if (last is not None and last['epoch'] == packet['epoch']
                     and packet['seq'] <= last['seq']):
@@ -194,12 +218,16 @@ class Fleet:
                 frame, sent = 'odom', (packet['x'], packet['y'], packet['yaw'])
             else:
                 return
-            if frame != car['frame']:
-                # Localized, or lost: positions in another frame, so a new path,
-                # and no move to smooth across from the old one.
+            if frame != car['frame'] or packet['epoch'] != car['run']:
+                # Localized, or lost, or the car's V2V restarted (a new epoch, its
+                # odometry perhaps from 0 again): positions in another frame, so a
+                # new path, and no move to smooth across from the old one.
                 car['frame'], car['before'], car['trail'] = frame, None, []
             else:
-                car['before'] = (car['sent'], car['sent_t'])
+                # From where the car is drawn now, not from the pose before: a
+                # packet that comes early would otherwise jump the drawn car forward.
+                car['before'] = (drawn(car, now), car['sent_t'])
+            car['run'] = packet['epoch']
             car['sent'], car['sent_t'] = sent, packet['t']
             car['pose'] = sent if frame == 'map' else v2v.compose(
                 self.places.get(packet['id'], (0.0, 0.0, 0.0)), *sent)
@@ -227,7 +255,8 @@ class Fleet:
                     'cmd_speed': bsm['cmd_speed'],
                     'cmd_steer': bsm['cmd_steer'],
                     'batt': bsm['batt'],
-                    'trail': car['trail'],
+                    # A copy: the page's thread encodes it after the lock is let go.
+                    'trail': list(car['trail']),
                 }
             return out
 
@@ -242,21 +271,24 @@ class Projector:
         # The simulated car's start (x, y, z, yaw in the simulator's frame:
         # x forward along the scene, y left, z up).
         self.sim_origin = None
-        # (frame, car pose, sim pose): a pose of the car in that frame and
-        # where the simulated car stood when it came. The car's first pose
-        # pins to the start; a pose in a new frame (the car localized, or
-        # lost its map) pins to where the simulated car stands, so it goes on
+        # (frame, run, car pose, sim pose): a pose of the car in that frame
+        # and run (its V2V epoch) and where the simulated car stood when it
+        # came. The car's first pose pins to the start; a pose in a new frame
+        # (the car localized, or lost its map) or a new run (the car's V2V
+        # restarted) pins to where the simulated car stands, so it goes on
         # from there without a jump.
         self.anchor = None
         self.last = None
         self.said = 0.0
 
     def reply(self, data):
-        """Return the command answering one telemetry message from the simulator."""
+        """Return the command answering one telemetry message from the simulator.
+
+        Raise ValueError if the first telemetry does not carry the NeoRacer's
+        V1 pose (see sim_start).
+        """
         if self.sim_origin is None:
-            x, y, z = (float(v) for v in data['V1 Position'].split())
-            quaternion = (float(v) for v in data['V1 Orientation Quaternion'].split())
-            yaw = v2v.yaw_from_quaternion(*quaternion)
+            x, y, z, yaw = sim_start(data)
             if self.at is not None:
                 x, y, yaw = self.at
             self.sim_origin = (x, y, z - AUTODRIVE_GPS_HEIGHT, yaw)
@@ -264,14 +296,14 @@ class Projector:
                   % (stamp(), x, y, degrees(yaw)))
         with self.fleet.lock:
             car = self.fleet.cars.get(self.car_id)
-            pose = frame = None
+            pose = frame = run = None
             if car is not None and car['sent'] is not None:
-                pose, frame = drawn(car, time.monotonic()), car['frame']
-        command = {'V1 Throttle': '0', 'V1 Steering': '0', 'V1 Reset': 'False', 'V1 CoSim': '0'}
+                pose, frame, run = drawn(car, time.monotonic()), car['frame'], car['run']
+        command = dict(IDLE)
         if pose is not None:
-            if self.anchor is None or self.anchor[0] != frame:
+            if self.anchor is None or self.anchor[:2] != (frame, run):
                 sim = self.sim_origin if self.last is None else self.last
-                self.anchor = (frame, pose, sim)
+                self.anchor = (frame, run, pose, sim)
                 print('%s AutoDRIVE: car %d at x %.2f y %.2f heading %.0f deg (%s) maps onto '
                       'x %.2f y %.2f heading %.0f deg'
                       % (stamp(), self.car_id, pose[0], pose[1], degrees(pose[2]),
@@ -294,7 +326,7 @@ class Projector:
 
     def project(self, pose):
         """Map a pose of the car onto the simulator: its move since the anchor's."""
-        _, (cx, cy, cyaw), (sx, sy, sz, syaw) = self.anchor
+        _, _, (cx, cy, cyaw), (sx, sy, sz, syaw) = self.anchor
         c, s = math.cos(-cyaw), math.sin(-cyaw)
         dx, dy = pose[0] - cx, pose[1] - cy
         rx, ry = dx * c - dy * s, dx * s + dy * c
@@ -408,6 +440,7 @@ def serve_autodrive(projector):
     import socketio
 
     sio = socketio.Server()
+    refused = []
 
     @sio.on('connect')
     def connect(sid, environ):
@@ -416,10 +449,18 @@ def serve_autodrive(projector):
     @sio.on('Bridge')
     def bridge(sid, data):
         # The first message after connecting carries no telemetry: answer it
-        # idle, the simulated car where it stands.
-        reply = projector.reply(data) if data else {
-            'V1 Throttle': '0', 'V1 Steering': '0', 'V1 Reset': 'False', 'V1 CoSim': '0'}
-        sio.emit('Bridge', data=reply)
+        # idle, the simulated car where it stands. Every message is answered:
+        # the simulator sends its next telemetry only on an answer, so one
+        # left unanswered would stop it for good.
+        reply = IDLE
+        if data:
+            try:
+                reply = projector.reply(data)
+            except ValueError as e:
+                if str(e) not in refused:
+                    refused.append(str(e))
+                    print('%s AutoDRIVE: %s; the simulated car stays where it is' % (stamp(), e))
+        sio.emit('Bridge', data=reply, room=sid)
 
     print('%s AutoDRIVE: waiting for the simulator on port %d (press Connect in it)'
           % (stamp(), AUTODRIVE_PORT))
@@ -457,6 +498,15 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.id <= v2v.MAX_ID:
         parser.error('ids are 1..%d' % v2v.MAX_ID)
+    cars = [c for c, _ in args.place]
+    if args.autodrive is not None:
+        cars.append(args.autodrive)
+    for car in cars:
+        if not 1 <= car <= v2v.MAX_ID or car == args.id:
+            parser.error('car %d: cars are 1..%d, and not the observer\'s own id %d'
+                         % (car, v2v.MAX_ID, args.id))
+    if args.key is not None and not re.fullmatch('[0-9a-fA-F]{64}', args.key):
+        parser.error('--key is the fleet key: 64 hex characters (racecar v2v key show)')
 
     saved_map = None
     if args.map is not None:
