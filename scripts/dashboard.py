@@ -304,8 +304,9 @@ def _read_max_temp_c():
 
 def _classify_temp(celsius):
     """Map the hottest thermal zone to (status, label) for dashboard rendering."""
+    # No reading is a caution ('missing'), not a fault: 'dead' is kept for HOT.
     if celsius is None:
-        return ('dead', 'NO READING')
+        return ('missing', 'NO READING')
     if celsius < TEMP_OK_C:
         return ('healthy', f'{celsius:.1f} C')
     if celsius < TEMP_HIGH_C:
@@ -319,7 +320,7 @@ def _collect_system_health():
     temp_status, temp_label = _classify_temp(temp)
     return {
         'temperature': {
-            'label': 'Jetson temp (max zone)',
+            'label': 'Jetson temp (max zone)' if temp is not None else 'Jetson temp',
             'status': temp_status,
             'detail': temp_label,
         },
@@ -343,7 +344,7 @@ def _battery_card():
         return None
     volts, age = reading
     if age > BATTERY_STALE_SEC:
-        status, detail = 'dead', f'no reading for {age:.0f} s'
+        status, detail = 'missing', f'NO READING - {age:.0f} s ago'
     else:
         pct = min(1.0, max(0.0, (volts - BATTERY_V_MIN) / (BATTERY_V_MAX - BATTERY_V_MIN)))
         detail = f'{volts:.1f} V ({pct:.0%})'
