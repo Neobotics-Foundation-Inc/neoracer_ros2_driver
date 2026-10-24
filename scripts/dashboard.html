@@ -53,7 +53,7 @@
     --edge: #26262D;
     --ink: #FFFFFF;
     --ink-2: #B4B5BC;
-    --ink-3: #7C7D85;
+    --ink-3: #8A8B93;
     --quiet: #4A4B53;
     --well: #000000;
     --mark: #FFC847;
@@ -68,7 +68,7 @@
     --edge: #D9D9DE;
     --ink: #1D1D27;
     --ink-2: #55565F;
-    --ink-3: #898A91;
+    --ink-3: #636469;
     --quiet: #C4C4CA;
     --well: #F6F6F8;
     --mark: #A86E00;
@@ -214,11 +214,13 @@
   .stepper button:active { background: var(--red); border-color: var(--red); color: #FFFFFF; }
   .stepper button:disabled { color: var(--ink-3); cursor: not-allowed; }
 
-  /* a slider: a red fill to the value, a square thumb big enough for a thumb */
+  /* a slider: a red fill to the value, a square thumb big enough for a thumb. Its field takes the pointer (kit.js
+     moves it by a sideways drag only) and lets an up or down swipe scroll the page */
   input[type="range"] {
-    -webkit-appearance: none; appearance: none; width: 100%; height: var(--hit); background: transparent; cursor: pointer; touch-action: pan-y;
+    -webkit-appearance: none; appearance: none; width: 100%; height: var(--hit); background: transparent; pointer-events: none;
     --v: 0%;
   }
+  .field:has(> input[type="range"]) { touch-action: pan-y; }
   input[type="range"]::-webkit-slider-runnable-track { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--red) var(--v), var(--surface-2) var(--v)); }
   input[type="range"]::-moz-range-track { height: 10px; border-radius: 5px; background: var(--surface-2); }
   input[type="range"]::-moz-range-progress { height: 10px; border-radius: 5px; background: var(--red); }
@@ -674,7 +676,34 @@ const KIT = (() => {
     return { x, w: r.width, h: r.height };
   }
 
-  /* ── a number field with − and +: a press steps once, holding repeats faster; the field's step, or for any value
+  /* ── a button that repeats while held: a tap steps once as it lets go, a hold steps from `first` ms on, `factor`
+        faster each time down to `min`. It follows one finger: a second one on it is ignored (two would run two
+        repeats, one never stopped), and a scroll that starts on it steps nothing (the browser cancels the pointer) ── */
+  function repeat(b, fn, first, min, factor) {
+    let timer = 0, held = null, stepped = false;
+    const end = e => { if (e.pointerId === held) { clearTimeout(timer); held = null; } };
+    b.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || held !== null) return;
+      e.preventDefault();
+      held = e.pointerId;
+      stepped = false;
+      b.setPointerCapture(held);
+      let delay = first;
+      const again = () => { stepped = true; fn(); delay = Math.max(min, delay * factor); timer = setTimeout(again, delay); };
+      timer = setTimeout(again, delay);
+    });
+    b.addEventListener('pointerup', e => {
+      if (e.pointerId !== held) return;
+      const r = b.getBoundingClientRect();
+      if (!stepped && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) fn();
+      end(e);
+    });
+    for (const ev of ['pointercancel', 'lostpointercapture']) b.addEventListener(ev, end);
+    b.addEventListener('click', e => { if (e.detail === 0) fn(); });  // the keyboard's press (Enter, Space)
+    b.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  /* ── a number field with − and +: a tap steps once, holding repeats faster; the field's step, or for any value
         a tenth of its size ── */
   function stepOf(input) {
     const s = input.getAttribute('step');
@@ -691,8 +720,7 @@ const KIT = (() => {
       b.type = 'button';
       b.textContent = txt;
       b.setAttribute('aria-label', label);
-      let timer = 0;
-      const bump = () => {
+      repeat(b, () => {
         if (input.disabled) return;
         const { step, dec } = stepOf(input);
         let v = (parseFloat(input.value) || 0) + dir * step;
@@ -701,20 +729,7 @@ const KIT = (() => {
         input.value = v.toFixed(dec);
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
-      };
-      const stop = () => { clearTimeout(timer); timer = 0; };
-      b.addEventListener('pointerdown', e => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        b.setPointerCapture(e.pointerId);
-        bump();
-        let delay = 350;
-        const again = () => { bump(); delay = Math.max(40, delay * 0.75); timer = setTimeout(again, delay); };
-        timer = setTimeout(again, delay);
-      });
-      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, stop);
-      b.addEventListener('click', e => { if (e.detail === 0) bump(); });  // the keyboard's press (Enter, Space)
-      b.addEventListener('contextmenu', e => e.preventDefault());
+      }, 350, 40, 0.75);
       return b;
     };
     input.replaceWith(wrap);
@@ -760,19 +775,7 @@ const KIT = (() => {
     view.addEventListener('touchend', e => { if (e.touches.length < 2) d0 = 0; });
     for (const b of view.querySelectorAll('.zoom button')) {
       const f = b.dataset.zoom === 'in' ? 1 / 1.15 : 1.15;
-      let timer = 0;
-      const stop = () => { clearTimeout(timer); timer = 0; };
-      b.addEventListener('pointerdown', e => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        b.setPointerCapture(e.pointerId);
-        set(clamp(get() * f));
-        const again = () => { set(clamp(get() * f)); timer = setTimeout(again, 90); };
-        timer = setTimeout(again, 380);
-      });
-      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, stop);
-      b.addEventListener('click', e => { if (e.detail === 0) set(clamp(get() * f)); });
-      b.addEventListener('contextmenu', e => e.preventDefault());
+      repeat(b, () => set(clamp(get() * f)), 380, 90, 1);
     }
   }
 
@@ -782,6 +785,62 @@ const KIT = (() => {
     range.style.setProperty('--v', `${((parseFloat(range.value) - lo) / (hi - lo)) * 100}%`);
   }
   document.addEventListener('input', e => { if (e.target.type === 'range') fill(e.target); });
+
+  /* ── a slider (the car's throttle cap) moves only with a sideways drag, by as far as the finger or mouse travels.
+        The browser's own slider jumps to wherever it is touched, so a scroll that started on it, a tap or a stray
+        click set the speed; the kit takes the pointer from it (pointer-events: none) and keeps its keyboard ── */
+  const THUMB = 28;
+  let slide = null;
+  document.addEventListener('pointerdown', e => {
+    const field = e.button === 0 && e.target.closest('.field');
+    const input = field && field.querySelector(':scope > input[type="range"]');
+    if (!input || input.disabled) return;
+    const r = input.getBoundingClientRect();
+    if (e.clientY < r.top || e.clientY > r.bottom) return;
+    slide = { field, input, id: e.pointerId, x: e.clientX, y: e.clientY, v: parseFloat(input.value), span: r.width - THUMB, moving: false };
+  });
+  document.addEventListener('pointermove', e => {
+    if (!slide || e.pointerId !== slide.id) return;
+    const dx = e.clientX - slide.x, dy = e.clientY - slide.y;
+    if (!slide.moving) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) >= Math.abs(dx)) { slide = null; return; }
+      slide.moving = true;
+      slide.field.setPointerCapture(e.pointerId);
+      slide.input.focus({ preventScroll: true });
+    }
+    const { input } = slide, lo = parseFloat(input.min), hi = parseFloat(input.max), step = parseFloat(input.step);
+    const v = Math.min(hi, Math.max(lo, slide.v + dx / slide.span * (hi - lo)));
+    const next = (Math.round((v - lo) / step) * step + lo).toFixed(stepOf(input).dec);
+    if (next !== input.value) { input.value = next; input.dispatchEvent(new Event('input', { bubbles: true })); }
+  });
+  for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, e => {
+    if (!slide || e.pointerId !== slide.id) return;
+    if (!slide.moving && ev === 'pointerup') slide.input.focus({ preventScroll: true });
+    slide = null;
+  });
+
+  /* ── a slider that applies as it moves shows what the car has. Call the returned function as a poll leaves; call
+        what that returns with the car's value. The slider takes it unless an edit made here was still on its way
+        when the poll left, or a finger is on the slider. Without this, a service restarted under the page (back at
+        the yaml's speed) left the old speed showing, and the next nudge jumped the car from 0 to it ── */
+  function liveRange(input, label, send) {
+    let sent = 0, answered = 0;
+    input.addEventListener('input', () => {
+      label.textContent = input.value;
+      const n = ++sent;
+      send(parseFloat(input.value)).finally(() => { answered = Math.max(answered, n); });
+    });
+    return () => {
+      const quiet = answered === sent;
+      return v => {
+        if (!quiet || answered !== sent || (slide && slide.input === input) || parseFloat(input.value) === v) return;
+        input.value = v;
+        label.textContent = input.value;
+        fill(input);
+      };
+    };
+  }
 
   /* ── the lidar from above: 0 deg is the nose (up), positive to the right; range rings each metre ── */
   function drawLidar(c, scan, ov, view, active) {
@@ -931,7 +990,7 @@ const KIT = (() => {
   }
 
   showTheme();
-  return { post, toast, tokens, live, fitCanvas, stepper, hold, zoomable, fill, drawLidar, drawSeries, drawCamera, frames };
+  return { post, toast, tokens, live, fitCanvas, stepper, hold, zoomable, fill, liveRange, drawLidar, drawSeries, drawCamera, frames };
 })();
 
 </script>
