@@ -10,6 +10,7 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [The `racecar` shell tool](#the-racecar-shell-tool)
 - [Networking (optional)](#networking-optional)
 - [Car-to-car (V2V)](#car-to-car-v2v)
+- [Programs driving cars in AutoDRIVE](#programs-driving-cars-in-autodrive)
 - [Localization and navigation (osracer)](#localization-and-navigation-osracer)
 - [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
 - [Web dashboard](#web-dashboard)
@@ -333,6 +334,23 @@ The Purdue testbed's map was traced from one photo of the track (`scripts/lanes/
 | Unknown start | found within 18 m, then 100% | 0.15 m |
 
 The cars weave 3 cm either side of the lane centre (a car in a 0.385 m lane has 5.8 cm). Strong gyro drift (15 degrees a minute) with heavy weaving (5 cm either side, nearly touching the tape) is past it: the car stays on its lane 93% of the time, but the scale it learns wanders and it can be drawn half a metre along the lane from where it is.
+
+## Programs driving cars in AutoDRIVE
+
+`scripts/autodrive_cars.py` lets programs drive NeoRacers in the AutoDRIVE simulator, one car or several, each car in its own ROS domain as real cars are:
+
+```sh
+python3 scripts/autodrive_cars.py --cars 2                              # the workspace sourced
+"AutoDRIVE Simulator.exe" -connect -ip <this computer's IP> -port 4567  # on Windows
+ROS_DOMAIN_ID=1 python3 lane_follow.py                                  # car 1
+ROS_DOMAIN_ID=2 python3 lane_follow.py                                  # car 2
+```
+
+- Car N is in ROS domain N, the domain `racecar v2v id N` gives a real car. Each car has this driver's mux, throttle and gamepad nodes and autodrive_neoracer's bridge node (unchanged), so its own `/drive`, `/odom`, `/imu/fused`, `/scan`, `/camera/color` and `/encoder/speed`.
+- The simulator sends every car's telemetry in one message on one connection. The script hands each car's part to that car's bridge, renumbered as car 1's (the bridge reads only car 1's), and answers with every car's latest commands. The simulated car holds its speed itself (`NeoRacerController`), so the bridges' speed controllers pass the speed through (gains 0).
+- The scenes are on the `purdue-cosim` branch of [Neobotics-Foundation-Inc/AutoDRIVE](https://github.com/Neobotics-Foundation-Inc/AutoDRIVE/tree/purdue-cosim): `NeoRacer - Purdue Testbed` (one car) and `NeoRacer - Purdue Testbed - Two Cars` (car 2 0.65 m behind car 1, `-executeMethod NeoRacerTwoCars.BuildTestbed`). Build a player with `-executeMethod NeoRacerPlayerBuild.Build -neoracerBuildDir <folder> -neoracerScene <scene>`. When the simulator connects, the script prints its cars and says if they differ from `--cars`: extra bridges get no telemetry, extra cars no commands.
+- Measured on the testbed with [lane-following](https://github.com/Neobotics-Foundation-Inc/lane-following) (branch `purdue-testbed`): two cars at once kept the whole car in its lane 92% of the time over 75 s, worst 0.12 m off the lane centre; one car, 89% over 60 s, worst 0.13 m, through this script and through autodrive_neoracer's own launch alike. With both programs running, the simulator sent 35 frames a second per car.
+- It needs autodrive_neoracer's Python packages (python-socketio 4.2.0, python-engineio 3.13.0, gevent, gevent-websocket). One server per port: stop any other AutoDRIVE bridge first.
 
 ## Localization and navigation (osracer)
 
