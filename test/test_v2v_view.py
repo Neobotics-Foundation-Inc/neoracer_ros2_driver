@@ -391,7 +391,7 @@ def test_a_car_on_a_lane_map_is_found_and_drawn_on_its_lane(lane_map):
     car = fleet.cars[7]
     x, y, _ = lane.pose(s)
     assert car['frame'] == 'lane'
-    assert math.hypot(car['pose'][0] - x, car['pose'][1] - y) < 0.5
+    assert math.hypot(car['pose'][0] - x, car['pose'][1] - y) < 0.5 * lane_map.data['lane_width']
     assert fleet.snapshot(now)['7']['lane']['id'] == car['lane']['lane']
 
 
@@ -407,7 +407,8 @@ def test_a_restart_keeps_the_car_on_its_lane(lane_map):
         fleet.update(p, 'a', now)
     car = fleet.cars[7]
     x, y, _ = lane.pose(s)
-    assert car['frame'] == 'lane' and math.hypot(car['pose'][0] - x, car['pose'][1] - y) < 0.5
+    assert car['frame'] == 'lane'
+    assert math.hypot(car['pose'][0] - x, car['pose'][1] - y) < 0.5 * lane_map.data['lane_width']
 
 
 def test_autodrive_places_a_locked_car_where_its_lane_puts_it(lane_map):

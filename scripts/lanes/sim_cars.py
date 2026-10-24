@@ -58,7 +58,7 @@ def main():
     ap.add_argument('--seconds', type=float, default=600.0)
     ap.add_argument('--drift', type=float, default=3.0, help='gyro drift, degrees a minute')
     ap.add_argument('--shake', type=float, default=2.0, help='heading shake, degrees')
-    ap.add_argument('--weave', type=float, default=0.05, help='weaving in the lane, m either side')
+    ap.add_argument('--weave', type=float, default=0.03, help='weaving in the lane, m either side')
     ap.add_argument('--encoder', type=float, default=1.0,
                     help='map metres per metre the encoder reads (1: true)')
     ap.add_argument('--truth', help="write each sample's true place here (JSON lines)")

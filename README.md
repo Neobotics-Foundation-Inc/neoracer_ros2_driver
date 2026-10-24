@@ -315,23 +315,24 @@ python3 scripts/v2v_view.py --broadcast 10.0.0.255 --lanes scripts/lanes/purdue_
 ```
 
 - A car's odometry drifts (the gyro's bias wanders, so the heading slowly turns, and the position with it) and shakes, but the distance it has driven and how its heading changes over a metre or two stay good, and on a known lane map they say where it is. The lane lock (`neoracer_ros2_driver/lane_lock.py`) is a particle filter over the lanes: each guess is a lane, how far along it, the gyro's bias and the odometry-to-map scale; as the car drives, each moves along its lane (at a junction, one of the ways on) and is weighed by how well the car's heading, less its bias, matches its lane there. Wrong guesses stop fitting at the next bend or turn. The car is always drawn on its lane centre, so drift and vibration cannot put it in the wrong lane or off the road.
-- Without a known start the lock finds the car as it drives, typically within 10 m (it locks once the car has turned 180 degrees and its guess has fit for a metre or two; until then the car is drawn faded, "finding", and stays still in AutoDRIVE). `--start 2:loop2_fwd:3.5` gives car 2's start (lane, metres along it). A lock that stops fitting (a car picked up and put down elsewhere) is dropped within a few metres and the car found again.
+- Without a known start the lock finds the car as it drives, typically within 5 m: over 48 simulated cold starts at 0.5 and 1 m/s, the median was 4.2 and 5.5 m and the longest 30 m. It locks once the car has turned 180 degrees and its guess has fit for a few lane widths; until then the car is drawn faded, "finding", and stays still in AutoDRIVE. A lock found this way can sit a lane off for a bend or two before the next one corrects it: over 24 cold starts at 0.5 m/s, 23.5 m of driving in all was locked more than a lane width from the car.
+- The lock's lengths (how far the car drives between updates, how far its guess may jump, how long a bad fit is borne) are in lane widths, so it works on a map of any size. `--start 2:loop2_fwd:3.5` gives car 2's start (lane, metres along it). A lock that stops fitting (a car picked up and put down elsewhere) is dropped within a few metres and the car found again.
 - `--lane-scale` is the map's metres per metre of the cars' odometry (1 when the map is measured true); the lock learns the true ratio within 0.8 to 1.25 of it and the table shows it.
 - The page draws the track itself (mat, white tape, dashed yellow centre lines, red stop lines). In AutoDRIVE, the testbed scene (`NeoRacer - Purdue Testbed`, or `- Two Cars`) is built from the same map in its own frame, so a locked car is placed on its lane as it is, on the `purdue-cosim` branch (menu AutoDRIVE > NeoRacer: Build Purdue Testbed Scene, or `-executeMethod NeoRacerTestbed.Build`).
 
-The Purdue testbed's map was traced from one photo of the track (`scripts/lanes/trace_track_photo.py`): the mat straightened from its corners and tiles into a top view, the tape picked out by colour, the dashed yellow lines linked into each road's centre, two lanes per road (right-hand traffic, half a lane to the right of the centre), lanes ending at their stop lines, and every lane joined to every lane on through a junction but its own road's other way. Its shape and proportions are measured from the photo; its scale is not: the mat is taken as 45 ft on its longer side until the track is measured, and every length scales with it (`--mat-length`). Measured, re-run the tracer with the true size.
+The Purdue testbed's map was traced from one photo of the track (`scripts/lanes/trace_track_photo.py`): the mat straightened from its corners and tiles into a top view, the tape picked out by colour, the dashed yellow lines linked into each road's centre, two lanes per road (right-hand traffic, half a lane to the right of the centre), lanes ending at their stop lines, and every lane joined to every lane on through a junction but its own road's other way. Its shape and proportions are measured from the photo, and so is its scale, from the mat's tiles: taken as 24 inch foam tiles (8.075 across the mat), the mat is 4.92 x 5.22 m, a lane 0.385 m wide (a NeoRacer, 0.27 m, has 5.8 cm to spare on either side), the white tape 2 inches. The camera that took the photo then stood 1.6 m up, a person holding a phone, which agrees. The track itself has not been measured: measured, re-run the tracer with the true size (`--mat-length`, metres on the mat's longer side).
 
 `scripts/lanes/sim_cars.py` sends simulated cars over V2V (odometry with gyro drift, shake, weave and encoder error) to try this without cars; `scripts/lanes/bench_lane_lock.py` scores the lock over many simulated drives:
 
 | Simulated drive (6 seeds each, worst seed) | On the right lane | Along the lane, 95% within |
 |---|---|---|
-| Anticlockwise laps, known start | 100% | 0.3 m |
-| Clockwise laps, known start | 100% | 0.4 m |
-| Through both junctions, every turn | 99.9% | 0.3 m |
-| Encoder reading 15% long | 100% | 0.3 m |
-| Unknown start | found within 10 m, then 100% | 0.8 m |
+| Anticlockwise laps, known start | 100% | 0.12 m |
+| Clockwise laps, known start | 100% | 0.13 m |
+| Through both junctions, every turn | 100% | 0.16 m |
+| Encoder reading 15% long | 100% | 0.11 m |
+| Unknown start | found within 18 m, then 100% | 0.15 m |
 
-Strong gyro drift (15 degrees a minute) with heavy weaving (12 cm either side) is past it: the car stays on its lane 95% of the time, but the scale it learns wanders and it can be drawn metres along the lane from where it is.
+The cars weave 3 cm either side of the lane centre (a car in a 0.385 m lane has 5.8 cm). Strong gyro drift (15 degrees a minute) with heavy weaving (5 cm either side, nearly touching the tape) is past it: the car stays on its lane 93% of the time, but the scale it learns wanders and it can be drawn half a metre along the lane from where it is.
 
 ## Localization and navigation (osracer)
 

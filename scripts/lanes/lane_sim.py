@@ -41,10 +41,12 @@ def route(lane_map, start, turns, laps_of_lanes):
 
 def drive(lane_map, lanes_driven, speed=1.0, rate=10.0, scale=1.0,
           bias_rate=math.radians(3) / 60, bias_walk=0.003, vibration=math.radians(2),
-          wobble=0.05, start_s=0.0, seed=1):
+          wobble=0.03, weave_period=1.5, start_s=0.0, seed=1):
     """Simulate a drive; return samples (t, odometry x, y, yaw, true lane, true s).
 
-    The car follows its lanes' centres weaving `wobble` m to either side; its
+    The car follows its lanes' centres weaving `wobble` m to either side, a
+    weave every `weave_period` m (a NeoRacer in a lane 0.385 m wide has 5.8 cm
+    to either side; a lane follower weaves about half of it); its
     odometry measures distance in metres the map's are `scale` times, its
     heading off by a bias growing `bias_rate` rad/s and wandering `bias_walk`
     rad per sqrt(s), plus `vibration` rad of noise on each reading.
@@ -61,7 +63,7 @@ def drive(lane_map, lanes_driven, speed=1.0, rate=10.0, scale=1.0,
     true = []
     for i, (x, y, h, lane, s) in enumerate(path):
         u = i * step
-        off = wobble * math.sin(2 * math.pi * u / 2.5)
+        off = wobble * math.sin(2 * math.pi * u / weave_period)
         true.append((x + off * math.sin(h), y - off * math.cos(h), lane, s))
     samples = []
     ox = oy = 0.0

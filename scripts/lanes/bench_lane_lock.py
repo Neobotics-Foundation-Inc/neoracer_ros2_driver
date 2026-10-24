@@ -29,7 +29,7 @@ import test_lane_lock as sim  # noqa: E402,I100
 
 def scenarios(lanes):
     heavy = {'bias_rate': math.radians(15) / 60, 'bias_walk': 0.01,
-             'vibration': math.radians(6), 'wobble': 0.12}
+             'vibration': math.radians(6), 'wobble': 0.05}
     tour = ['link1_fwd', 'loop2_fwd', 'link1_fwd', 'loop1_back', 'loop2_back', 'link1_back',
             'loop1_fwd']
     return {

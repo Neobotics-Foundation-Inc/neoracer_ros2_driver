@@ -4,7 +4,7 @@ Lane lock: where a car is on a lane map, from its odometry alone.
 A car's odometry (x, y and heading from the wheel encoder and the IMU) drifts:
 the heading slowly, as the gyro's bias wanders, and so the position more and
 more. Two parts of it stay good: the distance the car has driven (the
-encoder) and how its heading changes over a few metres (the gyro, over a
+encoder) and how its heading changes over a short stretch (the gyro, over a
 short time). On a known lane map those are enough to tell where the car is:
 how far along which lane, so it is always drawn on its lane, never beside it.
 
@@ -19,6 +19,9 @@ matching at the next bend or turn and die out; the bias and the scale follow
 the car's drift slowly. Without a known start the particles begin spread over
 every lane and find the car after a few bends (each bias set so the first
 heading fits); with one, around it.
+
+Its lengths are set in lane widths (the map's lane_width), not metres, so a
+map traced at another scale (a track measured at last) needs no retuning.
 
 Pure Python (the viewer runs under the Python 3.8 AutoDRIVE's devkit pins).
 """
@@ -121,14 +124,14 @@ class LaneMap:
         return best
 
 
-# The filter's settings. Lengths are the map's metres.
+# The filter's settings. Lengths are in lane widths (LW: the map's lane_width).
 # Particles while locked, and while searching the whole map (an unknown start,
 # a lost lock: the car could be anywhere on any lane, at any scale).
 PARTICLES = 2000
 SEARCH_PARTICLES = 6000
-# m the odometry drives between updates (a car standing still is not reweighed)
+# LW the odometry drives between updates (a car standing still is not reweighed)
 STEP = 0.05
-# m: the odometry's heading is averaged over this much of its travel, the
+# LW: the odometry's heading is averaged over this much of its travel, the
 # lane's taken half of it back (weaving in the lane and vibration average out)
 WINDOW = 1.0
 # rad: that heading off its lane's, less the bias, to start with; then
@@ -136,7 +139,7 @@ WINDOW = 1.0
 # shakes), within SD_RANGE
 HEADING_SD = 0.14
 SD_RANGE = (0.08, 0.20)
-# rad: a best guess misfitting this much for MISFIT_AFTER m is lost, however
+# rad: a best guess misfitting this much for MISFIT_AFTER LW is lost, however
 # sure it is (a wrong lock widens the misfit; capped, SD cannot widen to fit it).
 # A right lock misfits 0.06 to 0.17 (a car shaking hard); a wrong one, 0.4 up.
 MISFIT_LOST = 0.30
@@ -147,18 +150,20 @@ MISFIT_AFTER = 4.0
 SEARCH_TURN = math.pi
 # ... and only once its best guess has fit the car's heading this well (rad of
 # misfit), each new guess starting at MISFIT_LOST, so it proves itself over a
-# metre or two first (a lookalike stretch fits for a bend, then drifts off)
+# few lane widths first (a lookalike stretch fits for a bend, then drifts off)
 PROBATION = 0.20
 OUTLIER = 0.05        # the share of headings that may be anything (a bump, a swerve)
 BIAS_DRIFT = 0.004    # rad per sqrt(s): how fast the gyro's bias may wander
 MOVE_SD = 0.03        # of the distance moved: wheel slip
-SCALE_SD = 0.002      # per sqrt(m): how fast the odometry-to-map scale may wander
+SCALE_SD = 0.002      # per sqrt(LW): how fast the odometry-to-map scale may wander
 SCALE_RANGE = (0.8, 1.25)   # the scale's prior, times the nominal one
-ROUGHEN = (0.02, 0.005, 0.004)   # m, rad and scale: the nudge each resampled copy gets
-START_SD = 0.3        # m of spread around a known start
-CLUSTER = 1.0         # m: particles this near the best guess, running its way, back it
+ROUGHEN = (0.02, 0.005, 0.004)   # LW, rad and scale: the nudge each resampled copy gets
+START_SD = 0.3        # LW of spread around a known start
+CLUSTER = 1.0         # LW: particles this near the best guess, running its way, back it
+BIN = 0.5             # LW: the stretch of lane the best guess is taken over
+JUMP = 0.5            # LW: a best guess this much further than the car moved is a new one
 CONFIDENT = 0.6       # the share of the weight that makes the guess a lock
-# A lock lost for this many metres of driving searches the whole map again, as
+# A lock lost for this many LW of driving searches the whole map again, as
 # an unknown start does (more than a search takes to find the car, so it never
 # cuts one short). A lock is not dropped on every dip: at a junction the guesses
 # split between the ways on, and any lane pointing the car's way fits it until
@@ -172,6 +177,7 @@ class LaneLock:
     def __init__(self, lane_map, scale=1.0, start=None, particles=PARTICLES,
                  search=SEARCH_PARTICLES, seed=None):
         self.map = lane_map
+        self.u = lane_map.data['lane_width']   # m in a lane width: the unit of the settings
         self.locked_n = particles     # particles while locked
         self.search = search          # and while searching the whole map
         self.n = particles
@@ -186,7 +192,7 @@ class LaneLock:
         self.last = None              # the odometry pose at the last update: (x, y, yaw, t)
         self.estimate = None
         self.driven = 0.0             # m of odometry since the start
-        self.recent = []              # (odometry m driven, heading) over the last WINDOW m
+        self.recent = []              # (odometry m driven, heading) over the last WINDOW LW
         self.sd = HEADING_SD          # the heading misfit expected (learned, capped)
         self.misfit = HEADING_SD      # the best guess's misfit, uncapped
         self.lost_at = None           # m driven when the lock was lost, or None
@@ -207,7 +213,7 @@ class LaneLock:
                 lane, s = self._anywhere()
             else:
                 lane = self.map.by_id[self.start[0]]
-                lane, s = self._along(lane, self.start[1] + rng.gauss(0, START_SD))
+                lane, s = self._along(lane, self.start[1] + rng.gauss(0, START_SD * self.u))
             self.lane.append(lane)
             self.s.append(s)
             self.bias.append(wrap(yaw - lane.heading(s)))
@@ -258,24 +264,24 @@ class LaneLock:
             return None
         x0, y0, _, t0 = self.last
         d = math.hypot(x - x0, y - y0)
-        if d < STEP:
+        if d < STEP * self.u:
             return self.estimate
         # forward or back, by the heading the move was made at
         sign = 1.0 if math.cos(math.atan2(y - y0, x - x0) - yaw) >= 0 else -1.0
         dt = max(t - t0, 0.0)
         self.last = (x, y, yaw, t)
         self.driven += d
-        self.recent = [(m, h) for m, h in self.recent if self.driven - m <= WINDOW]
+        self.recent = [(m, h) for m, h in self.recent if self.driven - m <= WINDOW * self.u]
         self.recent.append((self.driven, yaw))
         seen = math.atan2(sum(math.sin(h) for _, h in self.recent),
                           sum(math.cos(h) for _, h in self.recent))
-        back = 0.5 * min(WINDOW, self.driven)
+        back = 0.5 * min(WINDOW * self.u, self.driven)
         if self.seen is not None:
             self.turned += abs(wrap(seen - self.seen))
         self.seen = seen
         rng = self.rng
         sd_bias = BIAS_DRIFT * math.sqrt(dt)
-        sd_k = SCALE_SD * math.sqrt(d)
+        sd_k = SCALE_SD * math.sqrt(d / self.u)
         lo, hi = self.scale * SCALE_RANGE[0], self.scale * SCALE_RANGE[1]
         norm = 2 * self.sd * self.sd
         total = 0.0
@@ -296,7 +302,7 @@ class LaneLock:
         before = self.estimate
         est = self._estimate()
         # the best guess's misfit; a guess that is not the last one moved on starts again
-        moved = 2 * est['scale'] * d + 0.5
+        moved = 2 * est['scale'] * d + JUMP * self.u
         if before is not None and \
                 math.hypot(est['x'] - before['x'], est['y'] - before['y']) > moved:
             self.misfit = max(self.misfit, MISFIT_LOST)
@@ -315,11 +321,12 @@ class LaneLock:
                 self.misfit_at = None
             elif self.misfit_at is None:
                 self.misfit_at = self.driven
-            lost = self.misfit_at is not None and self.driven - self.misfit_at > MISFIT_AFTER
+            lost = (self.misfit_at is not None
+                    and self.driven - self.misfit_at > MISFIT_AFTER * self.u)
         else:
             if self.lost_at is None:
                 self.lost_at = self.driven
-            lost = self.driven - self.lost_at > LOST_AFTER
+            lost = self.driven - self.lost_at > LOST_AFTER * self.u
         if lost:
             # search the whole map again, as an unknown start does
             self.start = None
@@ -347,7 +354,7 @@ class LaneLock:
                 i += 1
                 c += self.w[i]
             u += step
-            l2, s2 = self._along(self.lane[i], self.s[i] + rng.gauss(0, ROUGHEN[0]))
+            l2, s2 = self._along(self.lane[i], self.s[i] + rng.gauss(0, ROUGHEN[0] * self.u))
             lane.append(l2)
             s.append(s2)
             bias.append(self.bias[i] + rng.gauss(0, ROUGHEN[1]))
@@ -357,23 +364,25 @@ class LaneLock:
         self.w = [step] * n
 
     def _estimate(self):
-        """Return the best guess: the heaviest half-metre of a lane, and the weight near it."""
+        """Return the best guess: the heaviest BIN of a lane, and the weight near it."""
+        b_len = BIN * self.u
         bins = {}
         for i in range(self.n):
-            key = (self.lane[i].index, int(self.s[i] / 0.5))
+            key = (self.lane[i].index, int(self.s[i] / b_len))
             bins[key] = bins.get(key, 0.0) + self.w[i]
         (li, b), _ = max(bins.items(), key=lambda kv: kv[1])
         lane = self.map.lanes[li]
-        mid = (b + 0.5) * 0.5
+        mid = (b + 0.5) * b_len
         near = [i for i in range(self.n)
-                if self.lane[i] is lane and abs(self.s[i] - mid) <= 0.5]
+                if self.lane[i] is lane and abs(self.s[i] - mid) <= b_len]
         wsum = sum(self.w[i] for i in near)
         s = sum(self.w[i] * self.s[i] for i in near) / wsum
         x, y, heading = lane.pose(s)
         conf = wk = bs = bc = 0.0
         for i in range(self.n):
             px, py, ph = self.lane[i].pose(self.s[i])
-            if math.hypot(px - x, py - y) <= CLUSTER and abs(wrap(ph - heading)) < math.pi / 3:
+            if math.hypot(px - x, py - y) <= CLUSTER * self.u and \
+                    abs(wrap(ph - heading)) < math.pi / 3:
                 conf += self.w[i]
                 wk += self.w[i] * self.k[i]
                 bs += self.w[i] * math.sin(self.bias[i])

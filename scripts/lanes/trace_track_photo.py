@@ -599,6 +599,8 @@ def main():
         overlay(m, top, hom, length, args.photo, args.overlay)
     if args.mat_length is not None:
         m = scaled(m, args.mat_length / max(m['mat'].values()), args.scale_note)
+    elif args.scale_note:
+        m['source']['scale'] = args.scale_note
     with open(args.out, 'w') as f:
         json.dump(m, f, indent=1)
     lanes = [lane for lane in m['lanes'] if lane['kind'] == 'lane']
