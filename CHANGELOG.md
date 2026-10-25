@@ -16,6 +16,11 @@ All notable changes to this project. Format: Keep a Changelog
 
 ### Changed
 - `racecar update` resets the repo to the latest of the branch it is on, not always `origin/main`.
+- `scripts/lanes/purdue_testbed.json` is Purdue's layout of 24 October 2026 (one loop and a road across it, mat 4.90 x 5.53 m, lanes 0.408 m); the earlier layout is `purdue_testbed_2026-10-23.json`. The lane lock's tests and bench run on the new one.
+- `trace_track_photo.py`: `--yellow-sat`, `--yellow-val` (faded far dashes) and `--dashes` (dashes counted by hand where the photo blurs them); a dash's size and the yellow's colour come from the default colour limits, which only the sharp dashes pass.
+
+### Fixed
+- `trace_track_photo.py`: a lane is moved off its road's centre along the chord over half a lane either side, not the centre's own normals: a kink in the traced line tighter than half a lane folded the lane back on itself, and its end pointed the wrong way, so a junction's straight on was named a turn.
 
 ### Fixed
 - `v2v_view.py`: a packet arriving early no longer jumps the drawn car forward; a car whose V2V restarts starts a new path and its simulated car carries on where it stands (it jumped back by the whole trip); telemetry without the NeoRacer's pose is refused at the boundary and answered, not left unanswered (which stopped the simulator for good); answers go to the simulator that asked.

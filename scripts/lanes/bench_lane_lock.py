@@ -30,14 +30,15 @@ import test_lane_lock as sim  # noqa: E402,I100
 def scenarios(lanes):
     heavy = {'bias_rate': math.radians(15) / 60, 'bias_walk': 0.01,
              'vibration': math.radians(6), 'wobble': 0.05}
-    tour = ['link1_fwd', 'loop2_fwd', 'link1_fwd', 'loop1_back', 'loop2_back', 'link1_back',
-            'loop1_fwd']
+    # every turn at both junctions, from loop1_back: into the link and out of it each way
+    tour = ['link1_back', 'loop2_fwd', 'link1_back', 'loop1_back', 'loop2_back', 'link1_fwd',
+            'loop1_fwd', 'link1_fwd', 'loop2_back']
     return {
         'anticlockwise': (lane_sim.route(lanes, 'loop2_fwd', [], 9), {},
                           {'start': ('loop2_fwd', 0.0)}),
         'clockwise': (lane_sim.route(lanes, 'loop2_back', [], 9), {},
                       {'start': ('loop2_back', 0.0)}),
-        'link turns': (lane_sim.route(lanes, 'loop1_back', tour, 17), {},
+        'link turns': (lane_sim.route(lanes, 'loop1_back', tour, 19), {},
                        {'start': ('loop1_back', 0.0)}),
         'heavy drift': (lane_sim.route(lanes, 'loop2_fwd', [], 9), heavy,
                         {'start': ('loop2_fwd', 0.0)}),

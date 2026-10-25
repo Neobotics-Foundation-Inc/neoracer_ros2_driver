@@ -4,6 +4,7 @@ Trace a taped lane track from one photo into a lane map (JSON).
 
     python3 trace_track_photo.py PHOTO OUT.json --corners FL FR NR NL
             [--tile 0.6096] [--tiles-across 8.075] [--aspect 1.061] [--name NAME]
+            [--yellow-sat 90] [--yellow-val 110] [--dashes LENGTH PERIOD]
 
 The track is tape on a rectangular mat of square foam tiles: white tape
 bounds the roads, a dashed yellow line runs down the middle of each two-way
@@ -53,6 +54,7 @@ SPUR = 0.08          # m: thinning's side branches shorter than this are dropped
 # the line, a dash missing); two lines' dashes lie further apart than this
 CHAIN = 0.35
 TRIM_DEFAULT = 0.45  # m: a lane's end from a junction's centre, with no stop line on it
+YELLOW_SAT, YELLOW_VAL = 90, 110  # the yellow tape's least saturation and brightness, 0-255
 
 
 def rectify(photo, corners, width, length):
@@ -66,11 +68,11 @@ def rectify(photo, corners, width, length):
     return top, valid, hom
 
 
-def masks(top, valid):
+def masks(top, valid, yellow_sat, yellow_val):
     """White, yellow and red tape, by colour."""
     hsv = cv2.cvtColor(top, cv2.COLOR_BGR2HSV)
     h, s, v = (hsv[..., i].astype(int) for i in range(3))
-    yellow = (h >= 18) & (h <= 38) & (s > 90) & (v > 110) & valid
+    yellow = (h >= 18) & (h <= 38) & (s > yellow_sat) & (v > yellow_val) & valid
     red = ((h <= 12) | (h >= 165)) & (s > 110) & (v > 110) & valid
     white = (s < 45) & (v > 150) & valid & ~yellow & ~red
 
@@ -81,18 +83,8 @@ def masks(top, valid):
     return clean(white, 5), clean(yellow, 3), clean(red, 5)
 
 
-def chain_dashes(yellow, length):
-    """Link a dashed line's dashes in order: [(points, closed)], dash length, dash width.
-
-    The yellow is thinned to its middle and sampled every SAMPLE m (where the
-    photo is far and blurred, dashes run together into one strip, so each blob
-    gives points along its length, not one centre). The points within CHAIN m
-    of each other are joined by their minimum spanning tree: along a dashed
-    line that is a path, with short side branches where a dash split in two.
-    Each tree's longest path is its line in order; a line whose ends lie
-    within CHAIN m of each other is a loop. The dash sizes come from the blobs
-    short enough to be one dash.
-    """
+def dash_size(yellow, length):
+    """Return a dash's length and width, the medians of the blobs short enough to be one dash."""
     n, lab, stats, _ = cv2.connectedComponentsWithStats(yellow.astype(np.uint8))
     sizes = []
     for k in range(1, n):
@@ -101,6 +93,22 @@ def chain_dashes(yellow, length):
         _, (w, h), _ = cv2.minAreaRect(pts)
         if 0.02 < max(w, h) < 0.1:
             sizes.append((max(w, h), min(w, h)))
+    sizes = np.array(sizes)
+    return float(np.median(sizes[:, 0])), float(np.median(sizes[:, 1]))
+
+
+def chain_dashes(yellow, length):
+    """
+    Link a dashed line's dashes in order: [(points, closed)].
+
+    The yellow is thinned to its middle and sampled every SAMPLE m (where the
+    photo is far and blurred, dashes run together into one strip, so each blob
+    gives points along its length, not one centre). The points within CHAIN m
+    of each other are joined by their minimum spanning tree: along a dashed
+    line that is a path, with short side branches where a dash split in two.
+    Each tree's longest path is its line in order; a line whose ends lie
+    within CHAIN m of each other is a loop.
+    """
     ys, xs = np.nonzero(skeletonize(yellow))
     c = np.column_stack([(xs + 0.5) * R, length - (ys + 0.5) * R])
     _, first = np.unique(np.round(c / SAMPLE).astype(int), axis=0, return_index=True)
@@ -111,7 +119,7 @@ def chain_dashes(yellow, length):
     tree = minimum_spanning_tree(near)
     tree = tree + tree.T
     count, label = connected_components(tree, directed=False)
-    lines, gaps = [], []
+    lines = []
     for k in range(count):
         members = np.nonzero(label == k)[0]
         if len(members) < 4:
@@ -126,10 +134,7 @@ def chain_dashes(yellow, length):
         path = path[::-1]
         closed = float(np.hypot(*(c[path[0]] - c[path[-1]]))) <= CHAIN
         lines.append((c[path], closed))
-        q = c[path + ([path[0]] if closed else [])]
-        gaps.extend(np.hypot(*np.diff(q, axis=0).T))
-    sizes = np.array(sizes)
-    return lines, float(np.median(sizes[:, 0])), float(np.median(sizes[:, 1]))
+    return lines
 
 
 NEIGH = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
@@ -225,8 +230,17 @@ def polyline(points, closed):
     return smooth(resample(points, closed), closed)
 
 
-def tangents(p, closed):
-    d = np.roll(p, -1, 0) - np.roll(p, 1, 0) if closed else np.gradient(p, axis=0)
+def tangents(p, closed, k=1):
+    """
+    Return each point's way, along the chord from k points before it to k after.
+
+    An open line's ends use what it has.
+    """
+    if closed:
+        d = np.roll(p, -k, 0) - np.roll(p, k, 0)
+    else:
+        i = np.arange(len(p))
+        d = p[np.minimum(i + k, len(p) - 1)] - p[np.maximum(i - k, 0)]
     return d / np.hypot(d[:, 0], d[:, 1])[:, None]
 
 
@@ -259,8 +273,15 @@ def ray_hit(origin, direction, loop):
 
 
 def offset(p, closed, d):
-    """Move a polyline d m to the right of its way."""
-    t = tangents(p, closed)
+    """
+    Move a polyline d m to the right of its way.
+
+    Its way at each point is the chord over d either side: a kink in a traced line
+    bends tighter than d, and moved along its own normals it would fold back on
+    itself; the chord of an arc lies along the arc's tangent at its middle, so a
+    true curve moves as it is.
+    """
+    t = tangents(p, closed, max(1, int(round(abs(d) / SAMPLE))))
     return p + d * np.column_stack([t[:, 1], -t[:, 0]])
 
 
@@ -294,12 +315,15 @@ def build(args):
     width = args.tiles_across * args.tile
     length = args.aspect * width
     top, valid, hom = rectify(photo, args.corners, width, length)
-    white, yellow, red = masks(top, valid)
+    white, yellow, red = masks(top, valid, args.yellow_sat, args.yellow_val)
+    # the yellow the default colour limits pick out: lower limits take in far dashes too,
+    # faded and blurred into each other, which would dull its colour and widen its dashes
+    sharp = masks(top, valid, YELLOW_SAT, YELLOW_VAL)[1]
     # colours, as the photo shows them: each tape's median, and the mat's away from tape
     taped = cv2.dilate((white | yellow | red).astype(np.uint8), np.ones((15, 15))).astype(bool)
     bare = valid & ~taped
     look = {}
-    for name, where in (('mat', bare), ('white', white), ('yellow', yellow), ('red', red)):
+    for name, where in (('mat', bare), ('white', white), ('yellow', sharp), ('red', red)):
         b, g, r = np.median(top[where], axis=0)
         look[name] = '#%02x%02x%02x' % (int(r), int(g), int(b))
 
@@ -308,12 +332,15 @@ def build(args):
     white_len = sum(length_of(p, c) for p, c in white_lines)
     tape_white = float(white.sum() * R * R / white_len)
     # yellow: the dashes' centres, linked in order
-    chains, dash_length, tape_yellow = chain_dashes(yellow, length)
-    yellow_lines = [(polyline(p, c), c) for p, c in chains]
-    # a dash and the gap after it: a dash over the share of the line the yellow covers
-    yellow_len = sum(length_of(p, c) for p, c in yellow_lines)
-    covered = float(yellow.sum() * R * R / tape_yellow) / yellow_len
-    dash_period = dash_length / covered
+    yellow_lines = [(polyline(p, c), c) for p, c in chain_dashes(yellow, length)]
+    dash_length, tape_yellow = dash_size(sharp, length)
+    if args.dashes:
+        dash_length, dash_period = args.dashes
+    else:
+        # a dash and the gap after it: a dash over the share of the line the yellow covers
+        yellow_len = sum(length_of(p, c) for p, c in yellow_lines)
+        covered = float(sharp.sum() * R * R / tape_yellow) / yellow_len
+        dash_period = dash_length / covered
 
     loops = [p for p, c in yellow_lines if c]
     opens = [p for p, c in yellow_lines if not c]
@@ -470,6 +497,8 @@ def build(args):
             'tiles_across': args.tiles_across,
             'aspect': args.aspect,
             'assumed': ['tile_m'] + args.assumed,
+            'yellow_limits': [args.yellow_sat, args.yellow_val],
+            'dashes': 'given (--dashes)' if args.dashes else 'measured from the photo',
             'note': 'Traced from one photo. Every size scales with tile_m, which is assumed (a '
                     '24 in foam tile) until measured; the shape and proportions are measured '
                     'from the photo.',
@@ -591,6 +620,14 @@ def main():
                     help="scale the map so the mat's longer side is this many metres "
                          '(overrides --tile)')
     ap.add_argument('--scale-note', default='', help='where --mat-length comes from')
+    ap.add_argument('--yellow-sat', type=int, default=YELLOW_SAT,
+                    help="the yellow tape's least saturation, 0-255, for tracing the lines "
+                         '(lower for far, faded dashes)')
+    ap.add_argument('--yellow-val', type=int, default=YELLOW_VAL,
+                    help="the yellow tape's least brightness, 0-255, for tracing the lines")
+    ap.add_argument('--dashes', type=float, nargs=2, metavar=('LENGTH', 'PERIOD'),
+                    help='a dash and a dash plus its gap, m, counted by hand where the '
+                         'photo blurs the dashes together')
     ap.add_argument('--name', default='track')
     ap.add_argument('--overlay', help='write check images with this path prefix')
     args = ap.parse_args()

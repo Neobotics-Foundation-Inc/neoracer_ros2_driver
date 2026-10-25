@@ -114,13 +114,13 @@ def test_an_unknown_start_finds_the_car_within_a_lap(lanes):
 
 
 def test_turning_into_the_link_follows_the_car(lanes):
-    driven = route(lanes, 'loop1_back', ['link1_fwd', 'loop2_fwd'], 8)
+    driven = route(lanes, 'loop1_back', ['link1_back', 'loop2_fwd'], 8)
     samples = drive(lanes, driven, seed=5)
     lock, out = run(lanes, samples, start=('loop1_back', 0.0))
-    on_link = [i for i, (_, l, _) in enumerate(out) if l.id == 'link1_fwd']
+    on_link = [i for i, (_, l, _) in enumerate(out) if l.id == 'link1_back']
     # 1.5 m into the link, the estimate is on it
     settled = [out[i] for i in on_link if out[i][2] > 1.5]
-    assert settled and all(e['lane'] == 'link1_fwd' for e, _, _ in settled)
+    assert settled and all(e['lane'] == 'link1_back' for e, _, _ in settled)
     locked, right, _ = score(out, after=20)
     assert right > 0.97
 
