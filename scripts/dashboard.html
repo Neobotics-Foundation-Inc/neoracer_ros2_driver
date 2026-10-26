@@ -11,10 +11,12 @@
 </script>
 <style>
   /* ── NeoRacer dashboard kit (the same block in every dashboard; change it here, rebuild them all) ──
-     neobotics.org and the Playground's language, bold: Kernel heads, Space Grotesk words, squares not dots, solid
-     colour. A status is a whole box in its colour: green running, yellow to check (anything not detected), red a real
-     fault, grey off. Brand red is the logo, the heading dashes, the main buttons and the theme's sweep. Glass only
-     where the page moves behind it (the bar, overlays). No colour is translucent. Every control works by mouse, touch
+     The Playground's look (Koneshka, 2026-10-26): glass panels over the website's garage held still, Kernel heads,
+     Space Grotesk words, squares not dots. A status is a whole box in its colour: green running, yellow to check
+     (anything not detected), red a real fault, grey off; colours stay solid among the glass. Colour says a status; a
+     word is written only for a problem (Chris: "stop labeling everything"), and every status is still in the text for
+     a screen reader (.sr) and written in Windows High Contrast. Each fact once; a topic's name on hover or a tap. Brand
+     red is the logo, the section dashes, the main buttons and the theme's sweep. Every control works by mouse, touch
      and keyboard: 44 px targets on touch, steppers that repeat while held, holds to confirm what cannot be undone. */
   @font-face {
     font-family: 'Kernel';
@@ -42,7 +44,7 @@
     --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
     --sweep: 760ms cubic-bezier(0.77, 0, 0.18, 1);
     --bar-h: 64px;
-    --gap: 16px;
+    --gap: 24px;
     --hit: 40px;
   }
   :root[data-theme="dark"] {
@@ -52,13 +54,24 @@
     --surface-2: #1D1D23;
     --edge: #26262D;
     --ink: #FFFFFF;
-    --ink-2: #B4B5BC;
-    --ink-3: #8A8B93;
+    /* greys for glass: whatever the garage shows behind, the secondary clears 4.5:1 against the brightest of it
+       (measured, 4.86:1 over a ceiling light); text straight on a panel is never tertiary */
+    --ink-2: #CCCDD2;
+    --ink-3: #A3A4AC;
     --quiet: #4A4B53;
     --well: #000000;
     --mark: #FFC847;
     --bar-glass: rgb(9 9 11 / 0.72);
     --veil: rgb(9 9 11 / 0.6);
+    /* glass, the design standard's recipes: the veil over the garage, a panel, a flat panel, a card, their edges, and
+       the shadow under text on glass */
+    --garage-veil: rgb(6 7 10 / 0.42);
+    --glass: rgb(0 0 0 / 0.22);
+    --glass-flat: rgb(10 10 14 / 0.74);
+    --glass-card: rgb(0 0 0 / 0.48);
+    --glass-edge: rgb(255 255 255 / 0.10);
+    --glass-edge-card: rgb(255 255 255 / 0.08);
+    --on-glass: 0 1px 3px rgb(0 0 0 / 0.5), 0 1px 14px rgb(0 0 0 / 0.75);
   }
   :root[data-theme="light"] {
     color-scheme: light;
@@ -74,11 +87,24 @@
     --mark: #A86E00;
     --bar-glass: rgb(255 255 255 / 0.72);
     --veil: rgb(237 237 240 / 0.6);
+    --garage-veil: rgb(237 237 240 / 0.62);
+    --glass: rgb(255 255 255 / 0.72);
+    --glass-flat: rgb(255 255 255 / 0.9);
+    --glass-card: rgb(29 29 39 / 0.06);
+    --glass-edge: rgb(29 29 39 / 0.10);
+    --glass-edge-card: rgb(29 29 39 / 0.08);
+    --on-glass: none;
   }
   @media (pointer: coarse) { :root { --hit: 44px; } }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* hidden means hidden, whatever display a class gives (a legend, a chart until it has data) */
+  [hidden] { display: none !important; }
   html { -webkit-text-size-adjust: 100%; }
   body { font-family: var(--body); background: var(--page); color: var(--ink); font-size: 15px; line-height: 1.45; min-height: 100dvh; }
+  /* the website's garage (nb-world's home film poster, public), held still: the standard's backdrop recipe, its 14 px
+     blur baked into the picture so no browser blurs a whole screen, the theme's veil over it */
+  body::before { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: linear-gradient(var(--garage-veil), var(--garage-veil)), url(data:image/webp;base64,UklGRj4lAABXRUJQVlA4IDIlAABwqAGdASoABdACPp1OoEw8vLSqpDbZY5ATiWlu//a9rf25wfXnTnJBVYaa4GY7Yy8xk2edf6j2Av5J/ZvSmkBvNszff9706PPB5JHPaa738H0y6Exgn/vIvgX+lp17za+BDcC3+A///0m/AP/fzD/A/+nLnu+A5+CnDodlRN8sw7fAKcPIA/LozRDodlRN+WIEsejdWNAnGB+oJxOVOFWESA+s7Pi0wSUqv9gFeEy9mmip3VxFMvLU39PmltC9tYVsNHfX89BIm+WYdvgFOIG1E4qffkzqueqzZ/lLd2PxH9/p6g4hauHogBDbZe6jxMbGxCy6/HBC17Op47dZFOFmsKdV8Ql/HUL6IX9j5Y3Zh7qG2r8FPLBHbgFOJPWjgTMGWlF2Vqjo2y2rj5EnHqKKnC0doUFNHdwjlmxujWsJgvp64TPobb+qq4dmn4UZ7tt+USkBlRN8uszGHBS74COyJdyAVEXZXK4PJ9MlUEYPeq5DKCxEE7V4fb3jvoHaKDDr2pONDlOZ8CRSs/6NHJXjNQ47AYN8MvqUc86tITgBt7sfLMO3wCnD4RYBKF35+3xRHTBJpnb2UVRJu+mVDax2yNstcdVz4uznrbq5suMCm80fsNRVjtlQRdK5LYzeoNO3e83E9AuUpVdFNoJzd3BGfZh3RpDDt8Apw6IjMDI1WComkZQsELrO0F8CrfEjfKnOEhoLFfvtXFEkgmXzx7od1Bd+X440pAFYBcEPIUHhWWmaW5iYdehUQFfBISvM9wLDJa+TQkQIY2X8ujKib6SwBmEB2EXIq1PTzkfD0vV2ywP7gNyi6x3qu/tziRbmgUFEhh0b9iFB/VsoEMyVLpslkHpMRqqboEkZQTOvzUV/bep0cPJgyxA9dLC2wqC5A4NCqOqOIAEpBog36g18Um7PgqaVfcdwl66xEMJRNfv5MZdbdLYyOahmF2Yeq3RjtqpB/VsDrNs6Zec6uAwbI3mrYN5/pusYBZrzHdArHXAHjMiOv9CdFyMSC+m/dkTb+DjJLkMk15or/BUeCBUo+l0XgshNgHUP/FtbYC0n1JE0rDkP/0DgsHgIW8TOqGBnOQKjtxIZL1vKSMfDizXmRLYGMGhk/UsgVdtwYScEmLqiR50pL6QHNq5dIKG6Fuu+3AMbn2/NS+TLJmjnb7BsCee8/Cy8cd+2gCu5RFea4IKN+K85GoS0YxVKKUVPigNSvREK9S99LOWPUvXT37fEU88qeQUMF+x6ivtE4A0FnadHsGopjHkOYMoLBSPn5V1HRGspS91kDKO9UkygmdX42t0O3Del1BEpnW9lVBICeJ5FPaARfJlT4yJY316CRQpQJgj9MomHuCqWzblb9+8IgAcSHWWquamUmx2vYnIP6B6vbkpWXk269/MyaOsmrnjuNt6YvdNlt83XiMQDitGFJi/U6+sPI7YzHf1mTWCQFmQfJ9nwfG4NKshFUmb20LdU3NkFkl6XBHUOS2aAdruxspfBLx2YGPln5IPrDybXX6Aw4wLcwulXxwRtfRZ8Ei35LewiJ9PdnbIslxl/7G6zfeYQzrJzIR92Zd/7/1TmXIrpilvZPSPmgxU/mZffDNqhR+LF9V81JPClMXhKS5AeC6DmHeMlmOsTfiNqfoRWUSBlAXmN8d23R19EaHOcWupcwlvoB+0pL1jZGhAxB3hiHA7BuXnReQsQkOHU3cGN9VQbPPU3tuPQwB1QF+umyGkRrw0DUPMDjlze5spebXTfWhg+lXpEvV2jV9WRZEs49zqPOoY/EGEgWbcq4H0wMmWUJZhxzBvswCP1To4cCrt2CyP88igLv+RW9WAKEcfx+EcC4u11xeTFs8ltFHpgxU61c5fua1XsFMlS+tSExULjB2zB34SEUJon1qrvSbuFenJZ6wBCohOXq/KilJa3O36rewVGxBTensLQgTpf9Iyb/PLfRM1/b1Hy5xGdXZixLhXaYDeqBqo/X4w+IfuNL0VOQSEV5EblDdojjMPGD8W9eloxWhiCmL61islUy29Louu2Nq94YLQIUiaKrDIL5DAHwUDfCNeGhB79UL57gBZQnH/asjma+He4A6d+k8OS5aKcMty2e6MhG3oBiRpIUIkipNNncDQaLYBCmZ2Xez8wV5sRYNVNaIgLudUXReivX5g0FCcIyMITcBcSVZnTLvfHFu9gT+IossYocwFuRyC+legeqnKfbDhPyPE0G9G4mePU3RzHHpNjiwmh0iZ8yUBh8dsvUhdkTFpUroN5Mm0AtSuq8z9jGtT3JtoIduPG4QoDiNtsVFLSx7qnVygOf3ZKdRCWat7rAkf72FVyQQr51u//fpM2htznQpfWqMK1UHbFQDN9/bsTwOWHl8sypZH8zTKL5ui//637ShCgDdwWH53HfxLReDN5IcFPa0PcaZbyVxz/wFtP0ZIufn4QsPAD5FwglFos95BGVZaonmdv0UwSzyN5EHLFyv3sQi2wSuO6J3Pfl8H0lWq5q/3IHeDAbyOl+i3kiIag+om+3sjjuHndpnKgjem8RPVRNIf+WVsPcvQoYCfh9Rfp711gwvynwk5NoFwOFc/9h6SaKkljOCWgn1Mi6j5Cas0UKrs1mJV4SjCvpB4odVHx1P/VkDpAAgry3U7P30xeiUsyisVW5NFO++OSrQexPouvAPnqCCIZAwuQOo8xEtBKarTUYPBaVTss9ah3zf2UTy16U0hdRAWVzao7wYNfY/5WS0sZZbpYpz5VTvIaS6JD/N/fbp8Xuntfd3Rlxbv9xuQXqMUKJecHrma26jaw1bGKK2XatCXLWjwWp/VjjS9Z+Anp3EYa2mLgeBp2iPEvT1EuGVgmtRGkh/rXBe4Ugv+qNsrwl3kaqUmFuaEFmYzEDa4ocGPj1E6znwd9B0OW7hVUvvBe3Yclf5q7bMkjI6azbkHsFTT6c6VJDUHpHKK9ne8evy/Fg2qJIp8IuiTOkqSJ0wUkLCkvORqHv9rV0Uoy3lVoZI2vsBPTTry5ImdYcb+aov4MElXzx/+HgnJFVzLSK2ZGcaYAcs1VdW/3rw/yNy0oZw5Kx4MuhMQABe12eg9uaHJK5kVq1vxUEBEPSIblgtlmT1U/q9WMX34+KQYSmLu8AmqcipVNJuauCQnxK0KV2jsix21efoSyMspOluKNyy3Ef2tTKBG6w5mByppUXKTaOKmjmiCsGNUQuaY0O0NX5Qo9aONKfDVecj2CZQHiWJ+N+OTKxIHwf/03+5zASgyM8vaQsU6QA4YRCI/aAYgzVcA0SBvPjyawazauTHAqGRdx5J4vZQhRHYnar+0jAhp3XfmiWsf8s/0jNRTdvapBtoOiXek411KUI2/l9/B4UDgTDFCaxOSO9SuAQZVr1sCJHFX4O8HSeoDdYaDsuwt6suysWCFRzTWe4qs5/FfYMksxDUEJ/FrQ/LzJNgj1gAYTzT8on90W1cvtL+W5zXhhHySf3ducP4YXVCfZ8CNgsELO/I9tZ0Gybftbsyie4XYs/clpk0pe9m+0ngJfwM3ePRvn9B8qzAWTw5REWjgaXaID7kkL62welk69Fn7+UVY5eM6eBWnETvBbuPN7dV+vWaQBfcphs8ExQxSaYDTxV4X4aG0q204X0z5GoDdeYfuCzzo1dOarf7puGf7EZ0wPV3Ug6elJQy19V+3wegknDl1EM0DROAngjinhUEBiVS2RHCforo2QL6cWc6v56Y9irJg0W9Fafo4ofGEo3GFOHQ7R0kSdMNqyviBs/u9AaVIN+N29ooX72LY36w50MvS4ftZ+LqXDZ1sGen8tIHNBRBSaCD9vgLoGaKBZ9VEYQVXvIX18n/hNTe0E11GxWR4nflYrcYls4iC2ZBiFO8AxOBB8OwrnJFWoloLF5h3SD3wLUzQHyjWcK4C7AJnjFRWqHpyElkFGptkeaY/V6mi/B70EEa0DW43ssHj/6nF8gtjJynDodlg2+af0L92eeX5NWHwwXaJIwSnosp5z+2qicq9JH/F2KNWd5q+3Aa7BXVpa/tuXSUOMFOHQ7KdAx8HG/h5NhJkqehV5krAIJT+6Mk8EMYUh5rP3XN5dGEmqoNSm7wf8ffwGIZ6tIKRMD8ujKikxZowq8Ra40X+yI5MSea3sTYmroek1+kd57uhyICBiowYvelJDdezP1D/oyA/8dDDt8ApxFWWoWjV/HRSHcWTnwi92ef+btl7NGVWc4o/aypyYQSZhbIKymHKasmJFauqN8sw7fAEbvyfPOQoFWSJyL5hU0C8H5f2tA9YI7N6BNkQuUCczrA+NXVyLq6L8o7JD9vgFOHRU7UNZ15IJ+OoBm6h2bz/w8vYAmOCxhv4eWfTQTF+x/gLQqlN+knLk0+iRN8sw7fAKcHaD/48SJH4P70fDyz6bjfw8vFS3ppWlh+0HxHCOsuCoH0BanLa8QM+eYdvgFOHQ7RyQ1ZPNfaI5b0vzRBP4eXptbiUCbxpKiltZKmuAsxtKNsG3P15Y7nA/b4BTh0O0cnFUsl2jQvBnupMWRlitJya8hIvcc/8OJgLJyafhYpr8AqsROJSsAAD+9y/u6PHAWKWAAAKLIeDcOXTF/VhPWmfG4TopjYPC4ZA1RCyo9IRZj/ng926V73nMtI9C4FkzbMWqBI7U3P1U8Z3AqkGSUCZkCRArxvEAA4jVrh995xcPqgfjUL0jG9+Fd2skI7uPXdc3szRJkL7eaVZkKpngQE9M9g1rwIN9AJxTHMTXG623IkMMimY2zmGAmnM/obR7T2v0q9Zuu2b39qRlGPqT2sYQjV639s0or/ha1lA9pmf2mhTSZw4yfiQWqWMLrZOfNJc5iUC1OOsyCa3zhnJcFVkAAAiZ7k08wYS0GvXCAiYACdPOKLF8yh6oMhTlQHn19VpPlg0zB+/79W/sykZ7EfeMH/+E1ZI5hVjwTsYjpVETO8ey8Iw02QJK7WoGH11QxS26Z6/8Yyqk/F6LiGBt6d+dXU3jey0jnwR+5tz6FvNporf3TrS4HRIMjTFDpJrMe8QyNHxQvi8TiNxZwlsxyNXyM4Vc/Z/0mUEwA4fD+IOOz40wzbsjs6/yJcDONdTJJjsCgStN1TwyB/YyIHzNqiWuzxm2ept4zVq3qM5w2PWYfYu4NddveizbNSKSihQsWT94Mi68rHK1PdJ8TC2McM6eS19FjBzmu/cQ+4yD+21BusRqGVOPHR0DzVeDaM0WMBJJ7gEf5WJW+zafNf7IvFanBkMUsg9+jL/WbYEroQAAAmryVCJXQf/LEBIkVJg7ykPIwxwyjPRqLVk6u3esstxxQon9N8S4ZYe+GYOXWSBpi7PBRlB/E2SCV7Q2Ck6y1rycgxTubVxyfIYprav9M1ExPq6hgZIZ6QnhgZzZ7WMJ2SWq1bsCEbc9o0ZVFRYCt0SfC2Bhl5IwYxxsn1YnqrXKBHXWdyRiO5PclxsTrZl3ydlNAAAASUyPOfQ4i+nz3ace8BOUcyTqzWBee52Q5hZLk/HLH0XI+Eem9WowkzeYYI58ko+rhkwuQTPwD97RT5+SF6BE/oIspKwd5QpKqiyWXayKrYWfYOTV3O5yYFhSyrlOUUcW0LD58Oe00yVjHYlqJR60Xk3nRhYcys4g4UcOJxhw5YcQY/ZX8p7tVxkf21eg+qApVBhAAUMc4AAC5J36wHecmZ3CUVOtAAG4egMgdYwzaLIMlrLCV/c0efxP2FGGFM/QDdfWKdp0Btd7BnMJa5CXKBh3ASlef7sekDPc12IEyz5d/F9mhrz71DaBq4guEm6whD+QZURIyLUbyS68lORu/6Bai5yy3XsMx028R0yKBLpn62KiZMNUi1iRoJt33ntyypPtT+6vGHmX6rmn+qEPHpZv56q3a1haBI7O96hqIcQAA7MWSGVF4H9hzK2sc+hA9+lJScjM6XlrdeBz56Cqcl5OdA822RAxFZJ6rWpuU4bIPcOqZqQ8pZNqf5WKsKgdl+pg8CVUBNT6FpvTIOFzdiaCzh5qxADcdcPKa2uSrl9x1KxgdC30kmMKaWjbU5dpqGSXhhWAov0wu858fHVHmngpsEiPYNoeyPtt9m/BGYO7Fhw8sAC4LtjDPqPPshgYfDKCaLew+8Z6ymxe6nZDIRv5ch5Wr1UCACSZs3I0+yT0l2oAX8f0/MhtUbDlDIs22+rXq4ldD3wLAYKrIhFhDCdxUr0t1/BoW8pce4ghHJTY/vjsCem7bTBdWXxH/MFF3V/2u/y41lfJ3faMzDOj4CtCzYwuqSYtNFBTGKu2uLIWfAiAXzfl8uaQDp7NeHErOqoJ7SXACsII4CLbdXRZ7EtBgOn8m5PzmhksK+wNQ8ycqCBHrLDA1suoG6AAbcE2PBFE6CDKaAphV/ixLkBKKvC/+qNuD9HmILgOunAdVbe0wLO0Y8B4TvRzfFJ4pgUutrYpRh75e+IQ0pETbizuhQYuw+LsVGWb6Mv+Nl3em0FsDi/GWcoPuQuuXj19dnj6RIYpOQIVGhrEBqttaqhqqg4r2EAfkgAJVINwCmWoPjG//raLtdFdVkIE6kt56sBpbVcE/SUw9c1u6Hd1xDWwvsyAA7MFBvTtO5tYznFCM8JXi2I1iiSw08TodupNsfx/KkkDbIV08ml6weh40bELwsLjjLwA+qisFiKYA7/VckQ4mMX7HO9SY1XmUuG2tYVWK/8/VYgk5PzfA9VhVELYAMoMavXKTMO+NqoMkUkvuLVEwmUaExAW6+PSgxTMTDh0YRV1W5H+Dm+cSOEZLGDXGEBXTEXSfZJBwANS4LHnzO7yJU2vCAK2q7peJ3xy3I2J5vOHWA3DX9iLA3X+wivSt3Xm+Zaxvs4g7P6B/BXsnIEQyoMvFa6ookv0BBRLYzXipKTPtuPUZSu7FLXdeTKcTYWgeoauYDvTT9AkUHI5udyHdVeT1OmNh/KJKnF0Ha2De5gfB+XnBjskIrQb8NbU6VAGqL6i/xFQLwFccfc6IredA+rQxVvMqRjr8YEO6GF9/+XNiR/dw17spmlqziCidLsRs6XPvrG7NJ9VqBwXyJa0bGxDGMZz8ALggiDS3BwT/HhaX+h3Qz8fhszzqWsYMelHBA2zsaOgkDyro/9R0ameGru1jKJa8cThLVSSfAEMvD9ATWm9XacFtriYgu1sX8fhq+xl5Im2nbrN1SeM5dfU2vU4yIzIKlMKuo2QM+crC1+jv5Fjkly06W74Q6DaHd77WsiaPPohrnaDq31GoMMroBToQGmsCWrZXP0//5kVzBRh2Z6Zu6eeZvUVoA7yxM8GUlH8Be1Genp3Z7oLa0wiUaM2pacnLD4HGKhl0jOaPOwzpkjR1pCGw+tJOBse9AHxuufkvaOXOAUHp9SVGC4k5JD4Gh1T6x4y3sTyUTHreSsb8BckZtNuiGdWnXC1FIzM60XLAVcgftOuXMS8AKoKCwkZKgxIcXc6wLEnsg39o2WGsei0r3qU7JS8kLonlT65kYK5W8AUSQ1LqVTX5clQy1BGl9G7CO2+rUx1b4SLzOgwPp0desaL8CXdTsEaQXhnWcPSYy8KWISLLWmQqpa5n92ARGrrze/pleGkI0wplgZIKsxj67M7YNddxCw90z581VsG2V3KmbOVQcSCSoLJ/Dyu8Dt3Wc5lsGYx1RVQh5UOx7Rez85g/FfrJWaq8pVAtN/jtuWY29jIfbdmzOFIKl7T34NWSUaixDYTXeJXOh5B0P+Y15L8MUnWY3AIz4+dbn76PoQLj3YzwoXzF4c2rsDu+R0Iz+I8TpNNEe1RXseDUfQNvLA0Q62GvEPBRYQPAZu5TAsS6laAOw/ejXvXYuRoV1kbwn4bdd7uHqaH4nkyWm0FTwmhFuOBKfhsLLP8KT8hm/HA0eHglMUD1NWfLRVTrDwlor6J+SM0ZnIIcSNrTapX3EFnlWQ01RDKqnjAfoz7C8Q/a7OJP3YWSi8t0f4JrVn1GS/P4glM8/BNohOntkNpyUdZINVopddRQTjBFAbwzRnr2qRVWdWWMAorgwjgmodX4j5MTmJv34DgUdCx+O/MJoSgmRusZ9+xOSFlQ/HqkCua/QCJMasJh0+ASXA7El0YnvGI730mZdEVxS4f3yqqgQSMDRawUFaa6zH0YNxnwmBGaxNEHmzXpgtxRwEPedopVtPR5XDEKdyYQoS8/teSDoH1bvSIPfYWzklVeRwmj8V7DrXNM7OAKO5300e/zSwLIe2PZwEOfspxIMjBB0N1mp4iMD7oC3qmLJfDGSoeMsMc70wv/P0F0GvvyzKwFsWHiuQGWAjOh3KCqFAIBT7e8BziDIsmNwnVEYG0wyXxBOjsZYYwz6TbUOoSjhnn1+4kLENjotkIaBdgMBdiFk9GC6FDK0d/9n1Wkk5gaYEuEsQWweoNWwaY+d7VP7ZDfWPZfaGZ7mH21yyWr/Rh1vfmD9aVA/7eQ9dXx5mdAmKMwQ10eIYFr/G6xF23NufUuIHudVN+2TbdmIfZMpijzwqFZJrN0w6uaosQumbl3Yq8WrGYv3zdmGATE3ekyxWfdULa3d1tqljngPNnTnhLBBHRzxSY1RSO8KxHOycs5DxbUZ4C5KMe3rgnS3jIOw1yiTo9HF4Y2SFDW51I26pOt0F0c4V75cLOqlLXe1YAWTE+t8DaMmGXEBfzsGNjP5LXM8wVRUV/csHblukVkwpvu6w421dfj9rDJII+fve+u+aKZlm6kzkWvgxkU9UKnInMplexGWDSswEjLXwQqUBAY9+A7arNZiy5ZlrZhhk1xHDSXoH1AUAXnby/Hy8NaiVQEvKpLjshNJRjHOywdeTCHe5evMy7ibqjS2y96ofxjfgOdQ3pYbIefRj2ZQi3lmLdolUpspfqsZ1u0F7kcQnN9YKQZ2jDKfo72EZdQQsoAFb0cXE39gLI6YSYxHpTOUWVg1qGBO247lnhHeYgr7pS5gWTY2xR1YdJkfy0+yK7ooR0G71WVCH32gDhCvG2+RT2xvWkELDk/sitA7R1Bp8mw3UfDRzxo7+LieJVt+lZwDgw8YlZzJHAKLsDSkwb/aLSv0ifQscvWJL0T18cA0vouZtiTal6+PptDH9rMfcC2U2MPQ3eF7xRrJJyZvldBTz9jcr9gZskoBAXvWttYyFZrMW2ycns0m10QXAGP0ie7AwGFhcmETJXqNs8K7oztB4zSGHOuHb9t9A7DCakKpH62i2SV41D9vSFnC89R+MeKWRl55cPTh2FvH2qTCfcgHFDWuKlR+RNGfYtrEZ1xyhSS5j+YBS1DV5fxytCU7B4YploNbsgtYOflWulzsPy4+4zDrfSiSum3P1sadyFee4LZDVLaM3UwPnuSh1PSUNUpGV9G0ng582BIZiQn5TDqMA9t++YQEMvq1kpupjeYjU4RGuYdJKkJ2pFAhjRZls2IS0sr0mkt1U9ogWSlQfPq+GTMVX9P7FrevRcN5P8xnQF2s3GNrQKVAb/6gosbsgVbirc3XRUiNuJDPxK7mqkmSEZpiutmtJdYm2DrcG8YX2FoW+ZccSWomwz2KvXu66cJnuO00RUHXeCBx7X3dBZqpNk7oKAk8KtSmBjSDqeg85FJx1Z9l4WGwzaBTNWbKiChkoXbJSfcqcq/0kUo0Kr7JoM8sw1rpH+3sF6gvKarKzUyBiHCNsjqXE3NRODwfQFgdCvIrFyxJKydp2HuuqhRvwtBOo3QKNHNLJjyDuVeCFNR/mlPQWyyxCW9WlZKqeiLlNBYRqsAM+wDQQn3yeofCej2+/IM0QLLaNS2t0OLLRiJpxbaxbcV6K6lHNaKuIF43gNpP/rihu2rVtF5eG10yy6TJmffWQTpubnQg2aza8RPVGrg7aO7HMld6i5Kn3IcSlXSa8QFkwaks44FeqvP0+FdiRmzQvdVcTSfcoHqrnzZzK3VNp99U/qXLve+TDuCfolWqnhHIDifZEUtLeQQYKP+k8YHeQfsH4tqoOlBFkgOUkhVXRS/H0Ug4EbdR6SOIPuCmzsK5RCZFVmiinBistVSbbSOI0D2BOfyUTyFI8T980H9ssrMXs1TrWt261Du+SSv9IdvMujLsfJQEx/Z01BPg6ZaoTeBlEKz61BBV4Pt2ZBHIvW2cYpiNbyudVxVv0O3lNGgn8xWp2hITpx/HIOYPXPwRP1IMRnT9spyxyR4mnF/EyAxiJ+x+IBWe/uBSPjjKUsrQdMDP0N0esddcDgxNssDLYPj7SpEcDBZx4TxavbMe52C/jLxDF1PONwhLhZ6gWowD9NtZZRruQ3pwlcB3YPefP24mczaMYHyEeGxJ2efaEZkhszCf9zgo29Ev0SYKLWb0PWrbJOCzIEuviUWazhqc9Ayndj+t1Vv/4dsXpkZ5bIzzXwijHGRmNIqYJxUhDLZfhHPPKrStdzF/ZP9D1WyZ4Rqg2SbNnFPMKtHzxBGZLQZGsiqOeVHMFfIs7beuQ8g/XtqWrnBoxkoqQ04qlPqDDeu7R68Vc7b6Ra0NHwDUNf96QEovN6qU2NPEhzmbPK5KVi80ItCc2LyYfmfscmfDIxQ451mCrCCK1f72XsxazuAJzM0dRzNQUgiSaTrO/kR/feeNHpFXYbcxDfk84N7N+W/P2vdC1gBpOFnyGkvlfpNVuVY2xaEPL4FoQplif+Peopx+7eSxUKNwoCYV2coa8muckKjEuNwW9LQ7Dofhr9+9JAkBlYaYPcjAuXbERHc8tMhsJbpsWjXcDU5kGW+pLA0c/GIJmaTxcg/rsIixn8noqQsAbICEr7Jcr6C21I+g0v23eQsp5Hh5VzIv2PSpfXZeTb5qKQg+bW3PBB9AnrFjY+QI71PeOOJvDjLLFYw21cEYpQ8y0Z+AYqXC68lZi1geIMRz7AOy0Y2pwjTlcTceuUtPWqrNN0fu/js24xDBTbUuLzorOcQDV9zJyncqSYQG8hkE1EQUr1ydUQEDFSjhw8aMhjVvIZiqgESrrGl4Ke8lSMc3h8l1oisGjxcPwZecCH5T6uZ5MfhG08M4ux6p23TD2LADnJ193QiqEXkRywZFGbfp+2wtknc3egVyvvh+RyN9utIn8/q0YqwJk35dAnlbq5LGcYDg81sC24dcGy8e0RbJTyyatP0rY/50ARx4lRxYiC3qEr3KrRQLuS88tIEtR6CzrgQkLCWVVqYo/QpgsEJ7ryw4bxiMTHUOrhHpvf4sTruIASaVLx7Gm8ORzhdq/mZul0q0MOPYC0FPpgRwFzyKC5xTvqUo3tWWyIvl0GPsEX3D6lQ9gu/6zBHROenD8ze7DrZnY4CkGrUHl/4upHYP0bf5nm2yTzsevqWfGkt5RPjInOCYJ9KhLf4jzkGqHHF838kLiHl8IxTK3FFyN7nzzv6Cs/nNGlpvIsVA6qr0bOEyn6v+pWa6U74dYoOYrQ91hRYuQZkb+aROBO1n1JPtldoVgJn1LgYu9h1ANsbf5YgEBQDSu6wNUP7lCBxgRmAuOBN9Gljig9cCE2is1BRCkrbgUXIdgxYFdUkTe83BZZhFDv0ammIjgA4ciIagl/XiJcmSPyhX0BVHGHTe0Bb9rX3k1MhOuYR9/U/Uif++k/44QhD0i8BBCq5muUSnv9qRdhGFK5deBn8MaVICDcb88k94Jf4S9SvrcnJz9Hs486ukwaj3FMaEw6FZs4bNgnM5wxlgECoBmQCLW2efiwAfwqBx4nrLfbK9EHTWKIuvt4HJ8SCfC+ZBsoW1wTtkCtjeJL5GweaAYW1HuztPQofJ9/61/Ch+LoMCzizZFHBfohBi3JDvelxIhGLq3JTZ4fmvg7cigY5eIUdU5lcY5InQeM59x0HabVAdhte99IfCeBVAcynvug5RGR8WoQ8PNzozzsbFakkaNueb8VWMWdp3TxeCfuAxPFtRdbwcBuFcBvaac5wcmUYGEAAH/QTJqeho3ojMAxw5j613EcKXBV5UeMw5JQgWxpg9F9dcy2zgjQr5VK/MoED6z6qVR6R3HjQyXlnbLTFkhAATIzUuLsAB2nzIl+omD/Tjha4aBYSpQ/kv7YrhsS3UWfXRRjnVcit4DRQ451CoauxfZV48NQgMwEyADDAoC5cfYkWjUeKpV8on19ijzK3WBSaepua0HtX5AACls85Xe9MWgzSo3gDqSFf7uPAmwAAA1Ii8vMUvr9uwnxz1jDKICuOcIM/NnHuszC1yakW7FCJx1yjzNJ+sRUnqREZpAn45ytDy45IkA6l2JSAygAD3d+AOyqnN+Scp0Qmk4GCo8qDioAm1VkR5TtqFmLlrOEeZykot8vZwgiefLccBPa3AAAEPSyKagEBADMBEgDEe81f2msyht2y1lcFFs/w47dHbSvpFIAK1PVaE8mAmYswAAARcrdgZ0k6zN7JSg298QZWmISrXJd1mZgYTbi3sA/LzhULJ6K4P9xShuNHevHgf0o5AwAAR6bMWEyUS24VTNjAKetGUALdJjjOSPI0yIlKp3ONUlzE8omMYrSFSWAGEAAABL90cTQXVbdKb2E92MdwKCkP5g59/gBZs2LqG6/YZgE3CGAIAUkAAAK6gtkFRxF6x57+Aoddns2HgQqAQ2SMg6FIe0rsy63AxaAcDieLuktIAAAdkQsrCHAxluC2qzmzSiAi6FsY/9wLcVRr8QdAffA99oAC6cKjzLbsRiwAAAADNb8n2Qlazwd7wnLxcpquq5gOOKmmqLGN6P0WzlMN9MEBuTAeXyAAAAA/1wml4+ShloDOO2VMxkgICGxQIbAdayHg8rJnAMcPUAAAAA=) center / cover no-repeat, var(--page); }
   .mono { font-family: var(--mono); }
   .num { font-variant-numeric: tabular-nums; }
   :focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
@@ -88,6 +114,8 @@
   .s-caution { background: var(--warn); color: var(--ink-on-warn); }
   .s-fault { background: var(--red); color: #FFFFFF; }
   .s-off { background: var(--surface-2); color: var(--ink-3); }
+  /* off, inside a glass panel: a card, not a grey block */
+  .panel .s-off { background: var(--glass-card); border: 1px solid var(--glass-edge-card); color: var(--ink-2); }
   .state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
   .state i { width: 9px; height: 9px; flex: none; background: currentColor; }
 
@@ -114,10 +142,10 @@
   .live.lost i { background: var(--warn); }
   .live.wait i { background: var(--ink-3); }
 
-  /* the theme: one switch, the picked side solid red */
-  .seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 999px; overflow: hidden; background: var(--surface); flex: none; }
-  .seg button { appearance: none; border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0 14px; min-height: 36px; cursor: pointer; }
-  .seg button[aria-pressed="true"] { background: var(--red); color: #FFFFFF; }
+  /* the theme: two outlined pills, the picked one solid red (the Playground's) */
+  .seg { display: inline-flex; gap: 6px; flex: none; }
+  .seg button { appearance: none; border: 1px solid var(--glass-edge); border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0 14px; min-height: 36px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: #FFFFFF; }
   @media (pointer: coarse) { .seg button { min-height: var(--hit); } }
 
   /* the sweep: the new theme slides across from the side of the button pressed, a red edge leading it */
@@ -134,13 +162,13 @@
   @keyframes band-ltr { from { transform: translateX(-14px); } to { transform: translateX(100vw); } }
   @keyframes band-rtl { from { transform: translateX(100vw); } to { transform: translateX(-14px); } }
 
-  /* ── Buttons: pills; the main one solid red ── */
+  /* ── Buttons: outlined pills on the glass; the main one solid red ── */
   .btn {
     appearance: none; position: relative; overflow: hidden;
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     min-height: var(--hit); padding: 0 18px;
-    border: 1px solid var(--edge); border-radius: 999px;
-    background: var(--surface-2); color: var(--ink);
+    border: 1px solid var(--glass-edge); border-radius: 999px;
+    background: transparent; color: var(--ink);
     font: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
     cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; touch-action: manipulation;
     -webkit-touch-callout: none; text-decoration: none;
@@ -161,12 +189,19 @@
   .btn.hold::before { content: ''; position: absolute; inset: 0; width: calc(var(--p, 0) * 100%); background: var(--red-deep); }
   .btn.hold > * { position: relative; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  /* "Not applied": a form's edits that Apply has not sent yet (the only word the actions carry) */
+  .word.pending { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; background: var(--warn); color: var(--ink-on-warn); text-shadow: none; }
+  .word.pending[hidden] { display: none; }
 
-  /* ── Panels ── */
-  .panel { background: var(--surface); border: 1px solid var(--edge); border-radius: 24px; padding: 18px 20px 20px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  /* ── Panels: glass (Black 22% with a 10 px blur and a White 10% edge; frosted white in the light theme), the
+     standard's shadow under text on it; status boxes, the summary and the main buttons stay solid ── */
+  .panel { background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 28px; padding: 24px 28px 28px; min-width: 0; display: flex; flex-direction: column; gap: 20px;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-shadow: var(--on-glass); }
+  .s-ok, .s-caution, .s-fault, .summary, .btn.primary, .btn.ok, .btn.bad, .view, input, select, .note.caution, .info .tip { text-shadow: none; }
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .title { font-family: var(--head); font-size: 18px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1; }
-  .title::after { content: ''; display: block; width: 28px; height: 4px; margin-top: 8px; background: var(--red); }
+  /* a panel's title as the Playground's section labels: spaced Kernel capitals, the red dash in front */
+  .title { font-family: var(--head); font-size: 14px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; line-height: 1; display: flex; align-items: center; gap: 12px; }
+  .title::before { content: ''; flex: none; width: 22px; height: 3px; background: var(--red); }
   .sub { font-family: var(--head); font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
   .count { font-size: 13px; font-weight: 600; color: var(--ink-2); }
   .tag { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; padding: 5px 11px; border-radius: 999px; white-space: nowrap; }
@@ -174,7 +209,7 @@
   .note.caution { background: var(--warn); color: var(--ink-on-warn); font-weight: 600; padding: 10px 14px; border-radius: 14px; }
 
   /* ── The summary: the page's numbers in its own ink turned over, no status colour ── */
-  .summary { container-type: inline-size; background: var(--ink); color: var(--page); border-radius: 24px; padding: 18px 24px; }
+  .summary { container-type: inline-size; background: var(--ink); color: var(--page); border-radius: 28px; padding: 24px 28px; }
   .summary .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 14px 20px; }
   .summary .stat { container-type: inline-size; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   /* each value at most --len characters wide (fixed per stat so a changing number does not jump), sized to its cell */
@@ -188,14 +223,31 @@
   @media (min-width: 701px) and (max-width: 887px) { .summary .stats.n6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (min-width: 701px) and (max-width: 749px) { .summary .stats.n5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
+  /* ── One grammar for every dashboard: a node or a part is the same box wherever it stands (its name, its rate in the
+     top right corner, a word only for a problem); its status for a screen reader in .sr; its topic on hover (the
+     title) or a tap (.peek, kit.js keeps it open through a redraw) ── */
+  .node { min-width: 0; min-height: 72px; border-radius: 18px; padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .node .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .node .name { flex: 1; font-family: var(--head); font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; min-width: 0; overflow-wrap: anywhere; }
+  .nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .hz { font-family: var(--head); font-size: 15px; font-weight: 700; white-space: nowrap; }
+  .hz small { font-family: var(--body); font-size: 11px; font-weight: 700; margin-left: 3px; }
+  .word { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  /* (not .note: that is a page note in grey ink, unreadable on a status box) */
+  .restart { font-size: 12px; font-weight: 600; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .peek { display: none; font: 600 11.5px/1.3 var(--mono); letter-spacing: 0; text-transform: none; overflow-wrap: anywhere; }
+  .open > .peek { display: block; }
+  [data-key] { cursor: pointer; }
+
   /* ── Fields: a name, its unit, the box; numbers with steppers that repeat while held ── */
   .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 14px; }
   /* the name, its unit under it in full, the box at the bottom (so a row's boxes line up whatever the units' length) */
   .field { display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0; }
   .field > .name { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 1px; font-size: 13px; font-weight: 700; }
-  .field > .name .unit { flex-basis: 100%; order: 2; font-weight: 500; color: var(--ink-3); font-size: 12px; line-height: 1.3; }
+  /* a unit beside the name (deg, m, s); what the field does is in its i tip */
+  .field > .name .unit { font-weight: 500; color: var(--ink-2); font-size: 12px; line-height: 1.3; }
   .field > .name b { font-family: var(--head); font-size: 18px; color: var(--ink); margin-left: auto; }
-  .field.wide > .name .unit { flex-basis: auto; order: 0; }
   .field.wide { grid-column: 1 / -1; }
   input[type="number"], input[type="text"], select {
     width: 100%; min-width: 0; height: var(--hit);
@@ -228,7 +280,7 @@
   input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 8px; background: var(--red); border: 3px solid var(--surface); }
 
   /* ── An info chip: hover or tap shows the tip, tap again or anywhere else hides it ── */
-  .info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font: 700 11px var(--body); letter-spacing: 0; text-transform: none; cursor: help; flex: none; vertical-align: middle; }
+  .info { appearance: none; border: 0; padding: 0; position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font: 700 11px var(--body); letter-spacing: 0; text-transform: none; cursor: help; flex: none; vertical-align: middle; }
   .info::after { content: ''; position: absolute; inset: -12px; }
   .info:hover, .info.open { background: var(--red); color: #FFFFFF; }
   .info .tip { display: none; position: absolute; top: 26px; left: -10px; z-index: 60; width: min(280px, 76vw); padding: 12px 14px; background: var(--ink); color: var(--page); border-radius: 14px; font: 500 13px/1.5 var(--body); letter-spacing: normal; text-transform: none; text-align: left; white-space: normal; }
@@ -289,35 +341,41 @@
   @media (prefers-reduced-motion: reduce) {
     .live i, .btn, #toast { transition: none; }
   }
+  /* a phone, or a viewer who asked for less transparency: flat glass, nothing blurred */
+  @media (max-width: 700px), (prefers-reduced-transparency: reduce) {
+    .panel { background: var(--glass-flat); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  /* Windows High Contrast strips the colours: every status is written there, and the marks drawn as backgrounds (the
+     state squares, the bar's square, the legends' swatches) take the system's text colour */
+  @media (forced-colors: active) {
+    .sr { position: static; width: auto; height: auto; clip: auto; overflow: visible; display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    .state i, .live i, .legend i { forced-color-adjust: none; background: CanvasText; }
+  }
 
-  /* ── NeoRacer System: the summary, the health and the log; the drive chain; the stack, autonomy and rates. On a
-     screen 1280 x 640 or larger the whole board fits it, nothing to scroll; smaller, it stacks and scrolls. ── */
-  /* ── The board: every part in its own area ── */
+  /* ── NeoRacer System, one grammar (the box, the words and the tap are the kit's) (Koneshka and Chris, 2026-10-26: less text, "stop labeling everything", syntax and
+     direction). Read top to bottom: the counts and the health, the drive chain, the sensors beside autonomy, the
+     watchdog. Every node is the same box wherever it stands: its name, its rate unless an arrow carries it, a word
+     only for a problem. Every topic's rate is shown once: on the chain's arrow that carries it, else in the box of the
+     node that publishes it. Colour says a status; every status is still in the text for a screen reader (.sr), and
+     written in Windows High Contrast, which strips the colours. A topic's name: on hover, or a tap. ── */
   main {
-    padding: var(--gap);
+    padding: var(--gap) var(--gap) 48px;
     display: grid;
     gap: var(--gap);
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas:
-      "lead lead"
-      "h0 h1"
-      "chain chain"
-      "stack stack"
-      "auton rates"
-      "log log";
+    grid-template-areas: "lead lead" "h0 h1" "chain chain" "sensors sensors" "auton auton" "log log";
   }
-  main.one-health { grid-template-areas: "lead lead" "h0 h0" "chain chain" "stack stack" "auton rates" "log log"; }
+  main.one-health { grid-template-areas: "lead lead" "h0 h0" "chain chain" "sensors sensors" "auton auton" "log log"; }
   .lead { grid-area: lead; }
   #health-0 { grid-area: h0; }
   #health-1 { grid-area: h1; }
   .area-chain { grid-area: chain; }
-  .area-stack { grid-area: stack; }
+  .area-sensors { grid-area: sensors; }
   .area-auto { grid-area: auton; }
-  .area-rates { grid-area: rates; }
   .area-log { grid-area: log; }
 
-  /* ── The summary: three counts, in the page's own ink turned over, no status colour ── */
-  .lead { container-type: inline-size; border-radius: 24px; padding: 22px 26px; display: flex; align-items: center; min-width: 0; background: var(--ink); color: var(--page); }
+  /* ── The summary: three counts in the page's own ink turned over, no status colour ── */
+  .lead { container-type: inline-size; border-radius: 28px; padding: 28px 32px; display: flex; align-items: center; min-width: 0; background: var(--ink); color: var(--page); }
   .stats { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
   .stat { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   /* the three as large as the box allows, the longest ("10/13") on one line in a third of it */
@@ -327,63 +385,42 @@
      of --len characters fits at 100cqi / (0.75 x --len) */
   .fit { white-space: nowrap; font-size: min(var(--fit-max), calc(100cqi * 1.3 / var(--len, 10))); }
 
-  .gauge { container-type: inline-size; border-radius: 24px; padding: 18px 22px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  /* ── The health: its name, its value as large as the box allows, the battery's charge in ten cells; a note only for a
+     problem (warm, HOT, low, CHARGE NOW, how long since a reading) ── */
+  .gauge { container-type: inline-size; border-radius: 28px; padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .gauge[hidden] { display: none; }
-  .gauge .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .gauge .name { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
   .gauge .value { --fit-max: 72px; font-family: var(--head); font-weight: 700; line-height: 1; margin-top: auto; }
-  .gauge .side { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; min-height: 17px; }
+  .gauge .side { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  /* the same bottom row in both boxes (a note, the cells, or nothing), so their values stand on one line */
+  .gauge .foot { min-height: 36px; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; }
   .cells { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; }
   .cells i { height: 12px; }
   .s-ok .cells i { background: #189446; }
   .s-caution .cells i { background: #DFA92B; }
   .s-fault .cells i { background: #C70028; }
   .cells i.on { background: currentColor; }
+  main.lost .gauge { filter: grayscale(1); }
 
-  /* ── The drive chain: the RC and autonomy, two ways in that meet at the mux, then on to the motor ── */
+
+  /* ── The drive chain: the RC and autonomy, two ways in that meet at the mux, then on to the motor. An arrow is solid
+     while its topic arrives, its rate on it; dashed while it does not ── */
   .chain {
-    --stage-h: 56px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
     grid-template-areas: "rc l1 gp lg mux l3 th l4 esp" ". . au la mux l3 th l4 esp";
-    row-gap: 8px;
+    row-gap: 12px;
   }
-  .stage { min-width: 0; min-height: var(--stage-h); border-radius: 16px; padding: 10px 14px; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
-  .stage .name { font-family: var(--head); font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .link { min-width: 96px; align-self: center; display: grid; grid-template-rows: auto auto auto; row-gap: 4px; padding: 0 10px; text-align: center; white-space: nowrap; }
-  .link .t { font-size: 11.5px; color: var(--ink-2); }
-  .link .r { font-size: 13px; font-weight: 700; }
-  .link.down .r { color: var(--ink-3); }
+  .link { min-width: 80px; align-self: center; display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; text-align: center; }
+  .link .hz { min-height: 18px; }
   .link .wire { position: relative; height: 3px; background: var(--ink); }
   .link .wire::after { content: ''; position: absolute; right: -2px; top: -5px; border-left: 9px solid var(--ink); border-top: 6.5px solid transparent; border-bottom: 6.5px solid transparent; }
   .link.down .wire { background: repeating-linear-gradient(90deg, var(--ink-3) 0 8px, transparent 8px 14px); }
   .link.down .wire::after { border-left-color: var(--ink-3); }
 
-  /* ── Tiles: nodes, autonomy, rates ── */
-  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-  .tile { border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px; min-height: 112px; min-width: 0; overflow: hidden; }
-  .tile .top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; row-gap: 2px; }
-  .tile .hz { font-family: var(--head); font-size: 18px; font-weight: 700; white-space: nowrap; }
-  .tile .name { font-weight: 700; font-size: 16px; line-height: 1.2; overflow-wrap: anywhere; }
-  .tile .name .detail { font-weight: 500; }
-  .tile .restart { font-size: 11.5px; font-weight: 700; }
-  .tile .topic { font-size: 11.5px; margin-top: auto; overflow-wrap: anywhere; }
-
-  /* a rate on one line: its topic, its rate, and its last 60 s where the box has room for them */
-  .rates { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
-  .rate { container-type: inline-size; border-radius: 12px; padding: 7px 12px; min-width: 0; display: flex; align-items: center; }
-  .rate .in { width: 100%; display: flex; align-items: center; gap: 10px; }
-  .rate .topic { flex: 1; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rate .v { font-family: var(--head); font-size: 14px; font-weight: 700; white-space: nowrap; }
-  .rate svg { flex: none; display: block; }
-  .rate polyline { stroke: currentColor; }
-  @container (max-width: 250px) { .rate svg { display: none; } }
-
-  .log { flex: 1; min-height: 72px; background: var(--well); border: 1px solid var(--edge); border-radius: 14px; padding: 10px 14px; font-size: 12px; line-height: 1.55; overflow-y: auto; white-space: pre-wrap; color: var(--ink-2); }
-  .log-dir { min-width: 0; color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  /* (the kit greys the panels; the health boxes too) */
-  main.lost .gauge { filter: grayscale(1); }
+  /* ── The watchdog's events ── */
+  .events { font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .events.none { font-family: var(--body); font-size: 14px; }
 
   /* ── The node graph: glass over the page ── */
   #graph-overlay { display: none; position: fixed; inset: 0; z-index: 100; flex-direction: column; background: var(--veil); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2); }
@@ -405,56 +442,24 @@
   #graph-svg .gedge.hot { stroke: var(--ink); stroke-width: 2; }
   #graph-svg .gnode, #graph-svg .gtopic { cursor: grab; }
 
-  /* ── One screen, nothing to scroll: the flag, the health and the log; the chain; the stack, autonomy and rates ── */
-  @media (min-width: 1280px) and (min-height: 640px) {
-    :root { --gap: 14px; --bar-h: 56px; }
+  /* ── Wide: one 12-column grid. The counts and the health; the chain; the sensors beside autonomy; the watchdog ── */
+  @media (min-width: 1100px) {
     main {
-      height: calc(100dvh - var(--bar-h));
       grid-template-columns: repeat(12, minmax(0, 1fr));
-      grid-template-rows: minmax(132px, 0.72fr) auto minmax(0, 2.2fr);
       grid-template-areas:
-        "lead lead lead lead lead h0 h0 h1 h1 log log log"
+        "lead lead lead lead lead lead h0 h0 h0 h1 h1 h1"
         "chain chain chain chain chain chain chain chain chain chain chain chain"
-        "stack stack stack stack stack auton auton auton rates rates rates rates";
+        "sensors sensors sensors sensors sensors sensors auton auton auton auton auton auton"
+        "log log log log log log log log log log log log";
     }
     main.one-health {
       grid-template-areas:
-        "lead lead lead lead lead h0 h0 h0 h0 log log log"
+        "lead lead lead lead lead lead h0 h0 h0 h0 h0 h0"
         "chain chain chain chain chain chain chain chain chain chain chain chain"
-        "stack stack stack stack stack auton auton auton rates rates rates rates";
+        "sensors sensors sensors sensors sensors sensors auton auton auton auton auton auton"
+        "log log log log log log log log log log log log";
     }
-    main > * { min-height: 0; }
-    .panel { padding: 14px 18px 16px; overflow: hidden; gap: 10px; }
-    .title { font-size: 16px; }
-    .title::after { width: 24px; height: 3px; margin-top: 7px; }
-    .lead { padding: 16px 24px; }
-    .stat b { font-size: min(88px, 8.5cqi, 8.5vh); }
-    .gauge { padding: 14px 18px; gap: 6px; }
-    .gauge .value { --fit-max: min(64px, 7.5vh); }
-    .cells i { height: 10px; }
-    .chain { --stage-h: 48px; row-gap: 6px; }
-    .stage { padding: 7px 14px; gap: 2px; line-height: 1.15; }
-    /* the tiles share their panel's height */
-    .tiles, .rates { flex: 1; min-height: 0; grid-auto-rows: minmax(0, 1fr); }
-    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .area-auto .tiles, .rates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    /* a tile in three lines: its state, its name, its topic with the rate beside it */
-    .tile { min-height: 0; padding: 8px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "state state" "name name" "restart restart" "topic hz"; align-content: center; gap: 2px 8px; }
-    .tile .top-row { display: contents; }
-    .tile .top-row .state { grid-area: state; }
-    .tile .name { grid-area: name; font-size: 14.5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .tile .restart { grid-area: restart; }
-    .tile .topic { grid-area: topic; margin-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tile .hz { grid-area: hz; font-size: 14px; align-self: end; }
-    .rate { padding: 3px 12px; }
-    .log { min-height: 0; }
-  }
-  /* one screen, short: a tile to check says whether it restarts in its topic's place (the rates show the topic) */
-  @media (min-width: 1280px) and (min-height: 640px) and (max-height: 820px) {
-    .tile.has-note .topic { display: none; }
-    /* a name's detail in brackets only where there is a line for it */
-    .tile .name { display: block; white-space: nowrap; text-overflow: ellipsis; }
-    .tile .name .detail { display: none; }
+    .lead, .gauge { min-height: 200px; }
   }
   /* narrower than the chain's five stages need: the chain top to bottom, autonomy beside the mux */
   @media (max-width: 1199px) {
@@ -463,37 +468,40 @@
       grid-template-areas: "rc rc rc" "l1 l1 l1" "gp gp gp" "lg lg lg" "mux la au" "l3 l3 l3" "th th th" "l4 l4 l4" "esp esp esp";
       row-gap: 0;
     }
-    .link { min-width: 0; padding: 6px 0 6px 24px; grid-template-columns: 3px auto; grid-template-rows: auto auto; column-gap: 14px; row-gap: 1px; text-align: left; justify-content: start; }
-    .link .t { grid-area: 1 / 2; }
-    .link .r { grid-area: 2 / 2; }
-    .link .wire { grid-area: 1 / 1 / 3 / 2; width: 3px; height: 34px; }
+    .link { min-width: 0; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 14px; padding: 8px 0 8px 24px; text-align: left; }
+    .link .hz { min-height: 0; }
+    .link .wire { width: 3px; height: 30px; }
     .link .wire::after { right: auto; top: auto; bottom: -2px; left: -5px; border-left: 6.5px solid transparent; border-right: 6.5px solid transparent; border-top: 9px solid var(--ink); border-bottom: 0; }
     .link.down .wire { background: repeating-linear-gradient(180deg, var(--ink-3) 0 6px, transparent 6px 11px); }
     .link.down .wire::after { border-top-color: var(--ink-3); border-left-color: transparent; }
     /* autonomy's /drive: from the right, into the mux */
-    .link.la { padding: 0 8px; grid-template-columns: auto; grid-template-rows: auto auto auto; row-gap: 6px; justify-content: stretch; text-align: center; }
-    .link.la .t { grid-area: 1 / 1; }
-    .link.la .wire { grid-area: 2 / 1; width: auto; height: 3px; }
-    .link.la .r { grid-area: 3 / 1; }
+    .link.la { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; text-align: center; }
+    .link.la .wire { width: auto; height: 3px; }
     .link.la .wire::after { left: -2px; top: -5px; bottom: auto; border-right: 9px solid var(--ink); border-top: 6.5px solid transparent; border-bottom: 6.5px solid transparent; border-left: 0; }
     .link.la.down .wire { background: repeating-linear-gradient(90deg, var(--ink-3) 0 8px, transparent 8px 14px); }
     .link.la.down .wire::after { border-right-color: var(--ink-3); border-top-color: transparent; }
   }
+  /* a phone: one column, the shipped page's edges (a 360 px screen has no room for more) */
   @media (max-width: 700px) {
+    :root { --gap: 12px; }
     #graph-btn .word { display: none; }
     .bar .meta #graph-btn { width: var(--hit); padding: 0; }
+    main, main.one-health { padding-bottom: 32px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "lead" "h0" "h1" "chain" "sensors" "auton" "log"; }
     .chain { grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr); }
-    .stage { padding: 10px 12px; }
-    .stage .name { font-size: 14px; }
-    main, main.one-health { grid-template-columns: minmax(0, 1fr); grid-template-areas: "lead" "h0" "h1" "chain" "stack" "auton" "rates" "log"; }
+    .node { padding: 12px; }
+    .node .name { font-size: 14px; }
     .panel { padding: 16px; border-radius: 20px; }
     .lead, .gauge { padding: 18px; border-radius: 20px; }
-    .head { flex-wrap: wrap; }
-    .tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
-    .tile { min-height: 0; padding: 12px; }
-    .tile .name { font-size: 15px; }
-    .rates { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .nodes { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
     .glegend span:last-child { display: none; }
+  }
+
+  /* Windows High Contrast (the kit writes every status): the chain's wires and the battery's cells take the system's
+     text colour */
+  @media (forced-colors: active) {
+    .cells i.on, .link .wire { forced-color-adjust: none; background: CanvasText; }
+    .link.down .wire { background: repeating-linear-gradient(90deg, CanvasText 0 8px, transparent 8px 14px); }
+    .link .wire::after { forced-color-adjust: none; border-left-color: CanvasText; }
   }
 </style>
 </head>
@@ -518,9 +526,9 @@
 <main id="board">
   <section class="lead" id="lead" aria-label="Summary">
     <div class="stats">
-      <div class="stat"><b class="num" id="stat-drive">&ndash;</b><span>Drive stack</span></div>
+      <div class="stat"><b class="num" id="stat-drive">&ndash;</b><span>Drive</span></div>
       <div class="stat"><b class="num" id="stat-autonomy">&ndash;</b><span>Autonomy</span></div>
-      <div class="stat"><b class="num" id="stat-topics">&ndash;</b><span>Topics live</span></div>
+      <div class="stat"><b class="num" id="stat-topics">&ndash;</b><span>Topics</span></div>
     </div>
   </section>
   <!-- the health items' boxes: the Jetson's temperature, the battery -->
@@ -531,22 +539,17 @@
     <div class="head"><div class="title">Drive chain</div></div>
     <div class="chain" id="chain"></div>
   </section>
-
-  <section class="panel area-stack">
-    <div class="head"><div class="title">Drive stack</div><div class="count num" id="drive-count"></div></div>
-    <div class="tiles" id="nodes"></div>
+  <section class="panel area-sensors">
+    <div class="head"><div class="title">Sensors</div></div>
+    <div class="nodes" id="sensors"></div>
   </section>
   <section class="panel area-auto">
-    <div class="head"><div class="title">Autonomy</div><span class="tag s-off" id="autonomy-tag">Off</span></div>
-    <div class="tiles" id="autonomy"></div>
-  </section>
-  <section class="panel area-rates">
-    <div class="head"><div class="title">Topic rates</div><div class="count">Last 60 s</div></div>
-    <div class="rates" id="rates"></div>
+    <div class="head"><div class="title">Autonomy</div></div>
+    <div class="nodes" id="autonomy"></div>
   </section>
   <section class="panel area-log">
-    <div class="head"><div class="title">Watchdog log</div><div class="log-dir mono" id="log-dir"></div></div>
-    <div class="log" id="watchdog-log">No watchdog events yet.</div>
+    <div class="head"><div class="title" id="log-title">Watchdog</div></div>
+    <div class="events none" id="watchdog-log">No events</div>
   </section>
 </main>
 
@@ -644,6 +647,28 @@ const KIT = (() => {
     for (const el of document.querySelectorAll('.info.open')) if (el !== hit) el.classList.remove('open');
     if (hit) hit.classList.toggle('open');
   });
+
+  /* ── a box's topic: a tap shows it in the box (.peek), a tap on it again or anywhere else hides it. A page that
+        redraws its boxes calls reopen() after, so a shown topic stays shown ── */
+  let peeked = null;
+  document.addEventListener('click', e => {
+    const hit = e.target.closest('[data-key]');
+    for (const el of document.querySelectorAll('[data-key].open')) if (el !== hit) el.classList.remove('open');
+    if (hit) hit.classList.toggle('open');
+    peeked = hit && hit.classList.contains('open') ? hit.dataset.key : null;
+  });
+  /* ── a form's edits not yet applied: its word (hidden) shows while any field has been typed in or stepped since the last
+        Apply, Load or Reset (Save writes what the car runs, so an edit not applied is not saved). Call the returned
+        function once they are applied, or the form is refilled ── */
+  function pending(form, word) {
+    form.addEventListener('input', e => { if (e.target.matches('input[type="number"], input[type="text"], select')) word.hidden = false; });
+    return () => { word.hidden = true; };
+  }
+  function reopen() {
+    // (a box can go between redraws: a detection that left the camera's view)
+    const el = peeked && document.querySelector(`[data-key="${peeked}"]`);
+    if (el) el.classList.add('open');
+  }
 
   /* ── the bar's square: a beat on each answer, yellow and greyed data when the car stops answering ── */
   const live = {
@@ -937,9 +962,12 @@ const KIT = (() => {
       const end = `${t1.toFixed(1)} s`;
       x.fillText(end, w - x.measureText(end).width - 6, h - 9);
     }
-    x.fillStyle = t.ink;
-    x.font = `700 12px ${t.body}`;
-    x.fillText(title(series), 6, 16);
+    // (a title only where it says what nothing else on the page does)
+    if (title) {
+      x.fillStyle = t.ink;
+      x.font = `700 12px ${t.body}`;
+      x.fillText(title(series), 6, 16);
+    }
   }
 
   /* ── the camera with the detector's boxes: the target red, the rest white, the stop size dashed yellow, the
@@ -990,28 +1018,29 @@ const KIT = (() => {
   }
 
   showTheme();
-  return { post, toast, tokens, live, fitCanvas, stepper, hold, zoomable, fill, liveRange, drawLidar, drawSeries, drawCamera, frames };
+  return { post, toast, tokens, live, reopen, pending, fitCanvas, stepper, hold, zoomable, fill, liveRange, drawLidar, drawSeries, drawCamera, frames };
 })();
 
 </script>
 <script>
 const POLL_MS = 3000;
-// 20 polls: the last 60 s of each topic's rate
-const HISTORY = 20;
 
-// a node's status (dashboard.py) as a flag: absent is to check, whether the watchdog restarts it or not
+// a node's status (dashboard.py): colour says it, a word only for a problem (and whether the watchdog restarts it);
+// the rest is in the text for a screen reader
 const NODE = {
-  healthy: { cls: 's-ok', label: 'Publishing' },
-  dead: { cls: 's-caution', label: 'Not detected', note: 'Watchdog restarts it' },
-  unsupervised: { cls: 's-caution', label: 'Not detected', note: 'No auto restart' },
-  off: { cls: 's-off', label: 'Standby' },
+  healthy: { cls: 's-ok', sr: 'Running' },
+  dead: { cls: 's-caution', word: 'Not detected', note: 'Watchdog restarts it' },
+  unsupervised: { cls: 's-caution', word: 'Not detected', note: 'No auto restart' },
+  off: { cls: 's-off', sr: 'Off' },
 };
+// a node that publishes, but the topic measured for it has no data: to check
+const NO_DATA = { cls: 's-caution', word: 'No data' };
 // a health item's: no reading or out of band is to check; dead is a real fault (too hot, charge now)
 const HEALTH = {
-  healthy: { cls: 's-ok', label: 'OK' },
-  stale: { cls: 's-caution', label: 'Check' },
-  missing: { cls: 's-caution', label: 'Check' },
-  dead: { cls: 's-fault', label: 'Fault' },
+  healthy: { cls: 's-ok', sr: 'OK' },
+  stale: { cls: 's-caution', sr: 'Check' },
+  missing: { cls: 's-caution', sr: 'Check' },
+  dead: { cls: 's-fault', sr: 'Fault' },
 };
 
 // The drive chain (the driver's drive stack): the RC through the gamepad node and autonomy's /drive, two ways in that
@@ -1032,9 +1061,14 @@ const LINKS = [
   { area: 'l3', node: 'mux', topic: '/mux_out' },
   { area: 'l4', node: 'throttle', topic: '/motor' },
 ];
+const IN_CHAIN = new Set(STAGES.map(st => st.node));
+// a topic an arrow carries has its rate on the arrow, not in its node's box
+const ON_ARROW = new Set(LINKS.map(l => l.topic));
+// a node whose own topic the server does not measure: the measured topic it publishes (Nav2 plans, then drives
+// /cmd_vel)
+const MEASURED_AS = { nav: '/cmd_vel' };
 
 const board = document.getElementById('board');
-const history = {};
 let latestGraph = null;
 
 function hzOf(rates, topic) {
@@ -1042,38 +1076,40 @@ function hzOf(rates, topic) {
   return r && r.hz !== null && !r.stale ? r.hz : null;
 }
 
-function hzText(hz) {
-  return hz >= 100 ? hz.toFixed(0) + ' Hz' : hz.toFixed(1) + ' Hz';
+function hzHtml(hz) {
+  return `<b class="hz num">${hz >= 100 ? hz.toFixed(0) : hz.toFixed(1)}<small>Hz</small></b>`;
 }
 
-function state(label) {
-  return `<span class="state"><i aria-hidden="true"></i>${label}</span>`;
+// "ESP32 (IMU/odom/joy)" is the ESP32; "Battery (3S pack)" the battery
+function nameOf(label) {
+  return label.split(' (')[0];
 }
 
-function tile(n, rates) {
-  const s = NODE[n.status];
-  const hz = hzOf(rates, n.topic);
-  const [name, detail] = n.label.split(/ (?=\()/);
-  return `<div class="tile ${s.cls}${s.note ? ' has-note' : ''}">
-    <div class="top-row">${state(s.label)}${hz !== null ? `<span class="hz num">${hzText(hz)}</span>` : ''}</div>
-    <div class="name" title="${n.label}">${name}${detail ? `<span class="detail"> ${detail.replace(/[_/]/g, '$&<wbr>')}</span>` : ''}</div>
-    ${s.note ? `<div class="restart">${s.note}</div>` : ''}
-    <div class="topic">${n.topic}</div>
-  </div>`;
+// what a box says of its status: a problem's word (and its note), or only a screen reader's
+function said(s) {
+  return s.word ? `<span class="word">${s.word}</span>${s.note ? `<span class="restart">${s.note}</span>` : ''}` : `<span class="sr">${s.sr}</span>`;
 }
 
-// a link is live while its node publishes and, where the server measures the topic, the topic arrives
+// a node, the same box wherever it stands: its name, its rate unless an arrow carries it, a word for a problem; its
+// topic on hover (the title) or a tap
+function node(key, n, rates, name, place) {
+  const topic = MEASURED_AS[key] || n.topic;
+  const hz = hzOf(rates, topic);
+  const s = n.status === 'healthy' && topic in rates && hz === null ? NO_DATA : NODE[n.status];
+  return `<div class="node ${s.cls}"${place} data-key="node-${key}" title="${topic}">
+    <div class="top"><span class="name">${name}</span>${hz !== null && !ON_ARROW.has(topic) ? hzHtml(hz) : ''}</div>
+    ${said(s)}<span class="peek">${topic}</span></div>`;
+}
+
 function chain(nodes, rates) {
   let html = '';
-  for (const st of STAGES) {
-    const s = NODE[nodes[st.node].status];
-    html += `<div class="stage ${s.cls}" style="grid-area: ${st.area}">${state(s.label)}<div class="name">${st.name}</div></div>`;
-  }
+  for (const st of STAGES) html += node(st.node, nodes[st.node], rates, st.name, ` style="grid-area: ${st.area}"`);
+  // a link is live while its node publishes and, where the server measures the topic, the topic arrives
   for (const l of LINKS) {
     const hz = hzOf(rates, l.topic);
     const up = nodes[l.node].status === 'healthy' && (hz !== null || !(l.topic in rates));
-    html += `<div class="link ${l.area} ${up ? '' : 'down'}" style="grid-area: ${l.area}">
-      <span class="t mono">${l.topic}</span><div class="wire"></div><b class="r num">${hz !== null ? hzText(hz) : (up ? 'Live' : 'No data')}</b></div>`;
+    html += `<div class="link ${l.area} ${up ? '' : 'down'}" style="grid-area: ${l.area}" data-key="link-${l.area}" title="${l.topic}">
+      ${hz !== null ? hzHtml(hz) : '<b class="hz"></b>'}<div class="wire"></div><span class="sr">${up ? 'Live' : 'No data'}</span><span class="peek">${l.topic}</span></div>`;
   }
   return html;
 }
@@ -1086,23 +1122,12 @@ function gauge(el, item) {
   const main = cut < 0 ? item.detail : item.detail.slice(0, cut);
   const note = cut < 0 ? '' : item.detail.slice(cut + 3);
   const pct = /^(.*) \((\d+)%\)$/.exec(main);
-  const side = [pct ? pct[2] + '%' : '', note].filter(Boolean).join(' · ');
   const value = pct ? pct[1] : main;
   el.className = `gauge ${s.cls}`;
   el.hidden = false;
-  el.innerHTML = `<div class="row"><span class="name">${item.label}</span>${state(s.label)}</div>
+  el.innerHTML = `<span class="name">${nameOf(item.label)}</span><span class="sr">${s.sr}</span>
     <span class="value fit num" style="--len: ${value.length}">${value}</span>
-    <span class="side num">${side}</span>
-    ${pct ? `<div class="cells" aria-hidden="true">${Array.from({ length: 10 }, (_, k) => `<i class="${k < Math.round(pct[2] / 10) ? 'on' : ''}"></i>`).join('')}</div>` : ''}`;
-}
-
-function spark(values) {
-  const W = 56, H = 18;
-  const max = Math.max(1, ...values.map(v => v || 0));
-  const step = W / (HISTORY - 1);
-  const start = HISTORY - values.length;
-  const pts = values.map((v, k) => `${((start + k) * step).toFixed(1)},${(H - 1 - ((v || 0) / max) * (H - 2)).toFixed(1)}`).join(' ');
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke-width="2" stroke-linejoin="round"/></svg>`;
+    <div class="foot">${note ? `<span class="side">${note}</span>` : ''}${pct ? `<div class="cells" aria-hidden="true">${Array.from({ length: 10 }, (_, k) => `<i class="${k < Math.round(pct[2] / 10) ? 'on' : ''}"></i>`).join('')}</div><span class="sr">${pct[2]}%</span>` : ''}</div>`;
 }
 
 function render(data) {
@@ -1110,59 +1135,42 @@ function render(data) {
   const ts = document.getElementById('timestamp');
   ts.textContent = data.timestamp.slice(11);
   ts.title = data.timestamp;
-  document.getElementById('log-dir').textContent = data.log_dir;
-
+  document.getElementById('log-title').title = data.log_dir;
   const rates = data.rates;
-  for (const [topic, info] of Object.entries(rates)) {
-    const h = history[topic] || (history[topic] = []);
-    h.push(info.hz);
-    if (h.length > HISTORY) h.shift();
-  }
 
-  let core = '', autonomy = '', coreUp = 0, coreTotal = 0, autonomyUp = 0, autonomyTotal = 0;
-  const coreTopics = new Set();
-  for (const n of Object.values(data.nodes)) {
+  // the drive stack's nodes outside the chain are the sensors; autonomy's, but the bridge (the chain's Autonomy)
+  let sensors = '', autonomy = '', coreUp = 0, coreTotal = 0, autonomyUp = 0, autonomyTotal = 0;
+  for (const [key, n] of Object.entries(data.nodes)) {
     if (n.optional) {
-      autonomy += tile(n, rates);
+      if (!IN_CHAIN.has(key)) autonomy += node(key, n, rates, nameOf(n.label), '');
       autonomyTotal += 1;
       if (n.alive) autonomyUp += 1;
     } else {
-      core += tile(n, rates);
+      if (!IN_CHAIN.has(key)) sensors += node(key, n, rates, nameOf(n.label), '');
       coreTotal += 1;
-      coreTopics.add(n.topic);
       if (n.alive) coreUp += 1;
     }
   }
-  document.getElementById('nodes').innerHTML = core;
+  document.getElementById('sensors').innerHTML = sensors;
   document.getElementById('autonomy').innerHTML = autonomy;
-  document.getElementById('drive-count').textContent = `${coreUp} of ${coreTotal} up`;
-  const tag = document.getElementById('autonomy-tag');
-  tag.textContent = autonomyUp === 0 ? 'Off' : (autonomyUp === autonomyTotal ? 'Running' : `${autonomyUp} of ${autonomyTotal} up`);
-  tag.className = `tag ${autonomyUp > 0 ? 's-ok' : 's-off'}`;
+  document.getElementById('chain').innerHTML = chain(data.nodes, rates);
 
   const health = Object.values(data.system_health);
   health.forEach((item, k) => gauge(document.getElementById(`health-${k}`), item));
   for (let k = health.length; k < 2; k++) document.getElementById(`health-${k}`).hidden = true;
   board.classList.toggle('one-health', health.length === 1);
 
-  document.getElementById('chain').innerHTML = chain(data.nodes, rates);
-
-  // a rate: OK, stale, or no data: to check on the drive stack's own topics, off on autonomy's
-  let rh = '', live = 0;
-  for (const [topic, info] of Object.entries(rates)) {
-    const cls = info.hz === null ? (coreTopics.has(topic) ? 'caution' : 'off') : (info.stale ? 'caution' : 'ok');
-    if (cls === 'ok') live += 1;
-    const value = info.hz === null ? (cls === 'off' ? 'Off' : 'No data') : hzText(info.hz) + (info.stale ? ' stale' : '');
-    rh += `<div class="rate s-${cls}"><div class="in"><span class="topic" title="${topic}">${topic}</span><span class="v num">${value}</span>${spark(history[topic])}</div></div>`;
-  }
-  document.getElementById('rates').innerHTML = rh;
-
+  const live = Object.values(rates).filter(r => r.hz !== null && !r.stale).length;
   document.getElementById('stat-drive').textContent = `${coreUp}/${coreTotal}`;
   document.getElementById('stat-autonomy').textContent = autonomyUp === 0 ? 'Off' : `${autonomyUp}/${autonomyTotal}`;
   document.getElementById('stat-topics').textContent = `${live}/${Object.keys(rates).length}`;
 
   const wl = data.watchdog_log;
-  document.getElementById('watchdog-log').textContent = wl.length ? wl.join('\n') : 'No watchdog events yet.';
+  const events = document.getElementById('watchdog-log');
+  events.textContent = wl.length ? wl.join('\n') : 'No events';
+  events.classList.toggle('none', !wl.length);
+
+  KIT.reopen();
 }
 
 function update() {
