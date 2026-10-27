@@ -5,6 +5,16 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-26
+
+On a fresh Jetson image the first command of `setup_ros2.sh` was an
+`apt-get install`, run before any `apt-get update`, and it failed with
+`Unable to fetch some archives` because the image's package lists were stale.
+Seen setting up a new car (Ansh, 2026-10-26).
+
+### Fixed
+- `scripts/setup_ros2.sh` refreshes the package lists before installing the bootstrap tools, so a new car's first run no longer stops at the ROS2 Humble install.
+
 ## [0.6.0] - 2026-09-04
 
 Adds `teleop_dashboard` to the labs setup clones. It is the seventh lab and the

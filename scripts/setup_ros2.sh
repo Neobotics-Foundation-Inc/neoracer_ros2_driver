@@ -2,7 +2,9 @@
 # Install ROS2 Humble + the ROS packages the racecar driver depends on.
 set -eo pipefail
 
-# Bootstrap tools needed to add the ROS2 apt repo.
+# Bootstrap tools needed to add the ROS2 apt repo. A fresh image's package
+# lists are stale, so refresh them first or this install fails to fetch.
+sudo apt-get update
 sudo apt-get install -y -qq curl wget gnupg ca-certificates lsb-release
 
 if ! dpkg -s ros2-apt-source >/dev/null 2>&1; then
