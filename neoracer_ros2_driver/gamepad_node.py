@@ -27,9 +27,7 @@ class GamepadNode(Node):
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.VOLATILE,
         )
-        self._pub = self.create_publisher(
-            AckermannDriveStamped, '/gamepad_drive', qos
-        )
+        self._pub = self.create_publisher(AckermannDriveStamped, '/gamepad_drive', qos)
         self.create_subscription(Joy, '/joy', self._joy_cb, qos)
 
         self.get_logger().info(

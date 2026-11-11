@@ -72,6 +72,7 @@ def load_yolo(model_path, task='detect'):
     """
     os.environ.setdefault('YOLO_VERBOSE', 'False')
     from ultralytics import YOLO
+
     return YOLO(model_path, task=task)
 
 
@@ -96,7 +97,8 @@ class InferenceNode(Node):
         max_rate = self.declare_parameter('max_rate_hz', 15.0).value
         self.publish_annotated = self.declare_parameter('publish_annotated', False).value
         annotated_topic = self.declare_parameter(
-            'annotated_topic', '/edgetpu/inference/image').value
+            'annotated_topic', '/edgetpu/inference/image'
+        ).value
         self.annotated_quality = self.declare_parameter('annotated_quality', 80).value
         diag_period = self.declare_parameter('diagnostics_period_sec', 1.0).value
         self.image_timeout = self.declare_parameter('image_timeout_sec', 5.0).value
@@ -127,14 +129,13 @@ class InferenceNode(Node):
 
         self.det_pub = self.create_publisher(Detection2DArray, det_topic, 10)
         self.annot_pub = (
-            self.create_publisher(Image, annotated_topic, qos)
-            if self.publish_annotated else None)
+            self.create_publisher(Image, annotated_topic, qos) if self.publish_annotated else None
+        )
         self.diag_pub = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_subscription(Image, image_topic, self._image_cb, qos)
         self.create_timer(diag_period, self._publish_diagnostics)
 
-        self.get_logger().info(
-            f'[INFO] Inference node ready: {image_topic} -> {det_topic}')
+        self.get_logger().info(f'[INFO] Inference node ready: {image_topic} -> {det_topic}')
 
     def _load_model(self, model_path):
         """Resolve and load the weights, or exit with a one-line reason."""
@@ -154,18 +155,19 @@ class InferenceNode(Node):
         except ImportError as exc:
             self.get_logger().fatal(
                 f'[FATAL] ultralytics is not importable ({exc}); '
-                'run `racecar setup ml` to install the GPU stack.')
+                'run `racecar setup ml` to install the GPU stack.'
+            )
             raise SystemExit(1)
         except Exception as exc:  # noqa: BLE001 - ultralytics raises bare Exception
             if not self._use_fallback(f'could not load {resolved}: {exc}'):
-                self.get_logger().fatal(
-                    f'[FATAL] Could not load model {resolved}: {exc}')
+                self.get_logger().fatal(f'[FATAL] Could not load model {resolved}: {exc}')
                 raise SystemExit(1)
             return self.model
 
         self.get_logger().info(
             f'[INFO] Model {os.path.basename(resolved)} on device {self.device} '
-            f'(imgsz {self.imgsz}, threshold {self.score_threshold})')
+            f'(imgsz {self.imgsz}, threshold {self.score_threshold})'
+        )
         return model
 
     def _use_fallback(self, reason):
@@ -184,7 +186,8 @@ class InferenceNode(Node):
         self.get_logger().warn(
             f'[WARN] TensorRT engine unusable on this car ({reason}); '
             f'falling back to {os.path.basename(fallback)} at roughly 2.4x the '
-            'latency. Rebuild the engine here with `racecar compile`.')
+            'latency. Rebuild the engine here with `racecar compile`.'
+        )
         try:
             self.model = load_yolo(fallback)
         except Exception as exc:  # noqa: BLE001
@@ -213,10 +216,10 @@ class InferenceNode(Node):
                 self._predict(blank)
             except Exception as exc2:  # noqa: BLE001
                 self.get_logger().fatal(
-                    f'[FATAL] Warmup failed on the fallback weights too: {exc2}')
+                    f'[FATAL] Warmup failed on the fallback weights too: {exc2}'
+                )
                 raise SystemExit(1)
-        self.get_logger().info(
-            f'[INFO] Warmup done in {(time.monotonic() - t0) * 1000:.0f} ms')
+        self.get_logger().info(f'[INFO] Warmup done in {(time.monotonic() - t0) * 1000:.0f} ms')
 
     def _predict(self, frame):
         """Run one BGR frame through the model and return the single result."""
@@ -244,8 +247,7 @@ class InferenceNode(Node):
         try:
             frame = il.decode_image(msg.data, msg.encoding, msg.height, msg.width)
         except ValueError as exc:
-            self.get_logger().warn(
-                f'[WARN] Frame decode failed: {exc}', throttle_duration_sec=5.0)
+            self.get_logger().warn(f'[WARN] Frame decode failed: {exc}', throttle_duration_sec=5.0)
             return
 
         try:
@@ -254,8 +256,7 @@ class InferenceNode(Node):
             elapsed_ms = (time.monotonic() - t0) * 1000.0
         except Exception as exc:  # noqa: BLE001 - torch/TensorRT raise broadly
             self.model_ok = False
-            self.get_logger().error(
-                f'[ERROR] Inference failed: {exc}', throttle_duration_sec=5.0)
+            self.get_logger().error(f'[ERROR] Inference failed: {exc}', throttle_duration_sec=5.0)
             return
 
         self.model_ok = True
@@ -264,8 +265,10 @@ class InferenceNode(Node):
         # Exponential average; the raw per-frame figure is next to it in
         # /diagnostics for anyone chasing a stall rather than a trend.
         self.avg_inference_ms = (
-            elapsed_ms if self.avg_inference_ms == 0.0
-            else 0.9 * self.avg_inference_ms + 0.1 * elapsed_ms)
+            elapsed_ms
+            if self.avg_inference_ms == 0.0
+            else 0.9 * self.avg_inference_ms + 0.1 * elapsed_ms
+        )
 
         height, width = frame.shape[:2]
         boxes = result.boxes
@@ -317,8 +320,8 @@ class InferenceNode(Node):
     def _publish_annotated(self, result, header, width, height):
         """Publish the drawn overlay as JPEG, matching the camera topic's format."""
         ok, buf = cv2.imencode(
-            '.jpg', result.plot(),
-            [int(cv2.IMWRITE_JPEG_QUALITY), int(self.annotated_quality)])
+            '.jpg', result.plot(), [int(cv2.IMWRITE_JPEG_QUALITY), int(self.annotated_quality)]
+        )
         if not ok:
             return
 

@@ -68,8 +68,7 @@ class CameraNode(Node):
     def __init__(self):
         super().__init__('camera_node')
 
-        self.video_device = self.declare_parameter(
-            'video_device', '/dev/osrbot_usb_cam').value
+        self.video_device = self.declare_parameter('video_device', '/dev/osrbot_usb_cam').value
         self.width = self.declare_parameter('image_width', 640).value
         self.height = self.declare_parameter('image_height', 480).value
         self.fps = self.declare_parameter('framerate', 30.0).value
@@ -117,8 +116,8 @@ class CameraNode(Node):
                 cap.release()
 
         self.get_logger().warn(
-            '[WARN] No working MJPG camera found; will keep retrying...',
-            throttle_duration_sec=5.0)
+            '[WARN] No working MJPG camera found; will keep retrying...', throttle_duration_sec=5.0
+        )
 
     def _tick(self):
         """Grab one native MJPG frame and publish it to ``/camera/color`` unchanged."""
@@ -130,8 +129,8 @@ class CameraNode(Node):
         if not ok or frame is None:
             self._fail_count += 1
             self.get_logger().warn(
-                '[WARN] Frame read failed; is the camera unplugged?',
-                throttle_duration_sec=1.0)
+                '[WARN] Frame read failed; is the camera unplugged?', throttle_duration_sec=1.0
+            )
             if self._fail_count >= 10:
                 self._open_camera()
             return

@@ -15,16 +15,15 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-POLL_INTERVAL = 5            # seconds between health checks
-RESTART_COOLDOWN = 30        # minimum seconds between restarts of the same node
-STARTUP_GRACE = 15           # seconds to wait before first check (systemd matches)
-SHM_CLEANUP_INTERVAL = 60    # seconds between FastRTPS shm orphan sweeps
-PGREP_FAIL_THRESHOLD = 5     # consecutive pgrep failures before assuming "not running"
+POLL_INTERVAL = 5  # seconds between health checks
+RESTART_COOLDOWN = 30  # minimum seconds between restarts of the same node
+STARTUP_GRACE = 15  # seconds to wait before first check (systemd matches)
+SHM_CLEANUP_INTERVAL = 60  # seconds between FastRTPS shm orphan sweeps
+PGREP_FAIL_THRESHOLD = 5  # consecutive pgrep failures before assuming "not running"
 
 PACKAGE = 'neoracer_ros2_driver'
 
@@ -48,19 +47,30 @@ def _is_running(path_substring: str):
         try:
             r = subprocess.run(
                 ['pgrep', '-f', path_substring],
-                capture_output=True, timeout=3,
+                capture_output=True,
+                timeout=3,
             )
             state['fails'] = 0
             return r.returncode == 0
         except (subprocess.TimeoutExpired, OSError) as exc:
             state['fails'] += 1
             if state['fails'] >= PGREP_FAIL_THRESHOLD:
-                log.error('pgrep(%s) failed %d times in a row: %s - treating as down',
-                          path_substring, state['fails'], exc)
+                log.error(
+                    'pgrep(%s) failed %d times in a row: %s - treating as down',
+                    path_substring,
+                    state['fails'],
+                    exc,
+                )
                 return False
-            log.warning('pgrep(%s) failed (%d/%d): %s',
-                        path_substring, state['fails'], PGREP_FAIL_THRESHOLD, exc)
+            log.warning(
+                'pgrep(%s) failed (%d/%d): %s',
+                path_substring,
+                state['fails'],
+                PGREP_FAIL_THRESHOLD,
+                exc,
+            )
             return True
+
     return check
 
 
@@ -101,7 +111,6 @@ NODES = {
         'kill_pattern': f'{DRIVER_LIB}/gamepad_node',
         'process_check': _is_running(f'{DRIVER_LIB}/gamepad_node'),
     },
-
     # ----- Sensors -----
     'lidar': {
         'topic': '/scan',
@@ -144,6 +153,7 @@ log = logging.getLogger('watchdog')
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _clean_fastrtps_orphans() -> int:
     """Remove 0-byte /dev/shm/fastrtps_port* segments and stranded lock files."""
     shm = Path('/dev/shm')
@@ -160,7 +170,7 @@ def _clean_fastrtps_orphans() -> int:
         except (OSError, FileNotFoundError):
             pass
     for el in shm.glob('fastrtps_port*_el'):
-        data = shm / el.name[:-len('_el')]
+        data = shm / el.name[: -len('_el')]
         if not data.exists():
             try:
                 (shm / f'sem.{data.name}_mutex').unlink(missing_ok=True)
@@ -210,7 +220,10 @@ class _FreshnessMonitor:
                 log.debug('freshness: cannot subscribe to %s: %s', topic, exc)
                 continue
             self._subs[topic] = self._node.create_subscription(
-                msg_cls, topic, lambda _msg, t=topic: self._mark(t), self._QOS,
+                msg_cls,
+                topic,
+                lambda _msg, t=topic: self._mark(t),
+                self._QOS,
             )
 
     def _mark(self, topic: str):
@@ -254,7 +267,9 @@ def _get_active_topics(node=None) -> set:
     try:
         result = subprocess.run(
             ['ros2', 'topic', 'list'],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             return set(result.stdout.strip().splitlines())
@@ -304,15 +319,17 @@ def _restart_node(name: str, cfg: dict) -> None:
     if kill_pat:
         try:
             r = subprocess.run(
-                ['pkill', '-f', kill_pat], capture_output=True, timeout=5,
+                ['pkill', '-f', kill_pat],
+                capture_output=True,
+                timeout=5,
             )
             if r.returncode == 0:
-                log.info('%s: sent SIGTERM to processes matching "%s"',
-                         name, kill_pat)
+                log.info('%s: sent SIGTERM to processes matching "%s"', name, kill_pat)
                 time.sleep(2)
                 r2 = subprocess.run(
                     ['pkill', '-9', '-f', kill_pat],
-                    capture_output=True, timeout=5,
+                    capture_output=True,
+                    timeout=5,
                 )
                 if r2.returncode == 0:
                     log.info('%s: sent SIGKILL to surviving processes', name)
@@ -372,6 +389,7 @@ def _signal_handler(signum, _frame):
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     global _running
@@ -450,19 +468,29 @@ def main() -> None:
 
             alive = topic_alive and proc_alive and not topic_stale
             failure = (
-                'topic+process down' if not topic_alive and not proc_alive else
-                'topic not advertised' if not topic_alive else
-                'process not running' if not proc_alive else
-                f'topic stale ({freshness.age(topic):.1f}s)' if topic_stale else
-                None
+                'topic+process down'
+                if not topic_alive and not proc_alive
+                else (
+                    'topic not advertised'
+                    if not topic_alive
+                    else (
+                        'process not running'
+                        if not proc_alive
+                        else f'topic stale ({freshness.age(topic):.1f}s)' if topic_stale else None
+                    )
+                )
             )
 
             child = _child_procs.get(name)
             if child:
                 child_proc, child_fh = child
                 if child_proc.poll() is not None:
-                    log.warning('%s: restarted child PID %d exited with code %s',
-                                name, child_proc.pid, child_proc.returncode)
+                    log.warning(
+                        '%s: restarted child PID %d exited with code %s',
+                        name,
+                        child_proc.pid,
+                        child_proc.returncode,
+                    )
                     try:
                         child_fh.close()
                     except OSError:
@@ -474,12 +502,20 @@ def main() -> None:
 
             device_ok = cfg['device_check']()
             if not device_ok:
-                log.warning('%s: %s - device %s NOT connected, skipping restart',
-                            name, failure, cfg['device_label'])
+                log.warning(
+                    '%s: %s - device %s NOT connected, skipping restart',
+                    name,
+                    failure,
+                    cfg['device_label'],
+                )
                 continue
 
-            log.warning('%s: %s - device %s connected, attempting restart',
-                        name, failure, cfg['device_label'])
+            log.warning(
+                '%s: %s - device %s connected, attempting restart',
+                name,
+                failure,
+                cfg['device_label'],
+            )
             _restart_node(name, cfg)
             # Drop the stale subscription so it re-binds to the new publisher.
             if cfg.get('freshness_sec'):
