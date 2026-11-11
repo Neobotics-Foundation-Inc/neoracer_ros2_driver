@@ -392,11 +392,10 @@ def _signal_handler(signum, _frame):
 
 
 def main() -> None:
-    global _running
 
     # Set up logging to both file and stderr (journald).
     logdir = _log_dir()
-    handlers = [logging.StreamHandler(sys.stderr)]
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     try:
         fh = logging.FileHandler(logdir / 'watchdog.log')
         handlers.append(fh)

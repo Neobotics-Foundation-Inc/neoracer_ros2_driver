@@ -12,6 +12,7 @@ The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 """
 
 import math
+from typing import Any
 
 # A raw RC channel reading below this is treated as "no signal" (failsafe).
 # The firmware reports -1 on every channel when the FlySky transmitter is off,
@@ -35,7 +36,7 @@ def motor_to_command(
     """
     speed_mps = clamp(speed) * max_speed_mps
     steer_deg = clamp(steering_angle) * max_steering_angle_deg + steering_trim_deg
-    return f"v {speed_mps:.3f} {steer_deg:.2f}\n"
+    return f'v {speed_mps:.3f} {steer_deg:.2f}\n'
 
 
 def parse_serial_data(line: str):
@@ -47,7 +48,7 @@ def parse_serial_data(line: str):
     lines so the caller can ignore them. Raises ``ValueError``/``IndexError``
     on malformed numeric fields, which the caller logs and skips.
     """
-    data = {}
+    data: dict[str, Any] = {}
 
     parts = line.split()
     if not parts:
@@ -268,7 +269,7 @@ def rc_to_joy(channels, cfg):
             _set_button(buttons, cfg['mode_idle_button'])
 
     # --- Generic 2-position aux switches -> arbitrary Joy buttons ---
-    for ch_i, btn_i in zip(cfg['aux_button_channels'], cfg['aux_button_indices']):
+    for ch_i, btn_i in zip(cfg['aux_button_channels'], cfg['aux_button_indices'], strict=False):
         if norm(ch_i) >= cfg['aux_button_thresh']:
             _set_button(buttons, btn_i)
 

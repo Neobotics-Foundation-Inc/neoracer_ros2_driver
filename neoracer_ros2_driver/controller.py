@@ -105,7 +105,7 @@ class ControllerNode(Node):
         # ===== INITIALIZE SERIAL PORT =====
         try:
             self.serial = serial.Serial(self.port_name, self.baud_rate, timeout=0.1)
-            self.get_logger().info(f"[DEBUG] Connected to: {self.port_name}")
+            self.get_logger().info(f'[DEBUG] Connected to: {self.port_name}')
         except serial.SerialException as e:
             self.get_logger().fatal(f"[ERROR] Could not connect to device '{self.port_name}': {e}")
             rclpy.shutdown()
@@ -156,7 +156,7 @@ class ControllerNode(Node):
         self.read_thread = threading.Thread(target=self.read_serial_loop, daemon=True)
         self.read_thread.start()
 
-        self.get_logger().info("[DEBUG] Controller node initialized; entering main loop")
+        self.get_logger().info('[DEBUG] Controller node initialized; entering main loop')
 
     def _declare_joy_params(self):
         """Declare the FlySky->Joy mapping parameters and return them as a dict."""
@@ -213,13 +213,13 @@ class ControllerNode(Node):
                                 self._dispatch(data, tag)
                         except (ValueError, IndexError) as e:
                             self.get_logger().warn(
-                                f"Unable to parse message: [{line}], reason: {e}"
+                                f'Unable to parse message: [{line}], reason: {e}'
                             )
                 except serial.SerialException:
-                    self.get_logger().error("Serial Exception Error")
+                    self.get_logger().error('Serial Exception Error')
                     break
                 except UnicodeDecodeError as e:
-                    self.get_logger().warn(f"Could not decode message: {e}")
+                    self.get_logger().warn(f'Could not decode message: {e}')
             else:
                 time.sleep(0.005)  # ~200 Hz idle poll
 
@@ -386,7 +386,7 @@ class ControllerNode(Node):
             try:
                 self.serial.write(command.encode('utf-8'))
             except serial.SerialException as e:
-                self.get_logger().error(f"[ERROR] Could not send [{command.strip()}]: {e}")
+                self.get_logger().error(f'[ERROR] Could not send [{command.strip()}]: {e}')
 
         self.last_cmd_time = self.get_clock().now()
 
@@ -401,9 +401,9 @@ def main(args=None):
         node = ControllerNode()
     except Exception as exc:
         print(
-            f"[controller_node] failed to start: {exc}\n"
-            "Check config/controller.yaml. A common cause is a float parameter "
-            "written as an integer: use -5.0, not -5.",
+            f'[controller_node] failed to start: {exc}\n'
+            'Check config/controller.yaml. A common cause is a float parameter '
+            'written as an integer: use -5.0, not -5.',
             file=sys.stderr,
         )
         rclpy.try_shutdown()

@@ -121,7 +121,7 @@ def build_detections(
     Ultralytics output is descending confidence.
     """
     detections = []
-    for box, score, index in zip(xyxy, scores, classes):
+    for box, score, index in zip(xyxy, scores, classes, strict=False):
         if float(score) < score_threshold:
             continue
         if 0 < max_detections <= len(detections):

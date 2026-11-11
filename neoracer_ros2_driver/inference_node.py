@@ -157,11 +157,11 @@ class InferenceNode(Node):
                 f'[FATAL] ultralytics is not importable ({exc}); '
                 'run `racecar setup ml` to install the GPU stack.'
             )
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
         except Exception as exc:  # noqa: BLE001 - ultralytics raises bare Exception
             if not self._use_fallback(f'could not load {resolved}: {exc}'):
                 self.get_logger().fatal(f'[FATAL] Could not load model {resolved}: {exc}')
-                raise SystemExit(1)
+                raise SystemExit(1) from exc
             return self.model
 
         self.get_logger().info(
@@ -192,7 +192,7 @@ class InferenceNode(Node):
             self.model = load_yolo(fallback)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().fatal(f'[FATAL] Fallback {fallback} failed: {exc}')
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
         return True
 
     def _warmup(self):
@@ -210,7 +210,7 @@ class InferenceNode(Node):
         except Exception as exc:  # noqa: BLE001
             if not self._use_fallback(f'warmup inference failed: {exc}'):
                 self.get_logger().fatal(f'[FATAL] Warmup inference failed: {exc}')
-                raise SystemExit(1)
+                raise SystemExit(1) from exc
             t0 = time.monotonic()
             try:
                 self._predict(blank)
@@ -218,7 +218,7 @@ class InferenceNode(Node):
                 self.get_logger().fatal(
                     f'[FATAL] Warmup failed on the fallback weights too: {exc2}'
                 )
-                raise SystemExit(1)
+                raise SystemExit(1) from exc2
         self.get_logger().info(f'[INFO] Warmup done in {(time.monotonic() - t0) * 1000:.0f} ms')
 
     def _predict(self, frame):
