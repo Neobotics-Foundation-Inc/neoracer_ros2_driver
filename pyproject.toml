@@ -7,6 +7,7 @@
 # meantime; formatting it here would only make that PR conflict. The exclusion
 # goes when the apps page lands.
 
+# Python 3.10 is the car's Python: Ubuntu 22.04 on the Jetson, ROS 2 Humble.
 [tool.black]
 line-length = 99
 skip-string-normalization = true
