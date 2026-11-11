@@ -9,14 +9,16 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
+from .limits import clamp
+
 
 def scale_speed(speed: float, max_fwd: float, max_back: float) -> float:
-    speed = max(-1.0, min(1.0, speed))
+    speed = clamp(speed)
     return speed * (max_fwd if speed >= 0 else max_back)
 
 
 def scale_steering(angle: float, max_steer: float) -> float:
-    return max(-1.0, min(1.0, angle)) * max_steer
+    return clamp(angle) * max_steer
 
 
 class ThrottleNode(Node):

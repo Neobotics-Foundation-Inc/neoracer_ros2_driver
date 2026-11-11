@@ -14,15 +14,12 @@ The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 import math
 from typing import Any
 
+from neoracer_ros2_driver.limits import clamp
+
 # A raw RC channel reading below this is treated as "no signal" (failsafe).
 # The firmware reports -1 on every channel when the FlySky transmitter is off,
 # so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
 RC_FAILSAFE_BELOW = 500
-
-
-def clamp(value, low=-1.0, high=1.0):
-    """Clamp ``value`` to the inclusive ``[low, high]`` range."""
-    return max(low, min(high, value))
 
 
 def motor_to_command(
@@ -174,7 +171,7 @@ def normalize_channel(raw, rc_min, rc_center, rc_max, deadband, failsafe_below=R
         span = max(1.0, float(rc_max - rc_center))
     else:
         span = max(1.0, float(rc_center - rc_min))
-    norm = max(-1.0, min(1.0, (raw - rc_center) / span))
+    norm = clamp((raw - rc_center) / span)
     if abs(norm) < deadband:
         return 0.0
     return norm

@@ -6,6 +6,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Joy
 
+from .limits import clamp
+
 
 class GamepadNode(Node):
     def __init__(self):
@@ -42,8 +44,8 @@ class GamepadNode(Node):
         speed = float(msg.axes[self._throttle_axis]) * self._throttle_sign
         steering = float(msg.axes[self._steering_axis]) * self._steering_sign
         drive = AckermannDriveStamped()
-        drive.drive.speed = max(-1.0, min(1.0, speed))
-        drive.drive.steering_angle = max(-1.0, min(1.0, steering))
+        drive.drive.speed = clamp(speed)
+        drive.drive.steering_angle = clamp(steering)
         self._pub.publish(drive)
 
 
