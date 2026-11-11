@@ -38,7 +38,7 @@ _resolved: tuple[Path, str] | None = None
 
 
 def fallback() -> Path:
-    """The default root: ~/racecar_data."""
+    """Return the default root, ~/racecar_data under the home folder."""
     return Path.home() / DEFAULT_NAME
 
 
