@@ -1,5 +1,7 @@
 [Unit]
 Description=Neoracer Teleop (control + sensors + ML + display)
+Wants=neoracer-data.service
+After=neoracer-data.service
 After=network-online.target
 Wants=network-online.target
 # Pull watchdog along when teleop starts; BindsTo in watchdog stops it when
@@ -11,6 +13,7 @@ Wants=neoracer-watchdog.service
 Type=exec
 User=racecar
 Group=racecar
+EnvironmentFile=-/run/racecar/environment
 ExecStart=/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/launch_teleop.sh
 Restart=on-failure
 RestartSec=10

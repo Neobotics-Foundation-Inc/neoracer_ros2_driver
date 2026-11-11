@@ -1,11 +1,14 @@
 [Unit]
 Description=Neoracer Web Dashboard (port 8080)
+Wants=neoracer-data.service
+After=neoracer-data.service
 After=neoracer-teleop.service
 
 [Service]
 Type=exec
 User=racecar
 Group=racecar
+EnvironmentFile=-/run/racecar/environment
 ExecStart=/bin/bash -c '\
     source /opt/ros/humble/setup.bash && \
     source /home/racecar/ros2_ws/install/setup.bash && \

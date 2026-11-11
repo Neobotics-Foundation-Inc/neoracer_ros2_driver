@@ -3,6 +3,18 @@
 # Not executed directly: it defines a `racecar` shell function so the build /
 # test / source subcommands can mutate the current shell (PWD, env).
 
+# Where the car's data goes (neoracer_ros2_driver/data_root.py). Login shells
+# get it from /etc/profile.d/racecar-data.sh; this covers a shell that read
+# only .bashrc, such as a terminal inside JupyterLab.
+if [ -z "${RACECAR_DATA_DIR:-}" ]; then
+    if [ -r /run/racecar/data_root ]; then
+        RACECAR_DATA_DIR="$(cat /run/racecar/data_root)"
+    else
+        RACECAR_DATA_DIR="$HOME/racecar_data"
+    fi
+    export RACECAR_DATA_DIR
+fi
+
 _rc_autonomy_env() {
     # Chained env for the osracer layers: underlay beneath the neoracer
     # overlay, same order as launch_autonomy.sh. Run inside a subshell so
@@ -115,6 +127,11 @@ racecar() {
             # This car's settings outside the driver folder; see
             # scripts/racecar_profile.py and neoracer_ros2_driver/car_profile.py.
             python3 "${RACECAR_PROFILE_SCRIPT:-$pkg_dir/scripts/racecar_profile.py}" "$@"
+            ;;
+
+        data)
+            # Where the car's data goes; see neoracer_ros2_driver/data_root.py.
+            python3 "$pkg_dir/neoracer_ros2_driver/data_root.py" "$@"
             ;;
 
         source)
@@ -1020,6 +1037,9 @@ Commands:
                                         tuning out of the driver folder
                           export FILE   write the profile to FILE (.tar.gz)
                           import FILE   read a profile written by export
+    data                Where the car's data goes (the data root): ~/racecar_data,
+                        outside the folders the installer removes. Programs
+                        read it from $RACECAR_DATA_DIR.
     source              Source the workspace overlay into the current shell.
     ws [name]           Switch this shell between workspaces: neoracer or
                         osracer (the vendor stack preinstalled in ~/osracer_ws).
@@ -1122,7 +1142,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test profile lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile data lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
