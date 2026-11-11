@@ -203,9 +203,7 @@ def legacy_files(config_dir: Path | None, dashboards_root: Path | None) -> dict[
 def unmigrated(config_dir: Path | None, dashboards_root: Path | None) -> list[Path]:
     """Return old per-car files whose profile copy does not exist: values the driver ignores."""
     return [
-        old
-        for old, new in legacy_files(config_dir, dashboards_root).items()
-        if not new.exists()
+        old for old, new in legacy_files(config_dir, dashboards_root).items() if not new.exists()
     ]
 
 
