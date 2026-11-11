@@ -179,3 +179,28 @@ def test_battery_fraction_3s():
     assert abs(cl.battery_fraction(11.7) - 0.5) < 1e-9
     assert cl.battery_fraction(13.0) == 1.0
     assert cl.battery_fraction(9.0) == 0.0
+
+
+# ---------- rc_link_up ----------
+
+
+def test_rc_link_up_for_pulse_widths():
+    assert cl.rc_link_up(_channels())
+    assert cl.rc_link_up(_channels(**{'0': 1000, '1': 2000}))
+
+
+def test_rc_link_down_when_the_transmitter_is_off():
+    assert not cl.rc_link_up([-1] * 10)
+
+
+def test_rc_link_down_on_one_dead_channel():
+    assert not cl.rc_link_up(_channels(**{'3': -1}))
+
+
+def test_rc_link_down_on_an_impossible_width():
+    assert not cl.rc_link_up(_channels(**{'3': 2600}))
+
+
+def test_rc_link_down_with_no_channels():
+    assert not cl.rc_link_up([])
+    assert not cl.rc_link_up(None)

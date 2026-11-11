@@ -18,7 +18,8 @@ IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
   controller API both work without a USB gamepad, and
 - republishes ``/encoder/speed``, ``/battery/voltage`` (std_msgs/Float32) and
   ``/rc/channels`` (std_msgs/Float32MultiArray), the scalar sensor topics
-  ``rc.physics`` reads on the racecar_neo platform.
+  ``rc.physics`` reads on the racecar_neo platform, and ``/rc/link``
+  (std_msgs/Bool), whether the transmitter is present.
 
 The exact FlySky channel order depends on the transmitter mixer and is exposed
 entirely as ROS parameters (see config/controller.yaml) for on-car tuning.
@@ -36,7 +37,7 @@ from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 # ===== IMPORT ROS2 MESSAGE TYPES =====
 from sensor_msgs.msg import BatteryState, Imu, Joy, MagneticField
-from std_msgs.msg import Float32, Float32MultiArray
+from std_msgs.msg import Bool, Float32, Float32MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
@@ -167,6 +168,8 @@ class ControllerNode(Node):
         self.rc_pub = self.create_publisher(
             Float32MultiArray, '/rc/channels', qos_profile_sensor_data
         )
+        # Link state from the raw pulse widths; see controller_lib.rc_link_up.
+        self.rc_link_pub = self.create_publisher(Bool, '/rc/link', qos_profile_sensor_data)
         self._unknown_tags = set()
         # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
         # connects; BEST_EFFORT pipeline subscribers accept a reliable publisher.
@@ -284,6 +287,7 @@ class ControllerNode(Node):
             if self.joy_pub is not None:
                 self.pub_joy(data)
             self.pub_rc(data)
+            self.pub_rc_link(data)
         elif tag == 'm' and self.mag_pub is not None:
             self.pub_mag(data)
         elif tag == 'b':
@@ -381,6 +385,11 @@ class ControllerNode(Node):
         msg = Float32MultiArray()
         msg.data = controller_lib.rc_to_channels(data['channels'], self._joy_cfg)
         self.rc_pub.publish(msg)
+
+    def pub_rc_link(self, data):
+        """Publish whether the transmitter link is up, from the raw ``r`` channels."""
+        up = controller_lib.rc_link_up(data['channels'], self._joy_cfg['rc_failsafe_below'])
+        self.rc_link_pub.publish(Bool(data=up))
 
     def pub_mag(self, data):
         """Publish a MagneticField message (Gauss -> Tesla) from an ``m`` record."""
