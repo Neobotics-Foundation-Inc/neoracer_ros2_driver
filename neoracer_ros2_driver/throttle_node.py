@@ -38,9 +38,7 @@ class ThrottleNode(Node):
             durability=QoSDurabilityPolicy.VOLATILE,
         )
         self._pub = self.create_publisher(AckermannDriveStamped, '/motor', qos)
-        self.create_subscription(
-            AckermannDriveStamped, '/mux_out', self._drive_cb, qos
-        )
+        self.create_subscription(AckermannDriveStamped, '/mux_out', self._drive_cb, qos)
 
         self.get_logger().info(
             f'Throttle ready: max_fwd={self._max_fwd}, max_back={self._max_back}, '

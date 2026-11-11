@@ -45,18 +45,22 @@ def generate_launch_description():
     # They are also mutually exclusive: slam_toolbox and Nav2's map-file
     # localization both publish map->odom.
     enable_slam = DeclareLaunchArgument(
-        'slam', default_value='false',
-        description='Start slam_toolbox (osracer_slam)')
+        'slam', default_value='false', description='Start slam_toolbox (osracer_slam)'
+    )
     enable_nav = DeclareLaunchArgument(
-        'nav', default_value='false',
-        description='Start Nav2 on a saved map (osracer_navigation)')
+        'nav', default_value='false', description='Start Nav2 on a saved map (osracer_navigation)'
+    )
 
     # TF: robot_state_publisher + odom-topic broadcaster from the vendor
     # description package, fed by the neoracer controller's /odom.
     description = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('osracer_description'),
-            'launch', 'osracer_description.launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory('osracer_description'),
+                'launch',
+                'osracer_description.launch.py',
+            )
+        ),
         launch_arguments={
             'start_jsp': 'false',
             'jsp_gui': 'false',
@@ -67,9 +71,11 @@ def generate_launch_description():
     )
 
     slam = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('osracer_slam'),
-            'launch', 'slam_toolbox.launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory('osracer_slam'), 'launch', 'slam_toolbox.launch.py'
+            )
+        ),
         condition=IfCondition(LaunchConfiguration('slam')),
     )
 
@@ -77,9 +83,11 @@ def generate_launch_description():
     # them in a PythonExpression, and the vendor's lowercase defaults throw
     # NameError. RViz stays off; this runs headless under systemd.
     nav = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('osracer_navigation'),
-            'launch', 'nav2.launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory('osracer_navigation'), 'launch', 'nav2.launch.py'
+            )
+        ),
         condition=IfCondition(LaunchConfiguration('nav')),
         launch_arguments={
             'use_namespace': 'False',
@@ -109,13 +117,15 @@ def generate_launch_description():
             ('imu/data_raw', '/imu/fused'),
             ('imu/data', 'imu_filter'),
         ],
-        parameters=[{
-            'do_bias_estimation': True,
-            'do_adaptive_gain': True,
-            'use_mag': False,
-            'gain_acc': 0.01,
-            'gain_mag': 0.01,
-        }],
+        parameters=[
+            {
+                'do_bias_estimation': True,
+                'do_adaptive_gain': True,
+                'use_mag': False,
+                'gain_acc': 0.01,
+                'gain_mag': 0.01,
+            }
+        ],
     )
     ekf = Node(
         package='robot_localization',
@@ -124,8 +134,8 @@ def generate_launch_description():
         output='screen',
         parameters=[
             os.path.join(
-                get_package_share_directory('osracer_bringup'),
-                'param', 'chassis_ekf_params.yaml'),
+                get_package_share_directory('osracer_bringup'), 'param', 'chassis_ekf_params.yaml'
+            ),
             {
                 'map_frame': 'map',
                 'odom_frame': 'odom',
@@ -136,13 +146,15 @@ def generate_launch_description():
         ],
     )
 
-    return LaunchDescription([
-        enable_slam,
-        enable_nav,
-        description,
-        twist_bridge,
-        imu_filter,
-        ekf,
-        slam,
-        nav,
-    ])
+    return LaunchDescription(
+        [
+            enable_slam,
+            enable_nav,
+            description,
+            twist_bridge,
+            imu_filter,
+            ekf,
+            slam,
+            nav,
+        ]
+    )

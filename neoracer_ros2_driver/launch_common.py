@@ -14,9 +14,9 @@ def single_node_launch(
     default_yaml: str,
     package: str,
     executable: str,
-    node_name: str = None,
+    node_name: str | None = None,
     remappings=None,
-    description: str = None,
+    description: str | None = None,
 ):
     """
     Build a 1-node LaunchDescription whose only config is a YAML param file.

@@ -40,7 +40,8 @@ def decode_image(data, encoding, height, width):
         if arr.size != height * width * 3:
             raise ValueError(
                 f'{encoding} payload is {arr.size} bytes, '
-                f'expected {height * width * 3} for {width}x{height}')
+                f'expected {height * width * 3} for {width}x{height}'
+            )
         arr = arr.reshape(height, width, 3)
         return arr[:, :, ::-1] if encoding == 'rgb8' else arr
 
@@ -103,8 +104,9 @@ def box_to_center_size(xyxy, img_w, img_h):
     return (x1 + x2) / 2.0, (y1 + y2) / 2.0, x2 - x1, y2 - y1
 
 
-def build_detections(xyxy, scores, classes, names, img_w, img_h,
-                     score_threshold=0.0, max_detections=0):
+def build_detections(
+    xyxy, scores, classes, names, img_w, img_h, score_threshold=0.0, max_detections=0
+):
     """
     Turn one YOLO result's arrays into a list of plain detection dicts.
 
@@ -119,20 +121,22 @@ def build_detections(xyxy, scores, classes, names, img_w, img_h,
     Ultralytics output is descending confidence.
     """
     detections = []
-    for box, score, index in zip(xyxy, scores, classes):
+    for box, score, index in zip(xyxy, scores, classes, strict=False):
         if float(score) < score_threshold:
             continue
         if 0 < max_detections <= len(detections):
             break
         index = int(index)
         cx, cy, w, h = box_to_center_size(box, img_w, img_h)
-        detections.append({
-            'class_id': str(names.get(index, index)),
-            'class_index': index,
-            'score': float(score),
-            'cx': cx,
-            'cy': cy,
-            'w': w,
-            'h': h,
-        })
+        detections.append(
+            {
+                'class_id': str(names.get(index, index)),
+                'class_index': index,
+                'score': float(score),
+                'cx': cx,
+                'cy': cy,
+                'w': w,
+                'h': h,
+            }
+        )
     return detections

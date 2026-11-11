@@ -58,15 +58,12 @@ def declare_float_param(node: Node, name: str, default: float) -> float:
     missing ``.0``. Declare dynamically typed and cast instead; fall back to
     the default (loudly) if the value is not a number at all.
     """
-    value = node.declare_parameter(
-        name, default, ParameterDescriptor(dynamic_typing=True)
-    ).value
+    value = node.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True)).value
     try:
         return float(value)
     except (TypeError, ValueError):
         node.get_logger().error(
-            f"parameter '{name}' must be a number, got {value!r}; "
-            f"using the default {default}"
+            f"parameter '{name}' must be a number, got {value!r}; " f"using the default {default}"
         )
         return float(default)
 
@@ -85,8 +82,7 @@ class ControllerNode(Node):
 
         # Drive command mapping (normalized /motor -> firmware m/s + degrees).
         self.max_speed_mps = declare_float_param(self, 'max_speed_mps', 6.0)
-        self.max_steering_angle_deg = declare_float_param(
-            self, 'max_steering_angle_deg', 30.0)
+        self.max_steering_angle_deg = declare_float_param(self, 'max_steering_angle_deg', 30.0)
         self.steering_trim_deg = declare_float_param(self, 'steering_trim_deg', 0.0)
 
         # Frames.
@@ -109,18 +105,17 @@ class ControllerNode(Node):
         # ===== INITIALIZE SERIAL PORT =====
         try:
             self.serial = serial.Serial(self.port_name, self.baud_rate, timeout=0.1)
-            self.get_logger().info(f"[DEBUG] Connected to: {self.port_name}")
+            self.get_logger().info(f'[DEBUG] Connected to: {self.port_name}')
         except serial.SerialException as e:
-            self.get_logger().fatal(
-                f"[ERROR] Could not connect to device '{self.port_name}': {e}")
+            self.get_logger().fatal(f"[ERROR] Could not connect to device '{self.port_name}': {e}")
             rclpy.shutdown()
             return
 
         # ===== SET UP SUBSCRIBERS =====
         # /motor is the throttle node output (normalized, BEST_EFFORT).
         self.motor_sub = self.create_subscription(
-            AckermannDriveStamped, '/motor', self.motor_callback,
-            qos_profile_sensor_data)
+            AckermannDriveStamped, '/motor', self.motor_callback, qos_profile_sensor_data
+        )
 
         # ===== SET UP PUBLISHERS =====
         # /imu/fused and /odom are RELIABLE: the EKF (robot_localization) and the
@@ -130,26 +125,30 @@ class ControllerNode(Node):
         self.imu_pub = self.create_publisher(Imu, '/imu/fused', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
-        self.battery_pub = self.create_publisher(
-            BatteryState, '/battery', qos_profile_sensor_data)
+        self.battery_pub = self.create_publisher(BatteryState, '/battery', qos_profile_sensor_data)
         # The scalar racecar_neo sensor topics the student library reads. They
         # carry no information /battery, /odom, and /joy do not already hold;
         # they exist so rc.physics reads the same names on both platforms.
         # /battery/current has no counterpart: the OSRbot base has no current
         # shunt, so nothing publishes it and rc.physics raises there.
         self.voltage_pub = self.create_publisher(
-            Float32, '/battery/voltage', qos_profile_sensor_data)
+            Float32, '/battery/voltage', qos_profile_sensor_data
+        )
         self.encoder_pub = self.create_publisher(
-            Float32, '/encoder/speed', qos_profile_sensor_data)
+            Float32, '/encoder/speed', qos_profile_sensor_data
+        )
         self.rc_pub = self.create_publisher(
-            Float32MultiArray, '/rc/channels', qos_profile_sensor_data)
+            Float32MultiArray, '/rc/channels', qos_profile_sensor_data
+        )
         self._unknown_tags = set()
         # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
         # connects; BEST_EFFORT pipeline subscribers accept a reliable publisher.
         self.joy_pub = self.create_publisher(Joy, '/joy', 10) if self.publish_joy else None
         self.mag_pub = (
             self.create_publisher(MagneticField, '/mag', qos_profile_sensor_data)
-            if self.publish_mag else None)
+            if self.publish_mag
+            else None
+        )
 
         # ===== STATE + SERIAL READ THREAD =====
         self.last_cmd_time = self.get_clock().now()
@@ -157,7 +156,7 @@ class ControllerNode(Node):
         self.read_thread = threading.Thread(target=self.read_serial_loop, daemon=True)
         self.read_thread.start()
 
-        self.get_logger().info("[DEBUG] Controller node initialized; entering main loop")
+        self.get_logger().info('[DEBUG] Controller node initialized; entering main loop')
 
     def _declare_joy_params(self):
         """Declare the FlySky->Joy mapping parameters and return them as a dict."""
@@ -183,10 +182,8 @@ class ControllerNode(Node):
             'mode_idle_button': p('mode_idle_button', -1).value,
             'mode_manual_button': p('mode_manual_button', 4).value,
             'mode_autonomy_button': p('mode_autonomy_button', 5).value,
-            'aux_button_channels': list(
-                p('aux_button_channels', [], _INT_ARRAY).value or []),
-            'aux_button_indices': list(
-                p('aux_button_indices', [], _INT_ARRAY).value or []),
+            'aux_button_channels': list(p('aux_button_channels', [], _INT_ARRAY).value or []),
+            'aux_button_indices': list(p('aux_button_indices', [], _INT_ARRAY).value or []),
             'aux_button_thresh': p('aux_button_thresh', 0.5).value,
         }
         return cfg
@@ -216,12 +213,13 @@ class ControllerNode(Node):
                                 self._dispatch(data, tag)
                         except (ValueError, IndexError) as e:
                             self.get_logger().warn(
-                                f"Unable to parse message: [{line}], reason: {e}")
+                                f'Unable to parse message: [{line}], reason: {e}'
+                            )
                 except serial.SerialException:
-                    self.get_logger().error("Serial Exception Error")
+                    self.get_logger().error('Serial Exception Error')
                     break
                 except UnicodeDecodeError as e:
-                    self.get_logger().warn(f"Could not decode message: {e}")
+                    self.get_logger().warn(f'Could not decode message: {e}')
             else:
                 time.sleep(0.005)  # ~200 Hz idle poll
 
@@ -239,7 +237,8 @@ class ControllerNode(Node):
             self._unknown_tags.add(tag)
             self.get_logger().warn(
                 f"Unknown serial frame tag '{tag}' (first line: [{line}]); "
-                "firmware protocol may be newer than this driver")
+                "firmware protocol may be newer than this driver"
+            )
 
     def _dispatch(self, data, tag):
         """Route a parsed serial record to the matching publisher."""
@@ -376,20 +375,24 @@ class ControllerNode(Node):
     def motor_callback(self, msg: AckermannDriveStamped):
         """Map a normalized ``/motor`` command to the firmware ``v`` command."""
         command = controller_lib.motor_to_command(
-            msg.drive.speed, msg.drive.steering_angle,
-            self.max_speed_mps, self.max_steering_angle_deg, self.steering_trim_deg)
+            msg.drive.speed,
+            msg.drive.steering_angle,
+            self.max_speed_mps,
+            self.max_steering_angle_deg,
+            self.steering_trim_deg,
+        )
 
         with self.serial_lock:
             try:
                 self.serial.write(command.encode('utf-8'))
             except serial.SerialException as e:
-                self.get_logger().error(
-                    f"[ERROR] Could not send [{command.strip()}]: {e}")
+                self.get_logger().error(f'[ERROR] Could not send [{command.strip()}]: {e}')
 
         self.last_cmd_time = self.get_clock().now()
 
 
 # ===== INITIALIZE SYSTEM - DO NOT MODIFY ======
+
 
 def main(args=None):
     """Spin the controller node until shutdown."""
@@ -398,9 +401,9 @@ def main(args=None):
         node = ControllerNode()
     except Exception as exc:
         print(
-            f"[controller_node] failed to start: {exc}\n"
-            "Check config/controller.yaml. A common cause is a float parameter "
-            "written as an integer: use -5.0, not -5.",
+            f'[controller_node] failed to start: {exc}\n'
+            'Check config/controller.yaml. A common cause is a float parameter '
+            'written as an integer: use -5.0, not -5.',
             file=sys.stderr,
         )
         rclpy.try_shutdown()

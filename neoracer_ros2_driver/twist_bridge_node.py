@@ -42,14 +42,12 @@ class TwistBridgeNode(Node):
 
         # Must match config/controller.yaml so normalization round-trips.
         self.max_speed_mps = self.declare_parameter('max_speed_mps', 6.0).value
-        self.max_steering_angle_deg = self.declare_parameter(
-            'max_steering_angle_deg', 30.0).value
+        self.max_steering_angle_deg = self.declare_parameter('max_steering_angle_deg', 30.0).value
         self.wheelbase = self.declare_parameter('wheelbase', 0.285).value
 
         # Slowest speed at which the servo still steers the car; commanded
         # when the planner wants to turn but sends |v| below this.
-        self.min_turn_speed_mps = self.declare_parameter(
-            'min_turn_speed_mps', 0.4).value
+        self.min_turn_speed_mps = self.declare_parameter('min_turn_speed_mps', 0.4).value
 
         # Publish zero once if the planner goes quiet (the mux also zeroes
         # on its own command_timeout_sec; this just makes the stop explicit).
@@ -63,13 +61,12 @@ class TwistBridgeNode(Node):
         # There is no EKF in the fused stack, so republish the controller's
         # /odom under that name - and at default (RELIABLE) QoS, because the
         # controller publishes BEST_EFFORT and Nav2 subscribes RELIABLE.
-        self.relay_filtered_odom = self.declare_parameter(
-            'relay_filtered_odom', True).value
+        self.relay_filtered_odom = self.declare_parameter('relay_filtered_odom', True).value
         if self.relay_filtered_odom:
-            self._odom_relay_pub = self.create_publisher(
-                Odometry, '/odometry/filtered', 10)
+            self._odom_relay_pub = self.create_publisher(Odometry, '/odometry/filtered', 10)
             self._odom_relay_sub = self.create_subscription(
-                Odometry, '/odom', self._on_odom, qos_profile_sensor_data)
+                Odometry, '/odom', self._on_odom, qos_profile_sensor_data
+            )
 
         self._last_cmd_time = None
         self._stopped = True
@@ -78,7 +75,8 @@ class TwistBridgeNode(Node):
         self.get_logger().info(
             f'[INFO] twist_bridge up: /cmd_vel -> /drive '
             f'(max {self.max_speed_mps} m/s, {self.max_steering_angle_deg} deg, '
-            f'wheelbase {self.wheelbase} m)')
+            f'wheelbase {self.wheelbase} m)'
+        )
 
     def _on_odom(self, msg: Odometry):
         self._odom_relay_pub.publish(msg)
@@ -98,8 +96,7 @@ class TwistBridgeNode(Node):
             steer_rad = 0.0
 
         speed_norm = max(-1.0, min(1.0, v / self.max_speed_mps))
-        steer_norm = max(-1.0, min(1.0,
-                         math.degrees(steer_rad) / self.max_steering_angle_deg))
+        steer_norm = max(-1.0, min(1.0, math.degrees(steer_rad) / self.max_steering_angle_deg))
 
         self._publish(speed_norm, steer_norm)
         self._last_cmd_time = self.get_clock().now()

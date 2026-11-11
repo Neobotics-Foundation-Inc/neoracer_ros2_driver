@@ -12,6 +12,7 @@ The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 """
 
 import math
+from typing import Any
 
 # A raw RC channel reading below this is treated as "no signal" (failsafe).
 # The firmware reports -1 on every channel when the FlySky transmitter is off,
@@ -24,8 +25,9 @@ def clamp(value, low=-1.0, high=1.0):
     return max(low, min(high, value))
 
 
-def motor_to_command(speed, steering_angle, max_speed_mps,
-                     max_steering_angle_deg, steering_trim_deg=0.0):
+def motor_to_command(
+    speed, steering_angle, max_speed_mps, max_steering_angle_deg, steering_trim_deg=0.0
+):
     """
     Map a normalized ``/motor`` command to the firmware ``v <m/s> <deg>`` string.
 
@@ -34,7 +36,7 @@ def motor_to_command(speed, steering_angle, max_speed_mps,
     """
     speed_mps = clamp(speed) * max_speed_mps
     steer_deg = clamp(steering_angle) * max_steering_angle_deg + steering_trim_deg
-    return f"v {speed_mps:.3f} {steer_deg:.2f}\n"
+    return f'v {speed_mps:.3f} {steer_deg:.2f}\n'
 
 
 def parse_serial_data(line: str):
@@ -46,7 +48,7 @@ def parse_serial_data(line: str):
     lines so the caller can ignore them. Raises ``ValueError``/``IndexError``
     on malformed numeric fields, which the caller logs and skips.
     """
-    data = {}
+    data: dict[str, Any] = {}
 
     parts = line.split()
     if not parts:
@@ -89,8 +91,8 @@ def parse_serial_data(line: str):
     if cmd_type == 'i' and len(parts) == 11:
         # i qx qy qz qw ax ay az gx gy gz
         q_x, q_y, q_z, q_w = map(float, parts[1:5])  # quaternion
-        a_x, a_y, a_z = map(float, parts[5:8])       # accelerometer
-        g_x, g_y, g_z = map(float, parts[8:11])      # gyroscope
+        a_x, a_y, a_z = map(float, parts[5:8])  # accelerometer
+        g_x, g_y, g_z = map(float, parts[8:11])  # gyroscope
 
         data['q_x'] = q_x
         data['q_y'] = q_y
@@ -156,8 +158,7 @@ def quaternion_from_euler(roll, pitch, yaw):
     return q
 
 
-def normalize_channel(raw, rc_min, rc_center, rc_max, deadband,
-                      failsafe_below=RC_FAILSAFE_BELOW):
+def normalize_channel(raw, rc_min, rc_center, rc_max, deadband, failsafe_below=RC_FAILSAFE_BELOW):
     """
     Map a raw RC pulse width to ``[-1.0, 1.0]`` about its center.
 
@@ -195,8 +196,14 @@ def rc_to_channels(channels, cfg):
     channel reads ``0.0``, matching the Joy failsafe.
     """
     return [
-        normalize_channel(raw, cfg['rc_min'], cfg['rc_center'], cfg['rc_max'],
-                          cfg['rc_deadband'], cfg['rc_failsafe_below'])
+        normalize_channel(
+            raw,
+            cfg['rc_min'],
+            cfg['rc_center'],
+            cfg['rc_max'],
+            cfg['rc_deadband'],
+            cfg['rc_failsafe_below'],
+        )
         for raw in (channels or [])
     ]
 
@@ -231,8 +238,12 @@ def rc_to_joy(channels, cfg):
 
     def norm(i):
         return normalize_channel(
-            chan(i), cfg['rc_min'], cfg['rc_center'], cfg['rc_max'],
-            cfg['rc_deadband'], cfg['rc_failsafe_below'],
+            chan(i),
+            cfg['rc_min'],
+            cfg['rc_center'],
+            cfg['rc_max'],
+            cfg['rc_deadband'],
+            cfg['rc_failsafe_below'],
         )
 
     # --- Driving axes ---
@@ -258,7 +269,7 @@ def rc_to_joy(channels, cfg):
             _set_button(buttons, cfg['mode_idle_button'])
 
     # --- Generic 2-position aux switches -> arbitrary Joy buttons ---
-    for ch_i, btn_i in zip(cfg['aux_button_channels'], cfg['aux_button_indices']):
+    for ch_i, btn_i in zip(cfg['aux_button_channels'], cfg['aux_button_indices'], strict=False):
         if norm(ch_i) >= cfg['aux_button_thresh']:
             _set_button(buttons, btn_i)
 

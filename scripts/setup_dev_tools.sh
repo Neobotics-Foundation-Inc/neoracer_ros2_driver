@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build tools, Python hardware libraries, and CLI utilities used across phases.
+# Build tools, Python hardware libraries, CLI utilities used across phases, and
+# the pinned Python linters behind `racecar lint`.
 set -eo pipefail
 
 sudo apt-get install -y \
@@ -10,3 +11,10 @@ sudo apt-get install -y \
     git vim nano htop tmux screen tree jq bc less curl wget \
     v4l-utils usbutils lshw lsof pciutils \
     net-tools iputils-ping traceroute dnsutils
+
+# Linters, pinned so every car agrees with pyproject.toml. Per-user install;
+# the binaries land in ~/.local/bin, which `racecar lint` runs directly.
+# Ubuntu 22.04's pip predates PEP 668, so there is no system-package guard to
+# bypass here.
+LINTERS=(ruff==0.16.8 black==26.5.1 mypy==2.3.1)
+pip3 install --user "${LINTERS[@]}"

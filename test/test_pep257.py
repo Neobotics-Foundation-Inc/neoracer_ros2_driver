@@ -1,27 +1,14 @@
-# Copyright 2015 Open Source Robotics Foundation, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+"""ament_pep257 docstring check."""
 
-import os
+from pathlib import Path
 
 from ament_pep257.main import main
 import pytest
 
-# The lab dashboards are checkouts of their own repositories, dropped here by
-# setup_services.sh and gitignored. They are linted where they are maintained.
-DASHBOARDS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'scripts', 'dashboards')
+# Upstream lab-dashboard checkouts live here; they are third-party code and are
+# not held to this package's docstring convention. ament_pep257 resolves
+# excludes to absolute paths, so this works whether or not the directory exists.
+DASHBOARDS = str(Path(__file__).parent.parent / 'scripts' / 'dashboards')
 
 
 @pytest.mark.linter

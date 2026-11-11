@@ -40,11 +40,7 @@ def joy_is_centered(axes, threshold: float = 0.2, ignore_axes=()) -> bool:
     so they must be excluded from the arming check or the mux never arms.
     """
     ignore = set(ignore_axes)
-    return all(
-        abs(float(a)) < threshold
-        for i, a in enumerate(axes)
-        if i not in ignore
-    )
+    return all(abs(float(a)) < threshold for i, a in enumerate(axes) if i not in ignore)
 
 
 class MuxNode(Node):
@@ -98,12 +94,8 @@ class MuxNode(Node):
         self._pub = self.create_publisher(AckermannDriveStamped, '/mux_out', qos)
 
         self.create_subscription(Joy, '/joy', self._joy_cb, qos)
-        self.create_subscription(
-            AckermannDriveStamped, '/gamepad_drive', self._gamepad_cb, qos
-        )
-        self.create_subscription(
-            AckermannDriveStamped, '/drive', self._auto_cb, qos
-        )
+        self.create_subscription(AckermannDriveStamped, '/gamepad_drive', self._gamepad_cb, qos)
+        self.create_subscription(AckermannDriveStamped, '/drive', self._auto_cb, qos)
 
         self.create_timer(1.0 / publish_rate, self._publish)
 
@@ -136,8 +128,7 @@ class MuxNode(Node):
             # Forward /drive when fresh; ignore /joy entirely. Software always
             # offers the command, the PCB SWC switch is the physical gate. Stale
             # /drive (lab stopped) -> zeros via cmd_timeout, so it self-safes.
-            if (self._latest_auto is not None
-                    and (now - self._auto_stamp) <= self._cmd_timeout):
+            if self._latest_auto is not None and (now - self._auto_stamp) <= self._cmd_timeout:
                 out = self._latest_auto
             self._pub.publish(out)
             return
@@ -156,7 +147,9 @@ class MuxNode(Node):
         if not self._armed:
             grace_elapsed = (now - self._boot_time) >= self._startup_grace
             if grace_elapsed and joy_is_centered(
-                joy.axes, self._arm_threshold, self._arm_ignore_axes,
+                joy.axes,
+                self._arm_threshold,
+                self._arm_ignore_axes,
             ):
                 self._armed = True
                 self.get_logger().info('Mux armed')
@@ -174,10 +167,7 @@ class MuxNode(Node):
             ):
                 out = self._latest_gamepad
         elif mode == MuxMode.AUTONOMY:
-            if (
-                self._latest_auto is not None
-                and (now - self._auto_stamp) <= self._cmd_timeout
-            ):
+            if self._latest_auto is not None and (now - self._auto_stamp) <= self._cmd_timeout:
                 out = self._latest_auto
 
         if mode != self._last_mode:

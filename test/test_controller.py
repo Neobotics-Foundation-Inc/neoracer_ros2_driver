@@ -2,17 +2,31 @@
 
 from neoracer_ros2_driver import controller_lib as cl
 
-
 # Mapping config matching the config/controller.yaml defaults.
 DEFAULT_CFG = {
-    'rc_min': 1000, 'rc_center': 1500, 'rc_max': 2000,
-    'rc_deadband': 0.05, 'rc_failsafe_below': 500,
-    'num_axes': 6, 'num_buttons': 11, 'trigger_axes': [2, 5],
-    'throttle_axis': 1, 'throttle_channel': 2, 'throttle_sign': 1,
-    'steering_axis': 3, 'steering_channel': 0, 'steering_sign': 1,
-    'mode_channel': 4, 'mode_mid_thresh': -0.5, 'mode_high_thresh': 0.5,
-    'mode_idle_button': -1, 'mode_manual_button': 4, 'mode_autonomy_button': 5,
-    'aux_button_channels': [], 'aux_button_indices': [], 'aux_button_thresh': 0.5,
+    'rc_min': 1000,
+    'rc_center': 1500,
+    'rc_max': 2000,
+    'rc_deadband': 0.05,
+    'rc_failsafe_below': 500,
+    'num_axes': 6,
+    'num_buttons': 11,
+    'trigger_axes': [2, 5],
+    'throttle_axis': 1,
+    'throttle_channel': 2,
+    'throttle_sign': 1,
+    'steering_axis': 3,
+    'steering_channel': 0,
+    'steering_sign': 1,
+    'mode_channel': 4,
+    'mode_mid_thresh': -0.5,
+    'mode_high_thresh': 0.5,
+    'mode_idle_button': -1,
+    'mode_manual_button': 4,
+    'mode_autonomy_button': 5,
+    'aux_button_channels': [],
+    'aux_button_indices': [],
+    'aux_button_thresh': 0.5,
 }
 
 
@@ -26,9 +40,11 @@ def _channels(**overrides):
 
 # ---------- parse_serial_data ----------
 
+
 def test_parse_imu():
     data, tag = cl.parse_serial_data(
-        'i -0.0072 -0.0061 0.7560 0.6545 -0.0179 -0.1542 9.8467 0.1297 0.0441 -0.0715')
+        'i -0.0072 -0.0061 0.7560 0.6545 -0.0179 -0.1542 9.8467 0.1297 0.0441 -0.0715'
+    )
     assert tag == 'i'
     assert data['q_w'] == 0.6545
     assert data['a_z'] == 9.8467
@@ -63,6 +79,7 @@ def test_parse_blank_and_unknown():
 
 # ---------- normalize_channel ----------
 
+
 def test_normalize_center_min_max():
     assert cl.normalize_channel(1500, 1000, 1500, 2000, 0.0) == 0.0
     assert cl.normalize_channel(2000, 1000, 1500, 2000, 0.0) == 1.0
@@ -80,6 +97,7 @@ def test_normalize_failsafe_and_deadband():
 
 # ---------- motor_to_command ----------
 
+
 def test_motor_to_command_scaling_and_format():
     assert cl.motor_to_command(1.0, 0.0, 6.0, 30.0, 0.0) == 'v 6.000 0.00\n'
     assert cl.motor_to_command(-1.0, 1.0, 6.0, 30.0, 0.0) == 'v -6.000 30.00\n'
@@ -88,6 +106,7 @@ def test_motor_to_command_scaling_and_format():
 
 
 # ---------- rc_to_joy ----------
+
 
 def test_rc_to_joy_shape_and_trigger_rest():
     axes, buttons = cl.rc_to_joy(_channels(), DEFAULT_CFG)
@@ -100,7 +119,7 @@ def test_rc_to_joy_shape_and_trigger_rest():
 
 def test_rc_to_joy_throttle_and_steering():
     axes, _ = cl.rc_to_joy(_channels(**{'2': 2000, '0': 1000}), DEFAULT_CFG)
-    assert axes[1] == 1.0   # throttle channel 2 full -> axis 1
+    assert axes[1] == 1.0  # throttle channel 2 full -> axis 1
     assert axes[3] == -1.0  # steering channel 0 min -> axis 3
 
 
@@ -131,6 +150,7 @@ def test_rc_to_joy_aux_buttons():
 
 
 # ---------- rc_to_channels ----------
+
 
 def test_rc_to_channels_preserves_firmware_order_and_length():
     # Centered stick reads 0.0; full deflection reads +-1.0, in channel order.

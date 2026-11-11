@@ -34,8 +34,7 @@ class LedMatrixNode(Node):
         # USB-UART adapter. baud matters here (real UART, unlike the ESP32 CDC).
         self.port = self.declare_parameter('port', '/dev/osrbot_led_matrix').value
         self.baud = self.declare_parameter('baud', 115200).value
-        self.input_topic = self.declare_parameter(
-            'input_topic', '/dotmatrix/text').value
+        self.input_topic = self.declare_parameter('input_topic', '/dotmatrix/text').value
         self.append_newline = self.declare_parameter('append_newline', True).value
         # The panel's power-on frame, restated here because nothing else in the
         # stack writes it. " " for a blank idle panel.
@@ -43,10 +42,15 @@ class LedMatrixNode(Node):
 
         try:
             self.serial = serial.Serial(
-                port=self.port, baudrate=self.baud,
-                bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE, timeout=0.1,
-                xonxoff=False, rtscts=False)
+                port=self.port,
+                baudrate=self.baud,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0.1,
+                xonxoff=False,
+                rtscts=False,
+            )
             self.get_logger().info(f'[INFO] LED matrix connected: {self.port}')
         except serial.SerialException as e:
             self.get_logger().fatal(f"[ERROR] Could not open '{self.port}': {e}")
@@ -56,8 +60,7 @@ class LedMatrixNode(Node):
         self._write_idle()
 
         self.create_subscription(String, self.input_topic, self._on_text, 10)
-        self.get_logger().info(
-            f'[INFO] LED matrix node ready, subscribed to {self.input_topic}')
+        self.get_logger().info(f'[INFO] LED matrix node ready, subscribed to {self.input_topic}')
 
     def _write(self, text: str):
         """Write one string to the display, newline-terminated."""

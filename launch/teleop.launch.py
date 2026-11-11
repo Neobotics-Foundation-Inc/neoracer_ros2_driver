@@ -51,20 +51,20 @@ _SUBSYSTEMS = {
 
 
 def generate_launch_description():
-    launch_dir = os.path.join(
-        get_package_share_directory('neoracer_ros2_driver'), 'launch')
+    launch_dir = os.path.join(get_package_share_directory('neoracer_ros2_driver'), 'launch')
 
     def include(name):
         return IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(launch_dir, f'{name}.launch.py')))
+            PythonLaunchDescriptionSource(os.path.join(launch_dir, f'{name}.launch.py'))
+        )
 
     def gated_include(name):
         return IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(launch_dir, f'{name}.launch.py')),
+            PythonLaunchDescriptionSource(os.path.join(launch_dir, f'{name}.launch.py')),
             condition=IfCondition(
-                EqualsSubstitution(LaunchConfiguration(f'{name}_enable'), 'true')))
+                EqualsSubstitution(LaunchConfiguration(f'{name}_enable'), 'true')
+            ),
+        )
 
     enable_args = [
         DeclareLaunchArgument(f'{name}_enable', default_value=default)

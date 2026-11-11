@@ -6,20 +6,20 @@ import pytest
 
 from neoracer_ros2_driver import inference_lib as il
 
-
 COCO_NAMES = {0: 'person', 2: 'car', 39: 'bottle'}
 
 
 def _bgr_frame(height=8, width=12):
     """Build a frame whose three channels are distinguishable from each other."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
-    frame[:, :, 0] = 10   # blue
-    frame[:, :, 1] = 20   # green
-    frame[:, :, 2] = 30   # red
+    frame[:, :, 0] = 10  # blue
+    frame[:, :, 1] = 20  # green
+    frame[:, :, 2] = 30  # red
     return frame
 
 
 # ---------- decode_image ----------
+
 
 def test_decode_jpeg_roundtrip():
     frame = _bgr_frame()
@@ -65,6 +65,7 @@ def test_decode_rejects_corrupt_jpeg():
 
 # ---------- resolve_model_path ----------
 
+
 def test_resolve_prefers_first_matching_dir(tmp_path):
     first = tmp_path / 'share'
     second = tmp_path / 'cwd'
@@ -73,8 +74,9 @@ def test_resolve_prefers_first_matching_dir(tmp_path):
     (first / 'yolo11n.pt').write_bytes(b'')
     (second / 'yolo11n.pt').write_bytes(b'')
 
-    assert il.resolve_model_path(
-        'yolo11n.pt', [str(first), str(second)]) == str(first / 'yolo11n.pt')
+    assert il.resolve_model_path('yolo11n.pt', [str(first), str(second)]) == str(
+        first / 'yolo11n.pt'
+    )
 
 
 def test_resolve_passes_through_unknown_name(tmp_path):
@@ -87,6 +89,7 @@ def test_resolve_keeps_absolute_path(tmp_path):
 
 
 # ---------- box_to_center_size ----------
+
 
 def test_box_center_and_size():
     cx, cy, w, h = il.box_to_center_size([10, 20, 50, 60], 640, 480)
@@ -107,6 +110,7 @@ def test_box_fully_outside_frame_collapses():
 
 
 # ---------- build_detections ----------
+
 
 def test_build_detections_maps_names_and_geometry():
     dets = il.build_detections(
@@ -177,6 +181,7 @@ def test_build_detections_empty_result():
 
 
 # ---------- fallback_weights ----------
+
 
 def test_fallback_weights_finds_sibling_pt(tmp_path):
     (tmp_path / 'yolo26n.pt').write_bytes(b'x')
