@@ -12,6 +12,8 @@
 
 set -eo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ---------------------------------------------------------------------------
 # Log directory setup
 # ---------------------------------------------------------------------------
@@ -69,6 +71,9 @@ fi
 # Mirror stdout/stderr to teleop.log AND console (journald when run via systemd).
 # ---------------------------------------------------------------------------
 exec &> >(tee -a "$LOG_DIR/teleop.log")
+
+# Per-car files left in the driver folder are ignored; say so in the log.
+python3 "$SCRIPT_DIR/racecar_profile.py" check || true
 
 # ---------------------------------------------------------------------------
 # Launch - `exec` so systemd tracks the ros2 launch PID, not this shell.

@@ -111,6 +111,12 @@ racecar() {
             echo "racecar lint: ruff, black and mypy passed"
             ;;
 
+        profile)
+            # This car's settings outside the driver folder; see
+            # scripts/racecar_profile.py and neoracer_ros2_driver/car_profile.py.
+            python3 "${RACECAR_PROFILE_SCRIPT:-$pkg_dir/scripts/racecar_profile.py}" "$@"
+            ;;
+
         source)
             # shellcheck disable=SC1091
             source "$ws/install/setup.bash"
@@ -1006,6 +1012,14 @@ Commands:
     build               Build neoracer_ros2_driver (--symlink-install) and source overlay.
     test                Run the package test suite with verbose results.
     lint                Run ruff, black --check and mypy on the package.
+    profile [action]    This car's settings, kept in ~/.config/racecar so a
+                        driver update or re-clone keeps the calibration.
+                          (none)        path, car name, files and dates
+                          path          the profile folder
+                          migrate       move config/*.local.yaml and dashboard
+                                        tuning out of the driver folder
+                          export FILE   write the profile to FILE (.tar.gz)
+                          import FILE   read a profile written by export
     source              Source the workspace overlay into the current shell.
     ws [name]           Switch this shell between workspaces: neoracer or
                         osracer (the vendor stack preinstalled in ~/osracer_ws).
@@ -1108,7 +1122,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 

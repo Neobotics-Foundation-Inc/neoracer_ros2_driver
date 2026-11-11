@@ -42,6 +42,16 @@ echo
 echo "==> [5/8] Workspace build (driver + pinned Lakibeam lidar clone)"
 bash "$SCRIPT_DIR/setup_workspace.sh"
 
+echo "    moving per-car files into the car profile (~/.config/racecar)"
+(
+    set +u
+    # shellcheck disable=SC1091
+    source /opt/ros/humble/setup.bash
+    # shellcheck disable=SC1091
+    source "$HOME/ros2_ws/install/setup.bash"
+    python3 "$SCRIPT_DIR/racecar_profile.py" migrate
+)
+
 echo
 echo "==> [6/8] GPU stack (PyTorch, Ultralytics, TensorRT check)"
 bash "$SCRIPT_DIR/setup_ml.sh"
