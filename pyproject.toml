@@ -1,0 +1,39 @@
+# Lint and format configuration only; the package builds through setup.py
+# (ament_python). Tool versions are pinned in scripts/setup_dev_tools.sh.
+# Settings track ament_flake8: 99 columns, single quotes.
+#
+# scripts/dashboard.py sits outside black and mypy for now. The 8080 page is
+# replaced wholesale by the apps page port, and an open PR rewrites it in the
+# meantime; formatting it here would only make that PR conflict. The exclusion
+# goes when the apps page lands.
+
+[tool.black]
+line-length = 99
+skip-string-normalization = true
+target-version = ['py310']
+extend-exclude = '^/(scripts/dashboards|build|install|log)/|^/scripts/dashboard\.py$'
+
+[tool.ruff]
+line-length = 99
+target-version = 'py310'
+extend-exclude = ['scripts/dashboards', 'build', 'install', 'log']
+
+[tool.ruff.lint]
+# Import order is left to ament_flake8 (google style).
+select = ['E', 'F', 'W', 'B', 'C4', 'Q', 'UP']
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = 'single'
+
+[tool.mypy]
+python_version = '3.10'
+files = ['neoracer_ros2_driver', 'launch', 'scripts']
+exclude = ['^scripts/dashboards/', '^scripts/dashboard\.py$']
+# rclpy, message packages and the GPU stack ship no type stubs.
+ignore_missing_imports = true
+# launch/ has no __init__.py; as a namespace package it would shadow ROS launch.
+namespace_packages = false
+# The tree is mostly untyped today. Ported MIT modules are typed; this goes to
+# true once the remaining NeoRacer modules are annotated.
+disallow_untyped_defs = false
+warn_unused_ignores = true

@@ -86,6 +86,31 @@ racecar() {
                 && colcon test-result --verbose )
             ;;
 
+        lint)
+            # ruff, black and mypy read their settings from pyproject.toml.
+            local lint_bin="${RACECAR_LINT_BIN:-$HOME/.local/bin}"
+            local tool
+            local -a failed=()
+            for tool in ruff black mypy; do
+                if [[ ! -x "$lint_bin/$tool" ]]; then
+                    echo "racecar lint: $lint_bin/$tool not found; run scripts/setup_dev_tools.sh" >&2
+                    return 3
+                fi
+            done
+            echo "==> ruff check"
+            ( cd "$pkg_dir" && "$lint_bin/ruff" check . ) || failed+=("ruff")
+            echo "==> black --check"
+            ( cd "$pkg_dir" && "$lint_bin/black" --check . ) || failed+=("black")
+            echo "==> mypy"
+            ( cd "$pkg_dir" && "$lint_bin/mypy" ) || failed+=("mypy")
+            echo
+            if [[ ${#failed[@]} -gt 0 ]]; then
+                echo "racecar lint: failed: ${failed[*]}" >&2
+                return 1
+            fi
+            echo "racecar lint: ruff, black and mypy passed"
+            ;;
+
         source)
             # shellcheck disable=SC1091
             source "$ws/install/setup.bash"
@@ -980,6 +1005,7 @@ Usage:
 Commands:
     build               Build neoracer_ros2_driver (--symlink-install) and source overlay.
     test                Run the package test suite with verbose results.
+    lint                Run ruff, black --check and mypy on the package.
     source              Source the workspace overlay into the current shell.
     ws [name]           Switch this shell between workspaces: neoracer or
                         osracer (the vendor stack preinstalled in ~/osracer_ws).
