@@ -168,3 +168,14 @@ def test_rc_to_channels_failsafe_is_neutral():
 def test_rc_to_channels_empty_and_none():
     assert cl.rc_to_channels(None, DEFAULT_CFG) == []
     assert cl.rc_to_channels([], DEFAULT_CFG) == []
+
+
+# ---------- battery_fraction ----------
+
+
+def test_battery_fraction_3s():
+    assert cl.battery_fraction(12.6) == 1.0
+    assert cl.battery_fraction(10.8) == 0.0
+    assert abs(cl.battery_fraction(11.7) - 0.5) < 1e-9
+    assert cl.battery_fraction(13.0) == 1.0
+    assert cl.battery_fraction(9.0) == 0.0

@@ -21,6 +21,16 @@ from neoracer_ros2_driver.limits import clamp
 # so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
 RC_FAILSAFE_BELOW = 500
 
+# 3S LiPo bounds for the charge fraction in /battery/state (the vendor stack's
+# battery_voltage_min/max).
+BATTERY_3S_V_MIN = 10.8
+BATTERY_3S_V_MAX = 12.6
+
+
+def battery_fraction(volts, v_min=BATTERY_3S_V_MIN, v_max=BATTERY_3S_V_MAX):
+    """Return the pack's charge fraction in [0, 1], linear between v_min and v_max."""
+    return clamp((volts - v_min) / (v_max - v_min), 0.0, 1.0)
+
 
 def motor_to_command(
     speed, steering_angle, max_speed_mps, max_steering_angle_deg, steering_trim_deg=0.0

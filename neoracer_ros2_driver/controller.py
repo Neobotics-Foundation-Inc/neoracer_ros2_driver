@@ -10,8 +10,9 @@ IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
   [-1, 1]) from the throttle node and writes the firmware drive command
   ``v <speed_mps> <steer_deg>``,
 - publishes ``/imu/fused`` (sensor_msgs/Imu), ``/odom`` (nav_msgs/Odometry),
-  ``/mag`` (sensor_msgs/MagneticField), and ``/battery``
-  (sensor_msgs/BatteryState) parsed from the board,
+  ``/mag`` (sensor_msgs/MagneticField), and ``/battery/state``
+  (sensor_msgs/BatteryState, the racecar_neo name; ``/battery`` carries the
+  same message for one more release) parsed from the board,
 - publishes ``/joy`` (sensor_msgs/Joy) synthesized from the FlySky RC channels,
   so the same software pipeline (gamepad -> mux -> throttle) and the student
   controller API both work without a USB gamepad, and
@@ -24,6 +25,8 @@ entirely as ROS parameters (see config/controller.yaml) for on-car tuning.
 
 Dependencies: pyserial (``serial``), controller_lib.
 """
+
+import math
 
 # ===== IMPORT ROS2 CORE ======
 import rclpy
@@ -66,6 +69,27 @@ def declare_float_param(node: Node, name: str, default: float) -> float:
             f"parameter '{name}' must be a number, got {value!r}; " f"using the default {default}"
         )
         return float(default)
+
+
+def build_battery_state(volts: float, v_min: float, v_max: float) -> BatteryState:
+    """
+    Build a BatteryState from one pack voltage reading.
+
+    The OSRbot base has no current shunt, so current is NaN (ROS counts
+    discharge as negative; nothing here has a sign to give). percentage is the
+    3S charge fraction between v_min and v_max, which the dashboard shows. The
+    frame arrives at about 0.5 Hz, so there is nothing to average.
+    """
+    msg = BatteryState()
+    msg.voltage = float(volts)
+    msg.current = math.nan
+    msg.charge = msg.capacity = msg.design_capacity = math.nan
+    msg.temperature = math.nan
+    msg.percentage = controller_lib.battery_fraction(volts, v_min, v_max)
+    msg.present = True
+    msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
+    msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+    return msg
 
 
 class ControllerNode(Node):
@@ -126,6 +150,9 @@ class ControllerNode(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
         self.battery_pub = self.create_publisher(BatteryState, '/battery', qos_profile_sensor_data)
+        # /battery/state is the racecar_neo name, which library v0.9.0-bot reads;
+        # /battery carries the same message for one more release for the dashboard.
+        self.battery_state_pub = self.create_publisher(BatteryState, '/battery/state', 10)
         # The scalar racecar_neo sensor topics the student library reads. They
         # carry no information /battery, /odom, and /joy do not already hold;
         # they exist so rc.physics reads the same names on both platforms.
@@ -193,10 +220,9 @@ class ControllerNode(Node):
     _IGNORED_EXACT = frozenset({'link', 'OK', 'ERROR'})
     _IGNORED_PREFIXES = ('FW', 'DIAG', 'LINK')
 
-    # 3S LiPo bounds for the reported charge fraction (matches the vendor
-    # stack's battery_voltage_min/max).
-    _BATTERY_V_MIN = 10.8
-    _BATTERY_V_MAX = 12.6
+    # 3S LiPo bounds for the reported charge fraction.
+    _BATTERY_V_MIN = controller_lib.BATTERY_3S_V_MIN
+    _BATTERY_V_MAX = controller_lib.BATTERY_3S_V_MAX
 
     def read_serial_loop(self):
         """Read incoming serial lines and fan them out to the sensor topics."""
@@ -264,18 +290,12 @@ class ControllerNode(Node):
             self.pub_battery(data)
 
     def pub_battery(self, data):
-        """Publish the pack voltage from the firmware's battery frame."""
-        msg = BatteryState()
+        """Publish the pack voltage from the firmware's battery frame on every battery topic."""
+        msg = build_battery_state(data['voltage'], self._BATTERY_V_MIN, self._BATTERY_V_MAX)
         msg.header.stamp = self.get_clock().now().to_msg()
-        volts = data['voltage']
-        msg.voltage = volts
-        span = self._BATTERY_V_MAX - self._BATTERY_V_MIN
-        msg.percentage = min(1.0, max(0.0, (volts - self._BATTERY_V_MIN) / span))
-        msg.present = True
-        msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
-        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        self.battery_state_pub.publish(msg)
         self.battery_pub.publish(msg)
-        self.voltage_pub.publish(Float32(data=volts))
+        self.voltage_pub.publish(Float32(data=msg.voltage))
 
     def pub_encoder(self, data):
         """Publish forward speed (m/s) from a parsed state or odometry record."""
