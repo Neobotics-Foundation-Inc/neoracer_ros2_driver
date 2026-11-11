@@ -187,6 +187,7 @@ def test_battery_fraction_3s():
 def test_rc_link_up_for_pulse_widths():
     assert cl.rc_link_up(_channels())
     assert cl.rc_link_up(_channels(**{'0': 1000, '1': 2000}))
+    assert cl.rc_link_up(_channels(**{'0': 500, '1': 2500}))  # both band edges inclusive
 
 
 def test_rc_link_down_when_the_transmitter_is_off():
@@ -199,6 +200,8 @@ def test_rc_link_down_on_one_dead_channel():
 
 def test_rc_link_down_on_an_impossible_width():
     assert not cl.rc_link_up(_channels(**{'3': 2600}))
+    assert not cl.rc_link_up(_channels(**{'3': 2501}))
+    assert not cl.rc_link_up(_channels(**{'3': 499}))
 
 
 def test_rc_link_down_with_no_channels():
