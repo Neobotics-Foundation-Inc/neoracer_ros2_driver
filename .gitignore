@@ -46,7 +46,7 @@ COLCON_IGNORE
 .ipynb_checkpoints/
 
 # Local-only configuration overrides
-neoracer_ros2_driver/config/*.local.yaml
+config/*.local.yaml
 
 # Lab dashboards. Each is a repository of its own, cloned here by
 # setup_services.sh and tracking its default branch, so the driver ships the
