@@ -17,7 +17,7 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 | `controller_lib` (neoracer_ros2_driver/controller_lib.py) | pure parsing + FlySky-to-Joy mapping (unit-tested) | - |
 | `gamepad_node` (neoracer_ros2_driver/gamepad_node.py) | `/joy` to `/gamepad_drive` | ackermann_msgs |
 | `mux_node` (neoracer_ros2_driver/mux_node.py) | gate `/gamepad_drive` (manual) or `/drive` (autonomy) to `/mux_out` | - |
-| `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps; `/mux_out` to `/motor` | - |
+| `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps, and the mapping caps while `/autonomy/status` reports mapping; `/mux_out` to `/motor` | - |
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera/color` (JPEG-in-Image) | opencv, numpy |
 | `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
