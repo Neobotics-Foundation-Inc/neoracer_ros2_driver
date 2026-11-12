@@ -10,11 +10,19 @@ import signal
 import sys
 import threading
 import time
+from urllib.parse import urlparse
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import BatteryState
+
+# The shared web assets and the host readings live beside this file. It is run
+# by path, so its folder goes on the path before they are imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import sysinfo  # noqa: E402, I100  sibling script, after the path insert
+import webui  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -461,17 +469,53 @@ def _load_dashboard_html() -> str:
 
 DASHBOARD_HTML = _load_dashboard_html()
 
+# The UI kit page: every shared piece of /ui/ with live host readings. Read on
+# each request, so an edited kit.html shows on the next reload.
+_KIT_PATH = Path(__file__).resolve().parent / 'kit.html'
+_host_poller = sysinfo.HostPoller()
+_host_lock = threading.Lock()
+
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    """Serve GET / (HTML) and GET /api/status (JSON snapshot)."""
+    """Serve / and /kit (HTML), /api/status and /api/host (JSON), and /ui/ (shared files)."""
 
     def do_GET(self):
-        if self.path == '/':
+        asset = webui.static_file(self.path)
+        route = urlparse(self.path).path
+        if asset is not None:
+            self._send(asset[0], asset[1], webui.CACHE_CONTROL)
+        elif route == '/':
             self._serve_html()
-        elif self.path == '/api/status':
+        elif route == '/api/status':
             self._serve_status()
+        elif route == '/kit':
+            self._serve_kit()
+        elif route == '/api/host':
+            self._serve_host()
         else:
             self.send_error(404)
+
+    def _send(self, body, content_type, cache=None):
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        if cache:
+            self.send_header('Cache-Control', cache)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_kit(self):
+        try:
+            body = _KIT_PATH.read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self._send(body, 'text/html; charset=utf-8', 'no-store')
+
+    def _serve_host(self):
+        with _host_lock:
+            data = _host_poller.poll()
+        self._send(json.dumps(data).encode(), 'application/json', 'no-store')
 
     def _serve_html(self):
         content = DASHBOARD_HTML.encode()

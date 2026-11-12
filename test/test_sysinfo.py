@@ -543,3 +543,96 @@ class TestGpu:
 
     def test_no_gpu_is_none(self, tmp_path):
         assert sysinfo.read_gpu(tmp_path) is None
+
+
+class TestCpuLoad:
+    def test_busy_share_between_samples(self):
+        assert sysinfo.cpu_load_pct((100, 1000), (150, 1100)) == 50.0
+
+    def test_first_sample_or_no_change_is_none(self):
+        assert sysinfo.cpu_load_pct(None, (150, 1100)) is None
+        assert sysinfo.cpu_load_pct((150, 1100), (150, 1100)) is None
+
+
+class TestHostPoller:
+    @pytest.fixture
+    def fake_host(self, monkeypatch):
+        calls = {'power_mode': 0, 'ntp': 0}
+        cpu = iter([(100, 1000), (150, 1100), (175, 1200)])
+
+        def power_mode():
+            calls['power_mode'] += 1
+            return ('25W', 1)
+
+        def ntp():
+            calls['ntp'] += 1
+            return True
+
+        monkeypatch.setattr(sysinfo, 'read_power_mode', power_mode)
+        monkeypatch.setattr(sysinfo, 'ntp_synchronized', ntp)
+        monkeypatch.setattr(sysinfo, 'read_cpu_times', lambda: next(cpu))
+        monkeypatch.setattr(sysinfo, 'read_arm_clock', lambda: (1344, 1728))
+        monkeypatch.setattr(sysinfo, 'read_throttled', lambda: (0, []))
+        monkeypatch.setattr(sysinfo, 'read_uptime', lambda: 991.77)
+        monkeypatch.setattr(sysinfo, 'read_soc_temp', lambda: 51.187)
+        monkeypatch.setattr(sysinfo, 'read_thermal_zones', lambda: {'tj-thermal': 51.187})
+        monkeypatch.setattr(
+            sysinfo, 'read_memory', lambda: {'total': 7620, 'available': 4727, 'used': 2893}
+        )
+        monkeypatch.setattr(
+            sysinfo,
+            'read_disk',
+            lambda: {'total': 115, 'used': 25, 'free': 84, 'percent_used': 22},
+        )
+        monkeypatch.setattr(
+            sysinfo, 'read_gpu', lambda: {'load_pct': 0.0, 'cur_mhz': 306.0, 'max_mhz': None}
+        )
+        monkeypatch.setattr(
+            sysinfo, 'read_power_rails', lambda: {'VDD_IN': {'mv': 5072, 'ma': 1320, 'mw': 6695}}
+        )
+        monkeypatch.setattr(sysinfo, 'read_fan', lambda: {'pwm': 41, 'percent': 16, 'rpm': 1641})
+        return calls
+
+    def test_the_snapshot_holds_every_reading(self, fake_host):
+        snap = sysinfo.HostPoller(clock=lambda: 0.0).poll()
+        assert set(snap) == {
+            'soc_temp_c',
+            'temps_c',
+            'cpu',
+            'memory_mib',
+            'disk_gib',
+            'gpu',
+            'power_rails',
+            'fan',
+            'throttle',
+            'uptime_s',
+            'uptime',
+            'power_mode',
+            'ntp_synchronized',
+        }
+        assert snap['cpu'] == {'load_pct': None, 'cur_mhz': 1344, 'max_mhz': 1728}
+        assert snap['power_mode'] == {'name': '25W', 'id': 1}
+        assert snap['throttle'] == {'flags': 0, 'active': []}
+        assert snap['uptime'] == '16m'
+
+    def test_cpu_load_comes_from_the_previous_poll(self, fake_host):
+        poller = sysinfo.HostPoller(clock=lambda: 0.0)
+        poller.poll()
+        assert poller.poll()['cpu']['load_pct'] == 50.0
+        assert poller.poll()['cpu']['load_pct'] == 25.0
+
+    def test_slow_facts_are_read_once_a_minute(self, fake_host):
+        now = [0.0]
+        poller = sysinfo.HostPoller(clock=lambda: now[0])
+        poller.poll()
+        now[0] = 30.0
+        poller.poll()
+        assert fake_host == {'power_mode': 1, 'ntp': 1}
+        now[0] = 61.0
+        poller.poll()
+        assert fake_host == {'power_mode': 2, 'ntp': 2}
+
+    def test_the_snapshot_is_json(self, fake_host):
+        import json
+
+        json.dumps(sysinfo.HostPoller(clock=lambda: 0.0).poll())

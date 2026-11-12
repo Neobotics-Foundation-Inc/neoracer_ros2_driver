@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI kit · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=1">
+<script src="/ui/theme.js?v=1"></script>
+<script src="/ui/charts.js?v=1" defer></script>
+<style>
+  /* This page only: the kit's live readings and one of every shared piece. */
+  .load-chart { height: 220px; }
+  .icons { display: flex; flex-wrap: wrap; gap: 14px; color: var(--nr-ink-2); }
+  .pieces { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" href="/" aria-label="NeoRacer, back to the system page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">UI kit <span class="thin">· live</span></h1>
+  <div class="nr-meta">
+    <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main" id="main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:5"><b id="s-cpu">?</b><span>CPU</span></div>
+      <div class="nr-stat" style="--len:5"><b id="s-gpu">?</b><span>GPU</span></div>
+      <div class="nr-stat" style="--len:6"><b id="s-ram">?</b><span>RAM used</span></div>
+      <div class="nr-stat" style="--len:5"><b id="s-power">?</b><span>Board power</span></div>
+      <div class="nr-stat" style="--len:5"><b id="s-temp">?</b><span>Junction</span></div>
+      <div class="nr-stat" style="--len:5"><b id="s-fan">?</b><span>Fan</span></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-6" aria-labelledby="t-temp">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-temp">Temperature</h2></div>
+    <div class="nr-nodes" id="temps"></div>
+  </section>
+
+  <section class="nr-panel nr-span-6" aria-labelledby="t-power">
+    <div class="nr-head">
+      <h2 class="nr-panel-title" id="t-power">Power</h2>
+      <span class="nr-badge" id="power-mode">Mode ?</span>
+    </div>
+    <div class="nr-nodes" id="rails"></div>
+  </section>
+
+  <section class="nr-panel nr-span-8" aria-labelledby="t-load">
+    <div class="nr-head">
+      <h2 class="nr-panel-title" id="t-load">Load</h2>
+      <div class="nr-legend" id="load-legend"></div>
+    </div>
+    <div class="nr-chart load-chart" id="load-chart"></div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-board">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-board">Board</h2></div>
+    <div class="nr-fields">
+      <div class="nr-field"><div class="name">CPU clock <span class="unit">MHz</span> <b id="f-cpu-clock">?</b></div></div>
+      <div class="nr-field"><div class="name">GPU clock <span class="unit">MHz</span> <b id="f-gpu-clock">?</b></div></div>
+      <div class="nr-field"><div class="name">Fan <span class="unit">percent</span> <b id="f-fan-pct">?</b></div></div>
+      <div class="nr-field"><div class="name">Disk <span class="unit">GiB free</span> <b id="f-disk">?</b></div></div>
+      <div class="nr-field"><div class="name">Uptime <b id="f-uptime">?</b></div></div>
+    </div>
+    <div class="nr-nodes" id="board-status"></div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-nodes">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-nodes">Nodes</h2><span class="nr-note" id="nodes-count"></span></div>
+    <div class="nr-nodes" id="nodes"></div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-pieces">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-pieces">Pieces</h2></div>
+    <div class="pieces">
+      <div class="nr-card">
+        <span class="nr-eyebrow">Status</span>
+        <div class="nr-nodes">
+          <div class="nr-status ok"><div class="top"><span class="name">Running</span><span class="value">30<small>Hz</small></span></div><span class="nr-sr">Running</span></div>
+          <div class="nr-status warn"><div class="top"><span class="name">Check</span></div><span class="nr-word">Not detected</span></div>
+          <div class="nr-status err"><div class="top"><span class="name">Fault</span></div><span class="nr-word">Jetson HOT</span></div>
+          <div class="nr-status off"><div class="top"><span class="name">Off</span></div><span class="nr-sr">Off</span></div>
+        </div>
+      </div>
+      <div class="nr-card">
+        <span class="nr-eyebrow">Buttons</span>
+        <div class="nr-actions">
+          <button class="nr-btn primary" type="button" id="toast-btn">Show toast <span class="k">T</span></button>
+          <button class="nr-btn" type="button">Outline</button>
+          <button class="nr-btn quiet" type="button">Quiet</button>
+          <button class="nr-btn small" type="button">Small</button>
+          <button class="nr-btn danger" type="button">Stop</button>
+          <button class="nr-btn" type="button" disabled>Disabled</button>
+        </div>
+        <div class="nr-actions">
+          <span class="nr-badge">Tag</span><span class="nr-badge ok">Ready</span><span class="nr-badge warn">Check</span>
+          <span class="nr-badge err">Fault</span><span class="nr-badge off">Off</span>
+        </div>
+      </div>
+      <div class="nr-card">
+        <span class="nr-eyebrow">Fields</span>
+        <div class="nr-fields">
+          <label class="nr-field"><span class="name">Speed cap <span class="unit">m/s</span>
+            <button class="nr-info" type="button" aria-label="About the speed cap">i<span class="tip">The fastest the car may drive under this page. A made-up field for the kit.</span></button></span>
+            <span class="nr-stepper"><button type="button" aria-label="Less" data-step="-0.1">-</button><input class="nr-input" type="number" id="cap" value="0.5" step="0.1" min="0" max="6"><button type="button" aria-label="More" data-step="0.1">+</button></span>
+          </label>
+          <label class="nr-field"><span class="name">Gain <b id="gain-v">40</b></span><input type="range" id="gain" min="0" max="100" value="40"></label>
+          <label class="nr-field"><span class="name">Map</span><select class="nr-input"><option>Track A</option><option>Track B</option></select></label>
+          <label class="nr-field"><span class="name">Topic</span><input class="nr-input" type="text" value="/scan"></label>
+        </div>
+        <p class="nr-note caution">Not applied</p>
+      </div>
+      <div class="nr-card">
+        <span class="nr-eyebrow">Icons</span>
+        <div class="icons" id="icons"></div>
+      </div>
+    </div>
+  </section>
+</main>
+<div id="nr-toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+  const POLL_MS = 2000;
+  const MISSES = 2;                     // missed polls before the page says it lost the car
+  const HISTORY_S = 120;                // the load chart's window
+  const TEMP_OK_C = 70, TEMP_HOT_C = 85; // the system page's limits
+  const ICONS = ['gauge', 'bolt', 'clock', 'battery', 'board', 'radar', 'camera', 'map', 'gamepad', 'terminal', 'check', 'alert'];
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const num = (v, d = 0) => (v === null || v === undefined ? '?' : Number(v).toFixed(d));
+  const history = { cpu: [], gpu: [] };
+  let misses = 0;
+
+  // One box in the one grammar: its name, its value top right, a word only for a problem.
+  function box(state, name, value, unit, word, title) {
+    const sr = { ok: 'Running', warn: 'Check', err: 'Fault', off: 'Off' }[state];
+    return `<div class="nr-status ${state}"${title ? ` title="${esc(title)}"` : ''}>
+      <div class="top"><span class="name">${esc(name)}</span>${value === null ? '' : `<span class="value">${esc(value)}${unit ? `<small>${esc(unit)}</small>` : ''}</span>`}</div>
+      ${word ? `<span class="nr-word">${esc(word)}</span>` : ''}<span class="nr-sr">${sr}${word ? `: ${esc(word)}` : ''}</span></div>`;
+  }
+
+  function tempState(c) {
+    if (c === null || c === undefined) return ['warn', 'No reading'];
+    if (c < TEMP_OK_C) return ['ok', ''];
+    if (c < TEMP_HOT_C) return ['warn', 'Warm'];
+    return ['err', 'HOT'];
+  }
+
+  function renderHost(h) {
+    const ram = h.memory_mib, rails = h.power_rails || {}, fan = h.fan || {}, gpu = h.gpu || {};
+    $('s-cpu').innerHTML = h.cpu.load_pct === null ? '?' : `${num(h.cpu.load_pct)}<small>%</small>`;
+    $('s-gpu').innerHTML = gpu.load_pct === null || gpu.load_pct === undefined ? '?' : `${num(gpu.load_pct)}<small>%</small>`;
+    $('s-ram').innerHTML = ram ? `${num(ram.used / 1024, 1)}<small>GB</small>` : '?';
+    $('s-power').innerHTML = rails.VDD_IN ? `${num(rails.VDD_IN.mw / 1000, 1)}<small>W</small>` : '?';
+    $('s-temp').innerHTML = h.soc_temp_c === null ? '?' : `${num(h.soc_temp_c)}<small>°C</small>`;
+    $('s-fan').innerHTML = fan.rpm === null || fan.rpm === undefined ? '?' : `${num(fan.rpm)}<small>rpm</small>`;
+
+    $('temps').innerHTML = Object.entries(h.temps_c || {}).map(([zone, c]) => {
+      const [state, word] = tempState(c);
+      return box(state, zone.replace('-thermal', ''), num(c, 1), '°C', word, zone);
+    }).join('') || box('warn', 'Zones', null, '', 'No reading');
+
+    $('rails').innerHTML = Object.entries(rails).map(([label, r]) =>
+      box('ok', label.replace('VDD_', ''), num(r.mw / 1000, 2), 'W', '', `${label}: ${r.mv} mV, ${r.ma} mA`)).join('')
+      || box('warn', 'Power monitor', null, '', 'Not detected');
+    const pm = h.power_mode || {};
+    $('power-mode').textContent = pm.name ? `Mode ${pm.name}` : 'Mode ?';
+    const th = h.throttle || {};
+    $('rails').insertAdjacentHTML('beforeend', th.flags === null || th.flags === undefined
+      ? box('warn', 'Throttling', null, '', 'No reading')
+      : th.flags ? box('warn', 'Throttling', null, '', 'Has occurred', th.active.join('\n')) : box('ok', 'Throttling', null, '', ''));
+
+    $('f-cpu-clock').textContent = h.cpu.cur_mhz === null ? '?' : `${h.cpu.cur_mhz} / ${h.cpu.max_mhz}`;
+    $('f-gpu-clock').textContent = gpu.cur_mhz ? `${num(gpu.cur_mhz)}${gpu.max_mhz ? ` / ${num(gpu.max_mhz)}` : ''}` : '?';
+    $('f-fan-pct').textContent = num(fan.percent);
+    $('f-disk').textContent = h.disk_gib ? `${h.disk_gib.free} of ${h.disk_gib.total}` : '?';
+    $('f-uptime').textContent = h.uptime || '?';
+    $('board-status').innerHTML =
+      (h.ntp_synchronized ? box('ok', 'Clock', null, '', '') : box('warn', 'Clock', null, '', 'Not synced'))
+      + (fan.rpm ? box('ok', 'Fan', num(fan.rpm), 'rpm', '') : box('warn', 'Fan', null, '', 'No reading'));
+
+    const now = Date.now() / 1000;
+    if (h.cpu.load_pct !== null) history.cpu.push([now, h.cpu.load_pct]);
+    if (gpu.load_pct !== null && gpu.load_pct !== undefined) history.gpu.push([now, gpu.load_pct]);
+    for (const k of Object.keys(history)) history[k] = history[k].filter((p) => p[0] >= now - HISTORY_S);
+    drawLoad(now);
+  }
+
+  function drawLoad(now) {
+    if (!window.NrCharts) return;
+    const series = [
+      { name: 'CPU', style: 'a', axis: 'l', unit: '%', digits: 0, pts: history.cpu },
+      { name: 'GPU', style: 'b', axis: 'l', unit: '%', digits: 0, pts: history.gpu },
+    ];
+    $('load-legend').innerHTML = NrCharts.legendHtml(series);
+    NrCharts.timeChart($('load-chart'), now - HISTORY_S, now, series, NrCharts.recentTicks(now, 30),
+      { gapSec: 5, fixed: { l: [0, 100] } });
+  }
+
+  function renderNodes(s) {
+    const nodes = Object.values(s.nodes || {}), rates = s.rates || {};
+    const words = { stale: 'No data', dead: 'Not detected', unsupervised: 'Not detected' };
+    const state = { healthy: 'ok', off: 'off' };
+    $('nodes').innerHTML = nodes.map((n) => {
+      const hz = rates[n.topic] && rates[n.topic].hz;
+      return box(state[n.status] || 'warn', n.label, hz ? num(hz, hz < 10 ? 1 : 0) : null, hz ? 'Hz' : '',
+        words[n.status] || '', n.topic);
+    }).join('');
+    const up = nodes.filter((n) => n.status === 'healthy').length;
+    $('nodes-count').textContent = nodes.length ? `${up} of ${nodes.length} running` : '';
+  }
+
+  async function get(url) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), POLL_MS - 200);
+    try {
+      const r = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+      if (!r.ok) throw new Error(r.status);
+      return await r.json();
+    } finally { clearTimeout(timer); }
+  }
+
+  async function poll() {
+    const live = $('live');
+    try {
+      const [host, status] = await Promise.all([get('/api/host'), get('/api/status').catch(() => null)]);
+      renderHost(host);
+      if (status) renderNodes(status);
+      misses = 0;
+      live.className = 'nr-live beat'; live.querySelector('span').textContent = 'Live';
+      $('main').classList.remove('nr-lost-data');
+      requestAnimationFrame(() => setTimeout(() => { live.className = 'nr-live'; }, 120));
+    } catch (err) {
+      if (++misses >= MISSES) {
+        live.className = 'nr-live lost'; live.querySelector('span').textContent = 'No answer';
+        $('main').classList.add('nr-lost-data');
+      }
+    }
+  }
+
+  // The pieces: icons, the toast, the stepper, the slider.
+  $('icons').innerHTML = ICONS.map((id) =>
+    `<svg class="nr-icon" role="img" aria-label="${id}"><use href="/ui/icons.svg?v=1#${id}"></use></svg>`).join('');
+  let toastTimer;
+  function toast(text) {
+    const t = $('nr-toast'); t.textContent = text; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+  $('toast-btn').addEventListener('click', () => toast('Saved to the car profile'));
+  document.addEventListener('keydown', (e) => { if (e.key === 't' && !e.target.closest('input, select')) toast('Saved to the car profile'); });
+  for (const b of document.querySelectorAll('[data-step]')) {
+    b.addEventListener('click', () => {
+      const cap = $('cap');
+      cap.value = Math.min(6, Math.max(0, Number(cap.value) + Number(b.dataset.step))).toFixed(1);
+    });
+  }
+  const gain = $('gain');
+  const showGain = () => { gain.style.setProperty('--v', `${gain.value}%`); $('gain-v').textContent = gain.value; };
+  gain.addEventListener('input', showGain); showGain();
+  for (const info of document.querySelectorAll('.nr-info')) {
+    info.addEventListener('click', (e) => { e.preventDefault(); info.classList.toggle('open'); });
+  }
+  window.addEventListener('resize', () => drawLoad(Date.now() / 1000));
+
+  poll();
+  setInterval(poll, POLL_MS);
+})();
+</script>
+</body>
+</html>
