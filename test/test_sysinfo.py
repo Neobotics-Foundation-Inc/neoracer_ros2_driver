@@ -72,7 +72,7 @@ def fake_run(monkeypatch):
 
 @pytest.fixture
 def car_thermal(tmp_path):
-    """A /sys/class/thermal tree with the car's zones; failing zones have no temp file."""
+    """Build a /sys/class/thermal tree with the car's zones; failing zones have no temp file."""
     for i, (kind, temp) in enumerate(CAR_THERMAL_ZONES):
         zone = tmp_path / f'thermal_zone{i}'
         zone.mkdir()
@@ -95,8 +95,9 @@ def _hwmon_tree(root, oc_counts=None):
 
 
 class TestDecodeThrottled:
-    # The car's counters were not read; these counts are made up in the
-    # format `grep . /sys/class/hwmon/hwmon4/oc*_event_cnt` prints.
+    # On the dev car on 2026-11-12 all three counters read 0 (test_clean and
+    # test_read_throttled_on_the_cars_counters). The non-zero counts are made
+    # up, in the format `grep . /sys/class/hwmon/hwmon4/oc*_event_cnt` prints.
     def test_counts_that_fired_set_their_bits(self):
         flags, active = sysinfo.decode_throttled(
             'oc1_event_cnt:0\noc2_event_cnt:3\noc3_event_cnt:0'
@@ -129,6 +130,10 @@ class TestDecodeThrottled:
         flags, active = sysinfo.read_throttled(root)
         assert flags == 0b100
         assert active == ['over-current throttling oc3 has occurred (4 events)']
+
+    def test_read_throttled_on_the_cars_counters(self, tmp_path):
+        root = _hwmon_tree(tmp_path, {1: 0, 2: 0, 3: 0})
+        assert sysinfo.read_throttled(root) == (0, [])
 
     def test_read_throttled_without_soctherm_oc(self, tmp_path):
         (tmp_path / 'hwmon0').mkdir()
