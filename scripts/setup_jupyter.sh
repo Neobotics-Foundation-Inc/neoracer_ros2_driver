@@ -105,7 +105,7 @@ fi
 if [ -r /run/racecar/data_root ]; then
     DATA_ROOT="$(cat /run/racecar/data_root)"
 else
-    DATA_ROOT="$USER_HOME/racecar_data"
+    DATA_ROOT="$USER_HOME/neoracer_data"
 fi
 MAP_ROOT="$DATA_ROOT/maps"
 mkdir -p "$MAP_ROOT"

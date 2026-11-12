@@ -1,5 +1,5 @@
 [Unit]
-Description=Neoracer data root (~/racecar_data), worked out once per boot
+Description=Neoracer data root (~/neoracer_data), worked out once per boot
 After=local-fs.target
 Before=neoracer-teleop.service neoracer-dashboard.service neoracer-jupyter.service neoracer-watchdog.service neoracer-autonomy.service
 
