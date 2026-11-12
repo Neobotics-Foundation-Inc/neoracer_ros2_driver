@@ -187,13 +187,42 @@ def _frame(encoding, data, height=480, width=640, step=0):
     return SimpleNamespace(encoding=encoding, data=data, height=height, width=width, step=step)
 
 
-def test_a_jpeg_frame_is_served_as_the_camera_sent_it(ov):
+def _camera_jpeg(cv2, height=480, width=640):
+    """Encode a test pattern the size of the NeoRacer camera's frames."""
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    img[:, :, 1] = np.linspace(0, 255, width, dtype=np.uint8)
+    img[::8, :, 2] = 255
+    return cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes()
+
+
+def test_a_jpeg_frame_is_served_as_a_preview(ov):
+    cv2 = pytest.importorskip('cv2')
+    frame = _camera_jpeg(cv2)
     node = FakeNode()
     feed = ov.Overview(node, deserialize=lambda data, cls: _frame('jpeg', data), config_dir=None)
     assert feed.jpeg('color') is None
     feed.touch_cameras()
-    _cb(node, '/camera/color')(JPEG)
-    assert feed.jpeg('color') == JPEG
+    _cb(node, '/camera/color')(frame)
+    out = feed.jpeg('color')
+    assert out[:2] == b'\xff\xd8' and len(out) < len(frame)
+    img = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR)
+    assert img.shape[:2] == (240, ov.PREVIEW_WIDTH)
+
+
+def test_a_small_jpeg_is_not_scaled_up(ov):
+    cv2 = pytest.importorskip('cv2')
+    out = ov.preview_jpeg(_camera_jpeg(cv2, height=120, width=160))
+    assert cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR).shape[:2] == (120, 160)
+
+
+def test_a_jpeg_that_cannot_be_read_is_not_served(ov):
+    pytest.importorskip('cv2')
+    assert ov.preview_jpeg(JPEG) is None
+
+
+def test_without_opencv_the_jpeg_goes_as_it_arrived(ov, monkeypatch):
+    monkeypatch.setitem(sys.modules, 'cv2', None)
+    assert ov.preview_jpeg(JPEG) == JPEG
 
 
 def test_a_stopped_camera_is_not_served_its_last_frame(ov):
@@ -360,6 +389,7 @@ def test_frame_route_serves_the_camera_jpeg(dash, ov, server, monkeypatch):
     node = FakeNode()
     feed = ov.Overview(node, deserialize=lambda data, cls: _frame('jpeg', data), config_dir=None)
     monkeypatch.setattr(dash, '_overview', feed)
+    monkeypatch.setattr(ov, 'preview_jpeg', lambda data: data)
     assert _get(server + '/api/overview/color.jpg')[0] == 404
     _cb(node, '/camera/color')(JPEG)
     assert _get(server + '/api/overview/color.jpg?t=1') == (200, 'image/jpeg', JPEG)

@@ -9,9 +9,11 @@ decoding happens when the page asks, at the page's rate rather than the
 sensor's.
 
 The NeoRacer's camera node publishes the camera's own MJPG frames on
-/camera/color (encoding 'jpeg'), so a frame goes to the page as it arrived,
-with no decode and no re-encode. The car has no depth camera, so upstream's
-depth preview is not here.
+/camera/color (encoding 'jpeg'). The page gets upstream's preview instead of
+the full frame: about 8 KB at PREVIEW_WIDTH against about 69 KB at 640 x 480,
+because a phone on weak WiFi shows the page. OpenCV loads the first time a
+frame is asked for. The car has no depth camera, so upstream's depth preview
+is not here.
 
 History keeps the battery voltage, the junction temperature and the memory in
 use for one battery's run, for the page's history charts.
@@ -36,7 +38,7 @@ FRAME_STALE_SEC = 1.0
 CAMERAS = ('color',)
 GRAPH_SEC = 30.0
 GRAPH_HZ = 10.0
-# A raw (not JPEG) frame is scaled to this width and encoded for the page.
+# Every camera frame is scaled to this width and encoded for the page.
 PREVIEW_WIDTH = 320
 JPEG_QUALITY = 60
 SCAN_MAX_M = 8.0
@@ -126,6 +128,35 @@ def footprint_from_config(config_dir: Path | None) -> dict[str, float] | None:
     if f is None or any(k not in f for k in FOOTPRINT_KEYS.values()):
         return None
     return {side: round(f[k] / 1000.0, 3) for side, k in FOOTPRINT_KEYS.items()}
+
+
+def preview_jpeg(data: bytes) -> bytes | None:
+    """
+    Return a camera JPEG scaled down to PREVIEW_WIDTH, or None if it cannot be read.
+
+    libjpeg decodes at half size (IMREAD_REDUCED_COLOR_2), which costs less
+    than a full decode; a frame too small for that is decoded at full size.
+    Without OpenCV the frame is returned as it arrived.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return data
+    buf = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(buf, cv2.IMREAD_REDUCED_COLOR_2)
+    if img is not None and img.shape[1] < PREVIEW_WIDTH:
+        img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    if img is None:
+        return None
+    if img.shape[1] > PREVIEW_WIDTH:
+        scale = PREVIEW_WIDTH / img.shape[1]
+        img = cv2.resize(
+            img,
+            (PREVIEW_WIDTH, max(1, int(img.shape[0] * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    ok, out = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    return out.tobytes() if ok else None
 
 
 class History:
@@ -345,8 +376,8 @@ class Overview:
         """
         Return a JPEG of the latest frame from camera `name`; cached for max_age s.
 
-        A JPEG frame, which is what the NeoRacer's camera node publishes, is
-        returned as it arrived. A raw frame (rgb8, bgr8, mono8) is scaled to
+        A JPEG frame, which is what the NeoRacer's camera node publishes, goes
+        through preview_jpeg. A raw frame (rgb8, bgr8, mono8) is scaled to
         PREVIEW_WIDTH and encoded, as upstream does.
         """
         with self._lock:
@@ -361,6 +392,10 @@ class Overview:
             data = bytes(msg.data)
             if data[:2] != b'\xff\xd8':
                 return None
+            preview = preview_jpeg(data)
+            if preview is None:
+                return None
+            data = preview
         else:
             img = image_array(msg)
             if img is None:
