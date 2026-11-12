@@ -4,13 +4,13 @@
 # test / source subcommands can mutate the current shell (PWD, env).
 
 # Where the car's data goes (neoracer_ros2_driver/data_root.py). Login shells
-# get it from /etc/profile.d/racecar-data.sh; this covers a shell that read
+# get it from /etc/profile.d/neoracer-data.sh; this covers a shell that read
 # only .bashrc, such as a terminal inside JupyterLab.
 if [ -z "${RACECAR_DATA_DIR:-}" ]; then
     if [ -r /run/racecar/data_root ]; then
         RACECAR_DATA_DIR="$(cat /run/racecar/data_root)"
     else
-        RACECAR_DATA_DIR="$HOME/racecar_data"
+        RACECAR_DATA_DIR="$HOME/neoracer_data"
     fi
     export RACECAR_DATA_DIR
 fi
@@ -1037,7 +1037,7 @@ Commands:
                                         tuning out of the driver folder
                           export FILE   write the profile to FILE (.tar.gz)
                           import FILE   read a profile written by export
-    data                Where the car's data goes (the data root): ~/racecar_data,
+    data                Where the car's data goes (the data root): ~/neoracer_data,
                         outside the folders the installer removes. Programs
                         read it from $RACECAR_DATA_DIR.
     source              Source the workspace overlay into the current shell.
