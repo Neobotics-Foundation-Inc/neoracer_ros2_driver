@@ -12,7 +12,6 @@ from neoracer_ros2_driver.launch_common import local_overrides, single_node_laun
 # Every per-node launch file ships one config YAML and exposes it as one argument.
 SINGLE_NODE_LAUNCHES = (
     'camera',
-    'controller',
     'gamepad',
     'inference',
     'led_matrix',
@@ -88,7 +87,7 @@ class TestSingleNodeLaunch:
 
 
 class TestShippedLaunchFiles:
-    """Each per-node launch file exposes exactly its own config argument."""
+    """Each per-node launch file exposes its own config argument; the controller adds odom."""
 
     @staticmethod
     def _load(name):
@@ -103,3 +102,6 @@ class TestShippedLaunchFiles:
     @pytest.mark.parametrize('name', SINGLE_NODE_LAUNCHES)
     def test_one_config_arg_each(self, share, name):
         assert _args(self._load(name)) == [f'{name}_config']
+
+    def test_controller_args(self, share):
+        assert _args(self._load('controller')) == ['controller_config', 'odom_config']
