@@ -5,14 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>System Health · NeoRacer</title>
 <link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/ui/neoracer.css?v=1">
-<script src="/ui/theme.js?v=1"></script>
-<script src="/ui/charts.js?v=1" defer></script>
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/charts.js?v=2" defer></script>
 <style>
-  /* This page only: the kit's live readings and one of every shared piece. */
+  /* This page only: the load chart's height. */
   .load-chart { height: 220px; }
-  .icons { display: flex; flex-wrap: wrap; gap: 14px; color: var(--nr-ink-2); }
-  .pieces { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 </style>
 </head>
 <body>
@@ -135,9 +133,9 @@
       return box(state, zone.replace('-thermal', ''), num(c, 1), '°C', word, zone);
     }).join('') || box('warn', 'Zones', null, '', 'No reading');
 
-    $('rails').innerHTML = batteryBox(batt) + Object.entries(rails).map(([label, r]) =>
+    $('rails').innerHTML = batteryBox(batt) + (Object.entries(rails).map(([label, r]) =>
       box('ok', label.replace('VDD_', ''), num(r.mw / 1000, 2), 'W', '', `${label}: ${r.mv} mV, ${r.ma} mA`)).join('')
-      || box('warn', 'Power monitor', null, '', 'Not detected');
+      || box('warn', 'Power monitor', null, '', 'Not detected'));
     const pm = h.power_mode || {};
     $('power-mode').textContent = pm.name ? `Mode ${pm.name}` : 'Mode ?';
     const th = h.throttle || {};
