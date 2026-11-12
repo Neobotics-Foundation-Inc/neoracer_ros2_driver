@@ -54,9 +54,9 @@ def generate_launch_description():
     )
 
     # TF: the static tree comes from teleop (launch/frames.launch.py), rooted
-    # at base_link. The vendor description is not included: its URDF would
-    # give laser and base_footprint a second parent, and its odom-topic
-    # broadcaster would duplicate the EKF's odom transform.
+    # at base_link. The vendor description is not included: its URDF roots at
+    # base_footprint, so with base_link -> base_footprint the two would form a
+    # loop, and laser, imu_link and camera_link would get a second transform.
 
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
