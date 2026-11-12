@@ -16,15 +16,13 @@ from typing import Any
 
 from neoracer_ros2_driver.limits import clamp
 
-# The ESP32 reports the receiver's SBUS channels as raw counts, not pulse
-# widths. Sticks and switches span about 240 to 1810 (the firmware's SBUS_MIN
-# and SBUS_MAX), and the firmware writes -1 to every channel while the
-# receiver reports failsafe or a lost frame. A reading below this is that
-# no-signal value and maps to neutral, never full scale.
-RC_FAILSAFE_BELOW = 0
-# The largest count an 11-bit SBUS channel carries; with RC_FAILSAFE_BELOW it
-# bounds what a live link reports.
-RC_COUNT_MAX = 2047
+# A raw RC channel reading below this is treated as "no signal" (failsafe).
+# The firmware reports -1 on every channel when the FlySky transmitter is off,
+# so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
+RC_FAILSAFE_BELOW = 500
+# A raw reading above this is not a pulse width the receiver produces; with
+# RC_FAILSAFE_BELOW it bounds what a live link reports (FlySky 1000 to 2000 us).
+RC_PULSE_MAX_US = 2500
 
 # 3S LiPo bounds for the charge fraction in /battery/state (the vendor stack's
 # battery_voltage_min/max).
@@ -172,7 +170,7 @@ def quaternion_from_euler(roll, pitch, yaw):
 
 def normalize_channel(raw, rc_min, rc_center, rc_max, deadband, failsafe_below=RC_FAILSAFE_BELOW):
     """
-    Map a raw RC channel count to ``[-1.0, 1.0]`` about its center.
+    Map a raw RC pulse width to ``[-1.0, 1.0]`` about its center.
 
     A reading below ``failsafe_below`` (e.g. the firmware's ``-1`` no-signal
     sentinel) returns ``0.0`` so a powered-off transmitter never commands full
@@ -198,17 +196,16 @@ def _set_button(buttons, idx, value=1):
         buttons[idx] = value
 
 
-def rc_link_up(channels, failsafe_below=RC_FAILSAFE_BELOW, count_max=RC_COUNT_MAX):
+def rc_link_up(channels, failsafe_below=RC_FAILSAFE_BELOW, pulse_max=RC_PULSE_MAX_US):
     """
-    Report whether the transmitter link is up: every raw channel is an SBUS count.
+    Report whether the transmitter link is up: every raw channel is a pulse width.
 
-    The firmware writes -1 to every channel while the receiver reports
-    failsafe or a lost frame. Use this, not the normalized channels, for
-    transmitter presence: the failsafe mapping turns a dead channel and a
-    centred stick into the same neutral value. One frame's verdict; freshness
-    belongs to the consumer.
+    The firmware reports -1 on every channel when the receiver has no signal.
+    Use this, not the normalized channels, for transmitter presence: the
+    failsafe mapping turns a dead channel and a stick held low into the same
+    neutral value. One frame's verdict; freshness belongs to the consumer.
     """
-    return bool(channels) and all(failsafe_below <= c <= count_max for c in channels)
+    return bool(channels) and all(failsafe_below <= c <= pulse_max for c in channels)
 
 
 def rc_to_channels(channels, cfg):

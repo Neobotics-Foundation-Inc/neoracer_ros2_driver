@@ -192,11 +192,11 @@ class ControllerNode(Node):
         """Declare the FlySky->Joy mapping parameters and return them as a dict."""
         p = self.declare_parameter
         cfg = {
-            'rc_min': p('rc_min', 240).value,
-            'rc_center': p('rc_center', 1025).value,
-            'rc_max': p('rc_max', 1810).value,
+            'rc_min': p('rc_min', 1000).value,
+            'rc_center': p('rc_center', 1500).value,
+            'rc_max': p('rc_max', 2000).value,
             'rc_deadband': p('rc_deadband', 0.05).value,
-            'rc_failsafe_below': p('rc_failsafe_below', 0).value,
+            'rc_failsafe_below': p('rc_failsafe_below', 500).value,
             'num_axes': p('joy_num_axes', 6).value,
             'num_buttons': p('joy_num_buttons', 11).value,
             'trigger_axes': list(p('joy_trigger_axes', [2, 5]).value),
