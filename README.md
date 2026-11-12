@@ -56,7 +56,7 @@ student library ──/dotmatrix/text──> led_matrix ──(USB-UART)──> 
 
 Published topics:
 
-- `/imu/fused` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery`: from the ESP32 V1.1 firmware state frame
+- `/imu/fused` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery/state` (and `/battery`, the same message, for one more release): from the ESP32 V1.1 firmware state frame
 - `/joy` (sensor_msgs/Joy): synthesized from FlySky RC channels
 - `/mag` (sensor_msgs/MagneticField): ESP32 magnetometer, Gauss converted to Tesla
 - `/encoder/speed`, `/battery/voltage` (std_msgs/Float32), `/rc/channels` (std_msgs/Float32MultiArray): the scalar racecar_neo sensor topics the student library's `rc.physics` reads. Same data as `/odom`, `/battery`, and `/joy`, under the names the reference platform publishes
