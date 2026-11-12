@@ -99,6 +99,25 @@ EOF
     echo "Created $JUPYTER_WS"
 fi
 
+# The data root (neoracer_ros2_driver/data_root.py) and its saved maps, linked
+# into the JupyterLab file browser, which is rooted at ~/jupyter_ws. The links
+# are made here because neoracer-installer removes ~/jupyter_ws.
+if [ -r /run/racecar/data_root ]; then
+    DATA_ROOT="$(cat /run/racecar/data_root)"
+else
+    DATA_ROOT="$USER_HOME/neoracer_data"
+fi
+MAP_ROOT="$DATA_ROOT/maps"
+mkdir -p "$MAP_ROOT"
+for link in data maps; do
+    target="$DATA_ROOT"
+    [ "$link" = maps ] && target="$MAP_ROOT"
+    if [ -L "$JUPYTER_WS/$link" ] || [ ! -e "$JUPYTER_WS/$link" ]; then
+        ln -sfn "$target" "$JUPYTER_WS/$link"
+        echo "Linked $JUPYTER_WS/$link -> $target"
+    fi
+done
+
 # ---------------------------------------------------------------------------
 # Student library + labs.
 # ---------------------------------------------------------------------------

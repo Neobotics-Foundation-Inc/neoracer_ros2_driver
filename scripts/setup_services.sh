@@ -4,6 +4,7 @@
 # Two groups, installed the same way but left in different states.
 #
 # Core stack, dropped in /etc/systemd/system/ and enabled at boot:
+#   neoracer-data.service      - oneshot: the data root, ~/neoracer_data
 #   neoracer-teleop.service    - full stack via launch_teleop.sh
 #   neoracer-watchdog.service  - BindsTo=teleop, restart-on-failure supervisor
 #   neoracer-dashboard.service - web status page (port 8080)
@@ -36,6 +37,7 @@ DASHBOARDS_DIR="$SCRIPT_DIR/dashboards"
 GITHUB_ORG=https://github.com/Neobotics-Foundation-Inc
 
 SERVICES=(
+    neoracer-data.service
     neoracer-teleop.service
     neoracer-watchdog.service
     neoracer-dashboard.service
@@ -161,6 +163,16 @@ if [[ $dash_failed -eq 1 ]]; then
     echo
     echo "One or more dashboards did not install. The core stack is unaffected;"
     echo "re-run 'racecar service install' once the car has internet."
+fi
+
+# RACECAR_DATA_DIR for login shells (SSH) from the path neoracer-data.service writes.
+PROFILE_SRC="${SCRIPT_DIR}/profile.d-neoracer-data.sh"
+PROFILE_DST="/etc/profile.d/neoracer-data.sh"
+if cmp -s "$PROFILE_SRC" "$PROFILE_DST" 2>/dev/null; then
+    echo "  $PROFILE_DST: already up to date"
+else
+    sudo install -m 0644 "$PROFILE_SRC" "$PROFILE_DST"
+    echo "  $PROFILE_DST: installed/updated"
 fi
 
 echo

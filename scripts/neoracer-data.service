@@ -1,0 +1,18 @@
+[Unit]
+Description=Neoracer data root (~/neoracer_data), worked out once per boot
+After=local-fs.target
+Before=neoracer-teleop.service neoracer-dashboard.service neoracer-jupyter.service neoracer-watchdog.service neoracer-autonomy.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=racecar
+Group=racecar
+Environment=HOME=/home/racecar
+# /run/racecar holds data_root and environment until the next boot.
+RuntimeDirectory=racecar
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 /home/racecar/ros2_ws/src/neoracer_ros2_driver/neoracer_ros2_driver/data_root.py write
+
+[Install]
+WantedBy=multi-user.target

@@ -56,14 +56,16 @@ def _data_root_session(tmp_path_factory):
     Point the data root at a temporary folder for the whole session.
 
     Session scope runs before module fixtures that import scripts, which read
-    the data root into module constants (LOG_DIR, DATASET). The data_root
-    module arrives with the data root port; until then this fixture only sets
-    the environment variable.
+    the data root into module constants (LOG_DIR, DATASET).
     """
+    from neoracer_ros2_driver import data_root
+
     path = tmp_path_factory.mktemp('data_root')
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv('RACECAR_DATA_DIR', str(path))
+        data_root.reset()
         yield path
+    data_root.reset()
 
 
 @pytest.fixture
