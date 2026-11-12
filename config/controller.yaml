@@ -24,7 +24,8 @@ controller_node:
     # reads REP-103 with the identity (2026-11-12, docs/esp32_protocol.md):
     # level accel z +10.0, nose down accel x -4.5, left side down accel y
     # -4.9, a left turn gyro z positive. A board mounted another way is fixed
-    # in the car profile, params/controller.yaml, with no code change. An
+    # in the car profile, params/controller.yaml, with no code change; the
+    # firmware's /odom yaw stays in the board's own axes. An
     # accel/gyro remap other than the identity marks the firmware's
     # orientation unknown, since the firmware fuses it in the board's axes.
     imu.accel_gyro_axis_order: [0, 1, 2]
