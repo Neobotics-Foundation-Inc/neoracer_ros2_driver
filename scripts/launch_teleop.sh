@@ -52,6 +52,10 @@ for el in /dev/shm/fastrtps_port*_el; do
     fi
 done
 
+# Launch arguments, one per line, so the watchdog leaves subsystems disabled
+# at launch (<name>_enable:=false) alone.
+printf '%s\n' "$@" > "$LOG_DIR/launch_args"
+
 # ROS2's internal logs (rosout, launch.log) land in the same dir as our tee.
 export ROS_LOG_DIR="$LOG_DIR"
 export ROS_HOME="$LOG_DIR"
