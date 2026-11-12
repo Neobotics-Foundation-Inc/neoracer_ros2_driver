@@ -44,6 +44,30 @@ clamp(steering_angle,-1,1) * max_steering_angle_deg + steering_trim_deg`. The
 ESP32 firmware fails over to direct RC control on its own serial timeout, so when
 the ROS pipeline stops streaming `v` commands the car reverts to the transmitter.
 
+## IMU axes
+
+`/imu/fused` and `/mag` are published in REP-103 body axes: x forward, y left,
+z up. The controller applies `out[i] = sign[i] * in[order[i]]` to the
+firmware's accel, gyro and magnetometer values, with the
+`imu.accel_gyro_axis_order` / `_sign` and `imu.mag_axis_order` / `_sign`
+parameters in `config/controller.yaml`. The shipped values are the identity:
+the firmware's axes are already REP-103 on the NeoRacer. Read on the dev car
+on 2026-11-12, `/imu/fused`:
+
+| Pose | accel x | accel y | accel z | Expected |
+|---|---|---|---|---|
+| Level, still | -0.03 | -0.06 | +10.00 | z up, about +9.81 |
+| Nose down, about 27 deg | -4.50 | -0.01 | +8.97 | x negative |
+| Left side down | -0.84 | -4.92 | +8.36 | y negative |
+| Turning left, seen from above | | | gyro z up to +0.45 rad/s | gyro z positive |
+
+Gravity reads 9.7 to 10.0 m/s^2 across these poses, about 2 percent above
+9.81 when level; no accelerometer scale is applied. The magnetometer's axes
+have not been checked yet. A board mounted another way is fixed in the car
+profile with no code change. A non-identity accel/gyro remap marks the
+firmware's orientation unknown (`orientation_covariance[0] = -1`), because the
+firmware fuses it in the board's own axes.
+
 ## FlySky RC -> `/joy` mapping
 
 The 10 `r` channels are converted to a Joy message that satisfies three

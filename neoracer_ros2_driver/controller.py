@@ -113,11 +113,25 @@ class ControllerNode(Node):
         # Frames.
         self.imu_frame = self.declare_parameter('imu_frame', 'imu_link').value
         self.odom_frame = self.declare_parameter('odom_frame', 'odom').value
-        self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
-        # Broadcast odom -> base_footprint alongside /odom. SLAM and Nav2
+        self.base_frame = self.declare_parameter('base_frame', 'base_link').value
+        # Broadcast odom -> base_link alongside /odom. SLAM and Nav2
         # need the transform, and this node is the single odometry source
         # (the vendor chassis node broadcast it the same way).
         self.publish_tf = self.declare_parameter('publish_tf', True).value
+
+        # IMU axes: /imu/fused and /mag are REP-103 body axes (x forward, y
+        # left, z up). out[i] = sign[i] * in[order[i]] on the firmware's
+        # values; identity on the NeoRacer, see config/controller.yaml.
+        self._ag_order, self._ag_sign = self._declare_axis_remap('imu.accel_gyro_axis')
+        self._mag_order, self._mag_sign = self._declare_axis_remap('imu.mag_axis')
+        # The firmware fuses its orientation in the board's own axes, so a
+        # remap that moves them leaves that orientation in the wrong frame.
+        self._orientation_valid = controller_lib.is_identity_remap(self._ag_order, self._ag_sign)
+        if not self._orientation_valid:
+            self.get_logger().warn(
+                'imu.accel_gyro_axis remap is not the identity; /imu/fused marks the '
+                "firmware's orientation unknown (orientation_covariance[0] = -1)"
+            )
 
         # /mag feeds rc.physics.get_magnetic_field(); off only on a car
         # whose firmware does not emit the `m` frame.
@@ -187,6 +201,23 @@ class ControllerNode(Node):
         self.read_thread.start()
 
         self.get_logger().info('[DEBUG] Controller node initialized; entering main loop')
+
+    def _declare_axis_remap(self, prefix):
+        """Declare <prefix>_order and <prefix>_sign; return them, or the identity if invalid."""
+        dynamic = ParameterDescriptor(dynamic_typing=True)
+        order = self.declare_parameter(
+            f'{prefix}_order', list(controller_lib.IDENTITY_AXIS_ORDER), dynamic
+        ).value
+        sign = self.declare_parameter(
+            f'{prefix}_sign', list(controller_lib.IDENTITY_AXIS_SIGN), dynamic
+        ).value
+        problem = controller_lib.axis_remap_problem(order, sign)
+        if problem:
+            self.get_logger().error(f'{prefix}: {problem}; using the identity')
+            return list(controller_lib.IDENTITY_AXIS_ORDER), list(
+                controller_lib.IDENTITY_AXIS_SIGN
+            )
+        return [int(i) for i in order], [float(s) for s in sign]
 
     def _declare_joy_params(self):
         """Declare the FlySky->Joy mapping parameters and return them as a dict."""
@@ -319,13 +350,19 @@ class ControllerNode(Node):
         imu_msg.orientation.z = data['q_z']
         imu_msg.orientation.w = data['q_w']
 
-        imu_msg.linear_acceleration.x = data['a_x']
-        imu_msg.linear_acceleration.y = data['a_y']
-        imu_msg.linear_acceleration.z = data['a_z']
+        if not self._orientation_valid:
+            imu_msg.orientation_covariance[0] = -1.0
 
-        imu_msg.angular_velocity.x = data['g_x']
-        imu_msg.angular_velocity.y = data['g_y']
-        imu_msg.angular_velocity.z = data['g_z']
+        accel = controller_lib.remap_axes(
+            (data['a_x'], data['a_y'], data['a_z']), self._ag_order, self._ag_sign
+        )
+        gyro = controller_lib.remap_axes(
+            (data['g_x'], data['g_y'], data['g_z']), self._ag_order, self._ag_sign
+        )
+        a = imu_msg.linear_acceleration
+        a.x, a.y, a.z = accel
+        g = imu_msg.angular_velocity
+        g.x, g.y, g.z = gyro
 
         self.imu_pub.publish(imu_msg)
 
@@ -396,9 +433,11 @@ class ControllerNode(Node):
         mag_msg = MagneticField()
         mag_msg.header.stamp = self.get_clock().now().to_msg()
         mag_msg.header.frame_id = self.imu_frame
-        mag_msg.magnetic_field.x = data['mag_x'] * 1e-4
-        mag_msg.magnetic_field.y = data['mag_y'] * 1e-4
-        mag_msg.magnetic_field.z = data['mag_z'] * 1e-4
+        field = controller_lib.remap_axes(
+            (data['mag_x'], data['mag_y'], data['mag_z']), self._mag_order, self._mag_sign, 1e-4
+        )
+        f = mag_msg.magnetic_field
+        f.x, f.y, f.z = field
         self.mag_pub.publish(mag_msg)
 
     def motor_callback(self, msg: AckermannDriveStamped):

@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<!--
+  NeoRacer frame tree (REP-103: x forward, y left, z up).
+
+  Every argument comes from config/frames.yaml (plus the car profile's
+  params/frames.yaml), converted to meters and radians by
+  launch/frames.launch.py and passed as xacro mappings. None is declared with a
+  default, so a missing key fails the render with "Undefined substitution
+  argument". All joints are fixed.
+
+  base_link is the floor point under the rear axle midpoint, as upstream.
+  base_footprint is a fixed child of base_link at the same point, kept for one
+  release for code that still looks up base_footprint: the vendor autonomy
+  stack and the student library fork's slam_real.py and nav_real.py.
+-->
+<robot name="neoracer" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:property name="front" value="$(arg footprint_front_x)" />
+  <xacro:property name="rear" value="$(arg footprint_rear_x)" />
+  <xacro:property name="left" value="$(arg footprint_left_y)" />
+  <xacro:property name="right" value="$(arg footprint_right_y)" />
+  <xacro:property name="plate" value="0.005" />
+
+  <material name="chassis">
+    <color rgba="0.3 0.3 0.3 1.0" />
+  </material>
+
+  <!-- Footprint as a thin plate at ride height. -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="${(front + rear) / 2} ${(left + right) / 2} ${$(arg ride_height) + plate / 2}" />
+      <geometry>
+        <box size="${front - rear} ${left - right} ${plate}" />
+      </geometry>
+      <material name="chassis" />
+    </visual>
+  </link>
+
+  <link name="base_footprint" />
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="base_footprint" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+
+  <link name="laser" />
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="laser" />
+    <origin xyz="$(arg laser_x) $(arg laser_y) $(arg laser_z)"
+            rpy="$(arg laser_roll) $(arg laser_pitch) $(arg laser_yaw)" />
+  </joint>
+
+  <link name="imu_link" />
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="imu_link" />
+    <origin xyz="$(arg imu_x) $(arg imu_y) $(arg imu_z)"
+            rpy="$(arg imu_roll) $(arg imu_pitch) $(arg imu_yaw)" />
+  </joint>
+
+  <link name="camera_link" />
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="camera_link" />
+    <origin xyz="$(arg camera_x) $(arg camera_y) $(arg camera_z)"
+            rpy="$(arg camera_roll) $(arg camera_pitch) $(arg camera_yaw)" />
+  </joint>
+
+</robot>

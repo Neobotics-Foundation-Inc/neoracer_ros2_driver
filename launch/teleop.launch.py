@@ -19,9 +19,11 @@ Always-on control pipeline (FlySky RC and autonomy both flow through it):
         v
     controller -> ESP32 serial "v <m/s> <deg>"
 
-Optional sensors/display, each gated by ``<name>_enable:=true|false``:
-lidar (Lakibeam -> /scan), camera (-> /camera/color), led_matrix (/dotmatrix/text),
-inference (/camera/color -> /edgetpu/inference).
+Optional subsystems, each gated by ``<name>_enable:=true|false``:
+frames (robot_state_publisher: the static TF tree base_link -> laser, imu_link,
+camera_link and base_footprint, from config/frames.yaml), lidar (Lakibeam ->
+/scan), camera (-> /camera/color), led_matrix (/dotmatrix/text), inference
+(/camera/color -> /edgetpu/inference).
 
 Every subsystem defaults to true, so ``/edgetpu/inference`` is on the graph
 without a launch argument. ``inference`` is the expensive one: it holds a YOLO
@@ -43,6 +45,7 @@ from launch.substitutions import EqualsSubstitution, LaunchConfiguration
 # Optional subsystems, each toggled by a <name>_enable launch arg, mapped to the
 # default that arg takes.
 _SUBSYSTEMS = {
+    'frames': 'true',
     'lidar': 'true',
     'camera': 'true',
     'led_matrix': 'true',
