@@ -27,6 +27,7 @@
   <!-- camera node (OpenCV JPEG encode into sensor_msgs/Image) -->
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <!-- inference node also needs ultralytics and a Tegra torch build; both come
        from scripts/setup_ml.sh, which has no rosdep key on this platform -->
