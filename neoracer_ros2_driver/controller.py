@@ -19,20 +19,25 @@ IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
 - republishes ``/encoder/speed``, ``/battery/voltage`` (std_msgs/Float32) and
   ``/rc/channels`` (std_msgs/Float32MultiArray), the scalar sensor topics
   ``rc.physics`` reads on the racecar_neo platform, and ``/rc/link``
-  (std_msgs/Bool), whether the transmitter is present.
+  (std_msgs/Bool), whether the transmitter is present, and
+- publishes ``/odom/integrated`` (nav_msgs/Odometry) from each ``s`` frame,
+  either the ESP32's own pose or odometry.py's integration of the body speed
+  and the gyro yaw rate (``odometry.source``, config/odom.yaml).
 
 The exact FlySky channel order depends on the transmitter mixer and is exposed
 entirely as ROS parameters (see config/controller.yaml) for on-car tuning.
 
-Dependencies: pyserial (``serial``), controller_lib.
+Dependencies: pyserial (``serial``), controller_lib, odometry.
 """
 
+from collections.abc import Sequence
 import math
 
 # ===== IMPORT ROS2 CORE ======
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 # ===== IMPORT ROS2 MESSAGE TYPES =====
@@ -49,8 +54,14 @@ import sys
 import threading
 import time
 from . import controller_lib
+from .odometry import OdomIntegrator, OdomState, yaw_quaternion
 
 _INT_ARRAY = ParameterDescriptor(type=ParameterType.PARAMETER_INTEGER_ARRAY)
+
+# Where /odom/integrated takes its pose from (odometry.source).
+ODOM_SOURCES = ('firmware', 'integrated')
+# Odometry: logged when the gyro bias estimate moves by more than this.
+ODOM_BIAS_LOG_STEP = math.radians(0.05)
 
 
 def declare_float_param(node: Node, name: str, default: float) -> float:
@@ -91,6 +102,36 @@ def build_battery_state(volts: float, v_min: float, v_max: float) -> BatteryStat
     msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
     msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
     return msg
+
+
+def build_integrated_odom(
+    state: OdomState, odom_frame: str, base_frame: str
+) -> tuple[TransformStamped, Odometry]:
+    """Return the odom -> base_link transform and its Odometry message for a pose."""
+    assert state.t is not None
+    stamp = Time(nanoseconds=round(state.t * 1e9)).to_msg()
+    qx, qy, qz, qw = yaw_quaternion(state.theta)
+
+    tf = TransformStamped()
+    tf.header.stamp = stamp
+    tf.header.frame_id = odom_frame
+    tf.child_frame_id = base_frame
+    tf.transform.translation.x = state.x
+    tf.transform.translation.y = state.y
+    tf.transform.rotation.x, tf.transform.rotation.y = qx, qy
+    tf.transform.rotation.z, tf.transform.rotation.w = qz, qw
+
+    odom = Odometry()
+    odom.header.stamp = stamp
+    odom.header.frame_id = odom_frame
+    odom.child_frame_id = base_frame
+    odom.pose.pose.position.x = state.x
+    odom.pose.pose.position.y = state.y
+    odom.pose.pose.orientation.x, odom.pose.pose.orientation.y = qx, qy
+    odom.pose.pose.orientation.z, odom.pose.pose.orientation.w = qz, qw
+    odom.twist.twist.linear.x = state.v
+    odom.twist.twist.angular.z = state.omega
+    return tf, odom
 
 
 class ControllerNode(Node):
@@ -193,6 +234,7 @@ class ControllerNode(Node):
             if self.publish_mag
             else None
         )
+        self._setup_odometry()
 
         # ===== STATE + SERIAL READ THREAD =====
         self.last_cmd_time = self.get_clock().now()
@@ -218,6 +260,83 @@ class ControllerNode(Node):
                 controller_lib.IDENTITY_AXIS_SIGN
             )
         return [int(i) for i in order], [float(s) for s in sign]
+
+    def _setup_odometry(self) -> None:
+        """
+        Declare the odometry.* parameters (config/odom.yaml) and set up /odom/integrated.
+
+        A bad value is logged and replaced by its default rather than stopping
+        the node, because this node also carries the drive commands.
+        """
+        enable = bool(self.declare_parameter('odometry.enable', True).value)
+        source = str(self.declare_parameter('odometry.source', 'firmware').value)
+        # Off by default: the autonomy launch's EKF publishes odom -> base_link.
+        publish_tf = bool(self.declare_parameter('odometry.publish_tf', False).value)
+        topic = str(self.declare_parameter('odometry.topic', '/odom/integrated').value)
+        axis = self.declare_parameter('odometry.yaw_rate_axis', 2).value
+        yaw_rate_sign = declare_float_param(self, 'odometry.yaw_rate_sign', 1.0)
+        speed_scale = declare_float_param(self, 'odometry.speed_scale', 1.0)
+        yaw_rate_scale = declare_float_param(self, 'odometry.yaw_rate_scale', 1.0)
+        rate_hz = declare_float_param(self, 'odometry.publish_rate_hz', 50.0)
+        stale_sec = declare_float_param(self, 'odometry.stale_input_sec', 0.25)
+        zero_hold_sec = declare_float_param(self, 'odometry.zero_hold_sec', 1.0)
+        zero_max_rate_dps = declare_float_param(self, 'odometry.zero_max_rate_dps', 2.0)
+        bias_tau_sec = declare_float_param(self, 'odometry.bias_tau_sec', 30.0)
+        turn_gain = declare_float_param(self, 'odometry.turn_gain', 0.0)
+        wheelbase_m = declare_float_param(self, 'odometry.wheelbase_m', 0.28764)
+        max_steer_deg = declare_float_param(self, 'odometry.max_steer_deg', 30.0)
+
+        self._odometry: OdomIntegrator | None = None
+        self._pub_odom_integrated = None
+        self._odom_tf = None
+        self._odom_frames_warned = False
+        if not enable:
+            return
+        if source not in ODOM_SOURCES:
+            self.get_logger().error(
+                f'odometry.source must be one of {ODOM_SOURCES}, got {source!r}; using firmware'
+            )
+            source = 'firmware'
+        if axis not in (0, 1, 2):
+            self.get_logger().error(
+                f'odometry.yaw_rate_axis must be 0, 1 or 2, got {axis}; using 2'
+            )
+            axis = 2
+        if rate_hz <= 0.0:
+            self.get_logger().error('odometry.publish_rate_hz must be positive; using 50')
+            rate_hz = 50.0
+        self._yaw_axis = int(axis)
+        self._yaw_gain = yaw_rate_sign * yaw_rate_scale
+        self._speed_scale = speed_scale
+        if source == 'integrated':
+            self._odometry = OdomIntegrator(
+                zero_hold_sec=zero_hold_sec,
+                zero_max_rate=math.radians(zero_max_rate_dps),
+                bias_tau_sec=bias_tau_sec,
+                stale_sec=stale_sec,
+                turn_gain=turn_gain,
+                wheelbase=wheelbase_m,
+                max_steer=math.radians(max_steer_deg),
+            )
+        # Published from the serial reader thread, not a timer, on a running
+        # deadline at publish_rate_hz.
+        self._odom_period = 1.0 / rate_hz
+        self._odom_next_pub: float | None = None
+        self._odom_gaps_logged = 0
+        self._odom_bias_logged = 0.0
+        self._pub_odom_integrated = self.create_publisher(Odometry, topic, qos_profile_sensor_data)
+        if publish_tf:
+            self._odom_tf = TransformBroadcaster(self)
+            if self.tf_broadcaster is not None:
+                # One writer for odom -> base_link: the firmware /odom TF steps aside.
+                self.get_logger().warn(
+                    'publish_tf and odometry.publish_tf are both on; '
+                    f'odom -> base_link comes from {topic} only'
+                )
+                self.tf_broadcaster = None
+        self.get_logger().info(
+            f"{topic} from the {source} pose; TF odom -> base_link {'on' if publish_tf else 'off'}"
+        )
 
     def _declare_joy_params(self):
         """Declare the FlySky->Joy mapping parameters and return them as a dict."""
@@ -306,14 +425,16 @@ class ControllerNode(Node):
             return
         if tag == 's':
             # V1.1 firmware state frame carries both sensor sets.
-            self.pub_imu(data)
+            imu = self.pub_imu(data)
             self.pub_odom(data)
             self.pub_encoder(data)
+            self.pub_odom_integrated(data, imu)
         elif tag == 'i':
             self.pub_imu(data)
         elif tag == 'o':
             self.pub_odom(data)
             self.pub_encoder(data)
+            self._note_split_frames()
         elif tag == 'r':
             if self.joy_pub is not None:
                 self.pub_joy(data)
@@ -340,7 +461,7 @@ class ControllerNode(Node):
         self.encoder_pub.publish(Float32(data=float(data['v_x'])))
 
     def pub_imu(self, data):
-        """Publish an Imu message from a parsed ``i`` record."""
+        """Publish an Imu message from a parsed ``i`` or ``s`` record, and return it."""
         imu_msg = Imu()
         imu_msg.header.stamp = self.get_clock().now().to_msg()
         imu_msg.header.frame_id = self.imu_frame
@@ -365,6 +486,7 @@ class ControllerNode(Node):
         g.x, g.y, g.z = gyro
 
         self.imu_pub.publish(imu_msg)
+        return imu_msg
 
     def pub_odom(self, data):
         """Publish an Odometry message from a parsed ``o`` record."""
@@ -405,6 +527,91 @@ class ControllerNode(Node):
             t.transform.rotation.z = q[2]
             t.transform.rotation.w = q[3]
             self.tf_broadcaster.sendTransform(t)
+
+    def pub_odom_integrated(self, data, imu):
+        """
+        Feed /odom/integrated from an ``s`` record and the /imu/fused message made from it.
+
+        The speed is the frame's body speed vx and the yaw rate is the
+        published gyro, after the REP-103 remap, on one stamp.
+        """
+        if self._pub_odom_integrated is None:
+            return
+        stamp_ns = imu.header.stamp.sec * 10**9 + imu.header.stamp.nanosec
+        g = imu.angular_velocity
+        gyro = (g.x, g.y, g.z)
+        if self._odometry is not None:
+            self._integrate_odometry(stamp_ns, float(data['v_x']), gyro)
+        else:
+            self._firmware_odometry(stamp_ns, data, gyro)
+
+    def _integrate_odometry(self, stamp_ns: int, speed: float, gyro: Sequence[float]) -> None:
+        assert self._odometry is not None
+        omega = float(gyro[self._yaw_axis]) * self._yaw_gain
+        t = stamp_ns * 1e-9
+        self._odometry.step(t, speed * self._speed_scale, omega)
+        if self._odometry_due(t):
+            self._publish_odometry(self._odometry.state)
+        gaps, bias = self._odometry.gaps, self._odometry.bias
+        if gaps != self._odom_gaps_logged:
+            self._odom_gaps_logged = gaps
+            self.get_logger().warn(
+                f'Odometry input gap over {self._odometry.stale_sec:g} s; pose held '
+                f'({gaps} so far)'
+            )
+        if abs(bias - self._odom_bias_logged) > ODOM_BIAS_LOG_STEP:
+            self._odom_bias_logged = bias
+            self.get_logger().info(f'Gyro bias estimate {math.degrees(bias):+.3f} deg/s')
+
+    def _firmware_odometry(self, stamp_ns: int, data, gyro: Sequence[float]) -> None:
+        """Publish the ESP32's own pose, with the gyro yaw rate unscaled (source firmware)."""
+        t = stamp_ns * 1e-9
+        if self._odometry_due(t):
+            state = OdomState(
+                x=float(data['p_x']),
+                y=float(data['p_y']),
+                theta=float(data['yaw']),
+                v=float(data['v_x']),
+                omega=float(gyro[self._yaw_axis]),
+                t=t,
+            )
+            self._publish_odometry(state)
+
+    def _odometry_due(self, t: float) -> bool:
+        """
+        Return whether a sample at time t is published, and move the deadline.
+
+        A running deadline holds the average at the configured rate; after a
+        gap it restarts from now rather than publishing a burst.
+        """
+        due = self._odom_next_pub
+        if due is not None and t < due:
+            return False
+        self._odom_next_pub = (
+            t + self._odom_period
+            if due is None or t - due > self._odom_period
+            else due + self._odom_period
+        )
+        return True
+
+    def _publish_odometry(self, state: OdomState) -> None:
+        assert self._pub_odom_integrated is not None
+        if state.t is None:
+            return
+        tf, odom = build_integrated_odom(state, self.odom_frame, self.base_frame)
+        if self._odom_tf is not None:
+            self._odom_tf.sendTransform(tf)
+        self._pub_odom_integrated.publish(odom)
+
+    def _note_split_frames(self):
+        """Warn once that /odom/integrated needs the V1.1 ``s`` frame, not ``o`` and ``i``."""
+        if self._pub_odom_integrated is None or self._odom_frames_warned:
+            return
+        self._odom_frames_warned = True
+        self.get_logger().warn(
+            'The firmware sends separate o and i frames; /odom/integrated is published '
+            'from the NEORACER_V1.1 s frame only'
+        )
 
     def pub_joy(self, data):
         """Publish a Joy message synthesized from a parsed ``r`` (FlySky) record."""
