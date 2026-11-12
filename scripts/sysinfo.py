@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 import select
 import shutil
 import subprocess
+import time
 from typing import Any
 
 # Thresholds of upstream's rechargeable RTC cell (2.7-3.0 V), kept only so
@@ -62,21 +64,37 @@ def first_line(cmd: list[str], timeout: float = 3.0) -> str:
     """
     Start a command that streams lines, return its first line, then stop it.
 
-    Returns an empty string when the command is missing or prints nothing
-    within `timeout` seconds.
+    Returns an empty string when the command is missing or prints no whole
+    line within `timeout` seconds; a half-written line never holds it past
+    the timeout. A command that exits without a newline gives what it printed.
     """
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     except OSError:
         return ''
+    deadline = time.monotonic() + timeout
+    data = b''
     try:
         if proc.stdout is None:
             return ''
-        ready, _, _ = select.select([proc.stdout], [], [], timeout)
-        return proc.stdout.readline().strip() if ready else ''
+        fd = proc.stdout.fileno()
+        while b'\n' not in data:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return ''
+            ready, _, _ = select.select([fd], [], [], left)
+            if not ready:
+                return ''
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            data += chunk
+        return data.split(b'\n', 1)[0].decode(errors='replace').strip()
     finally:
         proc.kill()
         proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 def read_diagnostic_rates(msg: Any, into: dict[str, float]) -> None:

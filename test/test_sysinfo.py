@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 from conftest import load_script
@@ -205,6 +206,31 @@ class TestFirstLine:
 
     def test_missing_binary_is_empty(self):
         assert sysinfo.first_line(['/nonexistent/tegrastats']) == ''
+
+    def test_a_half_written_line_does_not_outlast_the_timeout(self):
+        cmd = [
+            sys.executable,
+            '-c',
+            'import sys, time; sys.stdout.write("half"); sys.stdout.flush(); time.sleep(30)',
+        ]
+        start = time.monotonic()
+        assert sysinfo.first_line(cmd, timeout=1.0) == ''
+        assert time.monotonic() - start < 3.0
+
+    def test_stops_the_command_and_closes_its_pipe(self, monkeypatch):
+        started = []
+        real_popen = subprocess.Popen
+
+        def spy(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            started.append(proc)
+            return proc
+
+        monkeypatch.setattr(sysinfo.subprocess, 'Popen', spy)
+        cmd = [sys.executable, '-c', 'import time; print("one", flush=True); time.sleep(30)']
+        assert sysinfo.first_line(cmd, timeout=10) == 'one'
+        assert started[0].poll() is not None
+        assert started[0].stdout.closed
 
 
 class TestDiagnosticRates:
