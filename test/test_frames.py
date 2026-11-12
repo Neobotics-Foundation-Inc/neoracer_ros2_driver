@@ -283,8 +283,9 @@ class TestNeoRacer:
         assert "declare_parameter('base_frame', 'base_link')" in source
 
     def test_autonomy_launch_adds_no_second_parent(self):
-        # The vendor description would give laser and base_footprint a second
-        # parent; the EKF must publish odom -> base_link, the tree's root.
+        # The vendor URDF roots at base_footprint, so it would form a loop with
+        # base_link -> base_footprint and give laser, imu_link and camera_link a
+        # second transform; the EKF must publish odom -> base_link, the root.
         strings = _string_constants(_launch_ast('autonomy'))
         assert 'osracer_description' not in strings
         assert 'base_footprint' not in strings
