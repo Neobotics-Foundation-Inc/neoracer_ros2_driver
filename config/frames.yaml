@@ -1,0 +1,60 @@
+# Frame offsets for urdf/neoracer.urdf.xacro, read by launch/frames.launch.py.
+#
+# Fleet values for the NeoRacer M1. A car's own differences go in its car
+# profile, params/frames.yaml, whose keys win; the lidar calibration (F36)
+# writes laser_yaw_deg there.
+#
+# Units are in each key name: millimeters and degrees, converted to meters and
+# radians at launch. Positions are in base_link: the floor point under the
+# rear axle midpoint, x forward, y left, z up (REP-103), as upstream. Angles
+# follow the same axes: roll about x, pitch about y (positive tips the front
+# down), yaw about z (positive turns left).
+#
+# "CAD" values come from the NeoRacer spec (neoracer-mujoco,
+# src/neoracer_spec/neoracer.py), whose body frame has its origin at the
+# middle of the wheelbase on the axle line. base_link is 143.82 mm behind that
+# point (half the 287.64 mm wheelbase) and 42.5 mm below it (the 42.5 mm wheel
+# radius at rest, with no suspension sag).
+#
+# The real car sits higher than the CAD. Tape on the dev car on 2026-11-12:
+# the chassis tub's underside is 28 mm above the floor (CAD 19.52 mm), so the
+# body-mounted heights add 8.48 mm; the LakiBeam's top is 214 mm above the
+# floor (CAD 203.52 mm: the tub plus the spec's 184 mm from the tub's
+# underside to the LiDAR's top), so the lidar adds 10.48 mm.
+
+# Lidar (LakiBeam L1): the center of the scan, scan zero facing forward. On the
+# dev car on 2026-11-12, with the nose square against a wall, the nearest
+# return ahead was 0.306 m at +2.2 deg; the CAD puts the front of the body
+# 0.304 m ahead of the scan center.
+laser_x_mm: 99.62        # CAD
+laser_y_mm: 0.0
+laser_z_mm: 172.93       # CAD 162.45 + 10.48 measured lift
+laser_roll_deg: 0.0
+laser_pitch_deg: 0.0
+laser_yaw_deg: 0.0       # within 2 to 4 deg on the dev car; F36 measures it
+
+# IMU: the QMI8658A on the OSCORE board. Its place on the car is not measured;
+# the spec assumes the center of mass, 18.9 mm above the axle line. No
+# rotation: /imu/fused is in base_link's axes (REP-103, config/controller.yaml).
+imu_x_mm: 143.82         # assumed
+imu_y_mm: 0.0
+imu_z_mm: 69.88          # assumed 61.4 + 8.48 measured body lift
+imu_roll_deg: 0.0
+imu_pitch_deg: 0.0
+imu_yaw_deg: 0.0
+
+# Camera: the lens, as camera_link (x forward), the frame_id config/camera.yaml
+# gives /camera/color. Its tilt is not measured.
+camera_x_mm: 313.02      # CAD
+camera_y_mm: 0.0
+camera_z_mm: 113.63      # CAD 105.15 + 8.48 measured body lift
+camera_roll_deg: 0.0
+camera_pitch_deg: 0.0    # not measured
+camera_yaw_deg: 0.0
+
+# Footprint, for the URDF visual: the CAD outline of every part but the wheels.
+footprint_front_x_mm: 403.49
+footprint_rear_x_mm: -79.95
+footprint_left_y_mm: 117.55
+footprint_right_y_mm: -123.52
+ride_height_mm: 28.0     # tape: the underside of the chassis tub above the floor (CAD 19.52)

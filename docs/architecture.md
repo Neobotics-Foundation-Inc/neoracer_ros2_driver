@@ -23,6 +23,7 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
 | `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/dotmatrix/text` to USB-UART 8x8; writes `idle_text` on startup and shutdown | pyserial |
 | `lakibeam1` (pinned fork, cloned to `src/`) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
+| `frames` (launch/frames.launch.py, neoracer_ros2_driver/frames.py) | `robot_state_publisher` on urdf/neoracer.urdf.xacro: the static TF tree `base_link` -> `laser`, `imu_link`, `camera_link`, `base_footprint`, offsets from config/frames.yaml and the car profile | robot_state_publisher, xacro |
 
 ## Data pipeline
 

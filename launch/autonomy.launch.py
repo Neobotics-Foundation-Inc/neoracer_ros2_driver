@@ -12,12 +12,14 @@ intelligence and no hardware drivers. The osracer chassis, lidar, camera,
 and LED launches are deliberately NOT included here - they would collide
 with the teleop nodes on the same devices.
 
-  osracer_description  robot_state_publisher + odom-topic TF, fed from the
-                       controller's /odom (odom -> base_footprint -> laser)
+  static TF            not here: teleop's frames subsystem publishes the
+                       base_link tree (laser, imu_link, camera_link and, for
+                       one release, base_footprint) and /robot_description,
+                       so the vendor osracer_description is no longer included
   twist_bridge         /cmd_vel -> normalized /drive into the mux, so SWB
                        manual override and the throttle caps still apply
   EKF                  imu_complementary_filter + robot_localization fusing
-                       /odom + /imu/fused; owns the odom -> base_footprint TF and
+                       /odom + /imu/fused; owns the odom -> base_link TF and
                        publishes the real /odometry/filtered
   osracer_slam         opt-in (slam:=true); `racecar mapping` is the front door
   osracer_navigation   opt-in (nav:=true); `racecar navigation` is the front door
@@ -51,24 +53,10 @@ def generate_launch_description():
         'nav', default_value='false', description='Start Nav2 on a saved map (osracer_navigation)'
     )
 
-    # TF: robot_state_publisher + odom-topic broadcaster from the vendor
-    # description package, fed by the neoracer controller's /odom.
-    description = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('osracer_description'),
-                'launch',
-                'osracer_description.launch.py',
-            )
-        ),
-        launch_arguments={
-            'start_jsp': 'false',
-            'jsp_gui': 'false',
-            'use_rviz': 'false',
-            'publish_frequency': '100.0',
-            'odom_topic': '/odom',
-        }.items(),
-    )
+    # TF: the static tree comes from teleop (launch/frames.launch.py), rooted
+    # at base_link. The vendor description is not included: its URDF roots at
+    # base_footprint, so with base_link -> base_footprint the two would form a
+    # loop, and laser, imu_link and camera_link would get a second transform.
 
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -105,7 +93,7 @@ def generate_launch_description():
 
     # EKF pair from the vendor stack, fed by our controller's topics. The
     # complementary filter smooths the raw IMU; robot_localization fuses it
-    # with wheel odometry. It owns odom -> base_footprint (the controller's
+    # with wheel odometry. It owns odom -> base_link (the controller's
     # publish_tf ships off) and publishes /odometry/filtered for Nav2 and
     # cartographer, replacing the bridge's old relay.
     imu_filter = Node(
@@ -139,7 +127,7 @@ def generate_launch_description():
             {
                 'map_frame': 'map',
                 'odom_frame': 'odom',
-                'base_link_frame': 'base_footprint',
+                'base_link_frame': 'base_link',
                 'world_frame': 'odom',
                 'publish_tf': True,
             },
@@ -150,7 +138,6 @@ def generate_launch_description():
         [
             enable_slam,
             enable_nav,
-            description,
             twist_bridge,
             imu_filter,
             ekf,
