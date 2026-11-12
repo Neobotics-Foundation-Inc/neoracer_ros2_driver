@@ -1,14 +1,18 @@
 """
 Topic contract: what the student library and the lab dashboards read and write.
 
-Library v0.9.0-bot (MITRacecarNeo/racecar-neo-library) and the seven NeoRacer
-lab dashboards (camlabel, eps, linefollow, pursuit, smartfollow, teleop,
-wallfollow) reach the car only through the topics and services below. A
+Library v0.9.0-bot (MITRacecarNeo/racecar-neo-library), the Neobotics fork
+of the library that deployed cars run until F45 resyncs it, and the seven
+NeoRacer lab dashboards (camlabel, eps, linefollow, pursuit, smartfollow,
+teleop, wallfollow) reach the car only through the topics, services, action
+and TF frames below. A
 topic the library reads that nothing publishes does not fail: the library
 reads zeros. So every row is checked against the driver's own sources: the
 driver side exists with the message type, and the QoS on each end lets the
 two connect (a RELIABLE subscriber hears nothing from a BEST_EFFORT
 publisher; a TRANSIENT_LOCAL subscriber needs a TRANSIENT_LOCAL publisher).
+Every read of the deployed fork must be live: the 0.9.0 driver may not break
+the cars in the field.
 
 The readers' QoS comes from their sources at the refs named in each End.
 Publishers outside this repo are checked against the 0.6.1 baseline bag
@@ -30,6 +34,9 @@ VOL, TL = 'volatile', 'transient_local'
 
 LIB = 'library v0.9.0-bot'
 DASH = 'dashboard'
+FORK = 'deployed library fork'
+# Neobotics-Foundation-Inc/racecar-neo-library, branch main, read at d8ca6ab.
+FORK_REF = 'racecar-neo-library@d8ca6ab'
 
 
 @dataclass(frozen=True)
@@ -44,7 +51,7 @@ class End:
 
 @dataclass(frozen=True)
 class Row:
-    """One topic or service and everything that has to hold for it."""
+    """One topic, service, action or TF frame and everything that has to hold for it."""
 
     name: str
     msg_type: str
@@ -53,7 +60,7 @@ class Row:
     # (repo path, text) pairs that must appear in the driver's sources; spaces
     # and line breaks are ignored, so a call split over lines still matches.
     evidence: tuple[tuple[str, str], ...] = ()
-    service: bool = False
+    kind: str = 'topic'  # topic, service, action or frame
     pending: str = ''  # the port feature that adds the driver side
     absent: str = ''  # why the row does not exist on the NeoRacer
     note: str = ''
@@ -63,8 +70,13 @@ def _sensor(who, source):
     return End(who, source, BE)
 
 
+def _fork(path, reliability=BE, durability=VOL):
+    return End(FORK, f'{FORK_REF} library/real/{path}', reliability, durability)
+
+
 CAMERA_READERS = (
     End(LIB, 'library/real/camera_real.py:64', BE),
+    _fork('camera_real.py:49 (depth 10)'),
     _sensor(f'{DASH} camlabel', 'camlabel_dashboard/camlabel.py:62'),
     _sensor(f'{DASH} linefollow', 'linefollow_dashboard/linefollow.py:210'),
     _sensor(f'{DASH} pursuit', 'pursuit_dashboard/pursuit.py:91'),
@@ -84,12 +96,16 @@ ODOM_READERS = tuple(
 )
 SCAN_READERS = (
     End(LIB, 'library/real/lidar_real.py:36 (qos_profile_sensor_data)', BE),
+    _fork('lidar_real.py:41 (qos_profile_sensor_data)'),
     _sensor(f'{DASH} eps', 'eps_dashboard/eps.py:322'),
     _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:175'),
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:171'),
     _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
 )
-DRIVE_WRITERS = (End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),) + tuple(
+DRIVE_WRITERS = (
+    End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
+    _fork('drive_real.py:40 (depth 1)', REL),
+) + tuple(
     End(f'{DASH} {name}', f'{name}_dashboard/{name}.py:{line} (depth 1)', REL)
     for name, line in (
         ('eps', 321),
@@ -102,6 +118,17 @@ DRIVE_WRITERS = (End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),) + tu
 )
 CONTROLLER = 'neoracer_ros2_driver/controller.py'
 PHYSICS = 'library/real/physics_real.py:54'
+FORK_PHYSICS = 'physics_real.py:57 (depth 1)'
+AUTONOMY = 'launch/autonomy.launch.py'
+SLAM_INCLUDE = (
+    AUTONOMY,
+    "get_package_share_directory('osracer_slam'), 'launch', 'slam_toolbox.launch.py'",
+)
+NAV_INCLUDE = (
+    AUTONOMY,
+    "get_package_share_directory('osracer_navigation'), 'launch', 'nav2.launch.py'",
+)
+VENDOR = 'live under racecar mapping and racecar navigation, through the vendor stack'
 
 TABLE = (
     # -- read by the library --
@@ -129,11 +156,12 @@ TABLE = (
         publishers=(End('controller_node', f'{CONTROLLER}:176', REL),),
         subscribers=(
             End(LIB, 'library/real/controller_real.py:89 (depth 1)', REL),
+            _fork('controller_real.py:89 (depth 1)', REL),
             End('mux_node', 'neoracer_ros2_driver/mux_node.py:96', BE),
             End('gamepad_node', 'neoracer_ros2_driver/gamepad_node.py:51', BE),
         ),
         evidence=((CONTROLLER, "create_publisher(Joy, '/joy', 10)"),),
-        note='the library subscribes RELIABLE, so /joy must stay RELIABLE',
+        note='both libraries subscribe RELIABLE, so /joy must stay RELIABLE',
     ),
     Row(
         '/scan',
@@ -146,14 +174,14 @@ TABLE = (
         '/imu/fused',
         'sensor_msgs/msg/Imu',
         publishers=(End('controller_node', f'{CONTROLLER}:150', REL),),
-        subscribers=(End(LIB, PHYSICS, BE),),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
     Row(
         '/mag',
         'sensor_msgs/msg/MagneticField',
         publishers=(End('controller_node', f'{CONTROLLER}:178', BE),),
-        subscribers=(End(LIB, PHYSICS, BE),),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (CONTROLLER, "create_publisher(MagneticField, '/mag', qos_profile_sensor_data)"),
             ('config/controller.yaml', 'publish_mag: true'),
@@ -163,7 +191,7 @@ TABLE = (
         '/encoder/speed',
         'std_msgs/msg/Float32',
         publishers=(End('controller_node', f'{CONTROLLER}:165', BE),),
-        subscribers=(End(LIB, PHYSICS, BE),),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
         ),
@@ -180,7 +208,7 @@ TABLE = (
         '/rc/channels',
         'std_msgs/msg/Float32MultiArray',
         publishers=(End('controller_node', f'{CONTROLLER}:168', BE),),
-        subscribers=(End(LIB, PHYSICS, BE),),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (
                 CONTROLLER,
@@ -194,6 +222,7 @@ TABLE = (
         publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:130', REL),),
         subscribers=(
             End(LIB, 'library/real/vision_real.py:34', BE),
+            _fork('vision_real.py:34'),
             End(f'{DASH} pursuit', 'pursuit_dashboard/pursuit.py:92 (depth 10)', REL),
             End(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:178 (depth 10)', REL),
         ),
@@ -213,7 +242,10 @@ TABLE = (
         '/diagnostics',
         'diagnostic_msgs/msg/DiagnosticArray',
         publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:134', REL),),
-        subscribers=(End(LIB, 'library/real/telemetry_real.py:37', BE),),
+        subscribers=(
+            End(LIB, 'library/real/telemetry_real.py:37', BE),
+            _fork('telemetry_real.py:37'),
+        ),
         evidence=(
             (
                 'neoracer_ros2_driver/inference_node.py',
@@ -239,23 +271,28 @@ TABLE = (
         '/map',
         'nav_msgs/msg/OccupancyGrid',
         publishers=(
-            End('slam_toolbox or map_server', 'upstream autonomy launch (latched)', REL, TL),
+            End('slam_toolbox', f'{AUTONOMY} slam:=true (osracer_slam)', REL, TL),
+            End('nav2 map_server', f'{AUTONOMY} nav:=true (osracer_navigation)', REL, TL),
         ),
-        subscribers=(End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),),
-        pending='F24',
+        subscribers=(
+            End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),
+            _fork('slam_real.py:52 (latched)', REL, TL),
+        ),
+        evidence=(SLAM_INCLUDE, NAV_INCLUDE),
+        note=f'{VENDOR}; F24 replaces the vendor SLAM and must keep /map latched',
     ),
     Row(
         '/autonomy/save_map',
         'std_srvs/srv/Trigger',
         subscribers=(End(LIB, 'library/real/slam_real.py:59 (client)', REL),),
-        service=True,
+        kind='service',
         pending='F23',
     ),
     Row(
         '/autonomy/global_localization',
         'std_srvs/srv/Trigger',
         subscribers=(End('map viewer', 'upstream scripts/mapview.py:378 (client)', REL),),
-        service=True,
+        kind='service',
         pending='F23',
         note='called by the map viewer (F26) and the SLAM validation (F41)',
     ),
@@ -276,7 +313,10 @@ TABLE = (
     Row(
         '/dotmatrix/text',
         'std_msgs/msg/String',
-        publishers=(End(LIB, 'library/real/display_real.py:59 (depth 1)', REL),),
+        publishers=(
+            End(LIB, 'library/real/display_real.py:59 (depth 1)', REL),
+            _fork('display_real.py:54 (depth 1)', REL),
+        ),
         subscribers=(End('led_matrix_node', 'neoracer_ros2_driver/led_matrix_node.py:62', REL),),
         evidence=(
             (
@@ -372,7 +412,8 @@ TABLE = (
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/battery/voltage', qos_profile_sensor_data)"),
         ),
-        note='kept for older lab code; no reader in these sources',
+        subscribers=(_fork(FORK_PHYSICS),),
+        note='the deployed fork reads it (physics_real.py, physics.py); kept until F45',
     ),
     Row(
         '/rc/link',
@@ -389,13 +430,63 @@ TABLE = (
         note='read by the calibrations (F39) and analyze_odom (F40)',
     ),
     Row(
-        '/tf_static',
+        'TF base_link -> laser',
         'tf2_msgs/msg/TFMessage',
-        subscribers=(
-            End('library v0.9.2-bot', 'library/real/lidar_real.py (laser yaw)', REL, TL),
-        ),
+        subscribers=(End('SLAM and the lidar calibration', 'upstream F24 and F36', REL, TL),),
+        kind='frame',
         pending='F05',
-        note='base_link to laser; the 0.9.2 library rotates the scan by this yaw',
+        note='the 0.9.0 frame tree; library v0.9.2-bot reads its yaw in the 0.9.2 port',
+    ),
+    # -- read by the deployed library fork through the vendor autonomy stack --
+    Row(
+        'TF map -> base_footprint',
+        'tf2_msgs/msg/TFMessage',
+        publishers=(
+            End('robot_localization EKF (odom -> base_footprint)', f'{AUTONOMY}:130', REL),
+            End('slam_toolbox (map -> odom)', f'{AUTONOMY} slam:=true', REL),
+        ),
+        subscribers=(
+            _fork('slam_real.py:77 (lookup_transform)', REL),
+            _fork('nav_real.py:64 (lookup_transform)', REL),
+        ),
+        evidence=((AUTONOMY, "'base_link_frame': 'base_footprint'"), SLAM_INCLUDE),
+        kind='frame',
+        note=(
+            f'{VENDOR}; F05 keeps base_footprint as a child of base_link for one release '
+            'and F24 keeps map -> odom'
+        ),
+    ),
+    Row(
+        '/slam_toolbox/serialize_map',
+        'slam_toolbox/srv/SerializePoseGraph',
+        subscribers=(_fork('slam_real.py:63 (client)', REL),),
+        evidence=(SLAM_INCLUDE,),
+        kind='service',
+        note=f'{VENDOR}; F24 must keep slam_toolbox under this name until F45',
+    ),
+    Row(
+        '/slam_toolbox/deserialize_map',
+        'slam_toolbox/srv/DeserializePoseGraph',
+        subscribers=(_fork('slam_real.py:66 (client)', REL),),
+        evidence=(SLAM_INCLUDE,),
+        kind='service',
+        note=VENDOR,
+    ),
+    Row(
+        '/slam_toolbox/clear_changes',
+        'slam_toolbox/srv/Clear',
+        subscribers=(_fork('slam_real.py:69 (client)', REL),),
+        evidence=(SLAM_INCLUDE,),
+        kind='service',
+        note=VENDOR,
+    ),
+    Row(
+        '/compute_path_to_pose',
+        'nav2_msgs/action/ComputePathToPose',
+        subscribers=(_fork('nav_real.py:48 (action client)', REL),),
+        evidence=(NAV_INCLUDE,),
+        kind='action',
+        note='live under racecar navigation (vendor Nav2); plan D1 decides how rc.nav is served',
     ),
 )
 
@@ -428,6 +519,15 @@ FEATURE_MAP_ROWS = {
     '/autonomy/status', '/autonomy/pose', '/map', '/autonomy/save_map',
     '/autonomy/global_localization',
 }  # fmt: skip
+
+# Everything the deployed fork reads, and writes, on a real car.
+FORK_READS = {
+    '/camera/color', '/joy', '/scan', '/imu/fused', '/mag', '/encoder/speed',
+    '/battery/voltage', '/rc/channels', '/edgetpu/inference', '/diagnostics', '/map',
+    'TF map -> base_footprint', '/slam_toolbox/serialize_map', '/slam_toolbox/deserialize_map',
+    '/slam_toolbox/clear_changes', '/compute_path_to_pose',
+}  # fmt: skip
+FORK_WRITES = {'/drive', '/dotmatrix/text'}
 
 LIVE = [r for r in TABLE if not r.pending and not r.absent]
 
@@ -474,7 +574,7 @@ def test_the_driver_side_is_in_the_sources(row):
 @pytest.mark.parametrize('row', TABLE, ids=lambda r: r.name)
 def test_every_reader_connects_to_every_writer(row):
     _skip_unless_live(row)
-    if row.service:
+    if row.kind != 'topic':
         return
     assert row.publishers, f'{row.name} has no publisher'
     for pub in row.publishers:
@@ -489,7 +589,7 @@ def test_every_reader_connects_to_every_writer(row):
 def test_the_table_matches_what_the_car_published(row):
     msg_type, reliability = BASELINE[row.name]
     assert row.msg_type == msg_type
-    driver_side = [p for p in row.publishers if not p.who.startswith((LIB, DASH))]
+    driver_side = [p for p in row.publishers if not p.who.startswith((LIB, DASH, FORK))]
     for pub in driver_side:
         assert pub.reliability == reliability, (row.name, pub.who)
 
@@ -510,6 +610,26 @@ def test_every_library_read_is_covered():
     for name in library_reads:
         assert name in rows, name
         assert any(s.who == LIB for s in rows[name].subscribers), name
+
+
+def test_every_fork_read_is_live():
+    # Deployed cars run the fork until F45; the 0.9.0 driver must not break them.
+    rows = {r.name: r for r in TABLE}
+    for name in FORK_READS:
+        row = rows[name]
+        assert any(s.who == FORK for s in row.subscribers), name
+        assert not row.pending and not row.absent, f'{name}: deployed cars read it'
+    for row in TABLE:
+        if any(s.who == FORK for s in row.subscribers):
+            assert row.name in FORK_READS, row.name
+
+
+def test_every_fork_write_reaches_the_driver():
+    rows = {r.name: r for r in TABLE}
+    for name in FORK_WRITES:
+        row = rows[name]
+        assert any(p.who == FORK for p in row.publishers), name
+        assert row in LIVE and row.subscribers, name
 
 
 def test_the_table_covers_the_feature_map():
