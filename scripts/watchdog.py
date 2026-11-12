@@ -160,10 +160,10 @@ NODES: dict[str, dict[str, Any]] = {
         'process_pattern': f'{DRIVER_LIB}/camera',
         'enable_arg': 'camera_enable',
     },
-    # led_matrix is left out on purpose: it only subscribes, and a USB-serial
-    # re-init on restart is riskier than the display it would recover.
-    # inference is left out too: a crash-looping TensorRT engine is the
-    # likeliest way to run the 8 GB Jetson out of memory.
+    # led_matrix and inference are left out on purpose; each needs a watchdog
+    # of its own later. The LED matrix speaks a dedicated USB serial protocol,
+    # and the inference model is loaded into the device's memory. Restarting
+    # either from this loop can leave the board stuck or flood it.
 }
 
 
