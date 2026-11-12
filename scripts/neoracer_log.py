@@ -96,6 +96,14 @@ def exclude_regex(patterns: Sequence[str]) -> str:
     return '|'.join(f'({p})' for p in patterns)
 
 
+def filter_topics(topics: Sequence[str], exclude: Sequence[str] | None) -> list[str]:
+    """Drop the named topics an exclude pattern matches (re.search, as rosbag2 matches)."""
+    if not exclude:
+        return list(topics)
+    pattern = re.compile(exclude_regex(exclude))
+    return [t for t in topics if not pattern.search(t)]
+
+
 def build_record_argv(
     bag_dir: str | Path,
     topics: Sequence[str] | None = None,
@@ -106,14 +114,16 @@ def build_record_argv(
     Assemble the `ros2 bag record` command line in Humble's spellings.
 
     Humble records everything with --all, takes topics as positional
-    arguments and skips topics with a single --exclude regex.
+    arguments and skips topics with a single --exclude regex. It refuses
+    --exclude next to a topic list, so with named topics the patterns drop
+    the topics they match here instead.
     """
     argv = ['ros2', 'bag', 'record', '--output', str(bag_dir), '--storage', storage]
-    if exclude:
-        argv += ['--exclude', exclude_regex(exclude)]
     if topics:
-        argv += list(topics)
+        argv += filter_topics(topics, exclude)
     else:
+        if exclude:
+            argv += ['--exclude', exclude_regex(exclude)]
         argv.append('--all')
     return argv
 
@@ -303,7 +313,19 @@ def cmd_start(args: argparse.Namespace) -> int:
     topics = args.topics or (cfg.get('TOPICS', '').split(',') if cfg.get('TOPICS') else [])
     topics = [t for t in topics if t]
     exclude = args.exclude or []
+    if topics and exclude:
+        topics = filter_topics(topics, exclude)
+        if not topics:
+            print('every named topic matches --exclude; nothing to record', file=sys.stderr)
+            return 1
     storage = args.storage or cfg.get('STORAGE', DEFAULT_STORAGE)
+    if storage not in STORAGE_CHOICES:
+        print(
+            f'storage {storage!r} is not installed on this car; '
+            f'use {", ".join(STORAGE_CHOICES)} (check STORAGE in {CONFIG_FILE})',
+            file=sys.stderr,
+        )
+        return 1
     if not (args.dir or cfg.get('DIR')):
         from neoracer_ros2_driver.data_root import session_problem
 
@@ -482,8 +504,9 @@ def read_bag_summary(bag: Path) -> dict[str, Any] | None:
 
     rosbag2 writes metadata.yaml when it finalizes a recording. It is plain
     YAML, so analyze works without ROS sourced. A bag with no metadata.yaml,
-    left by a recorder that was killed, falls back to rosbag2_py, which reads
-    the sqlite3 file itself.
+    left by a recorder that was killed, falls back to rosbag2_py; on Humble
+    that also needs metadata.yaml, so such a bag gives None and analyze
+    suggests `ros2 bag reindex`.
     """
     meta_file = bag / 'metadata.yaml'
     if meta_file.is_file():

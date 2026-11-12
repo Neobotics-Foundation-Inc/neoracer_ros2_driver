@@ -141,6 +141,13 @@ class TestRecordArgv:
         assert '--all' not in argv
         assert argv[-2:] == ['/scan', '/odom']
 
+    def test_named_topics_take_no_exclude_flag(self):
+        # Humble refuses --exclude next to a topic list; the patterns filter
+        # the named topics instead.
+        argv = rl.build_record_argv('/data/bag', topics=['/scan', '/rosout'], exclude=['/rosout'])
+        assert '--exclude' not in argv
+        assert argv[-1] == '/scan' and '/rosout' not in argv
+
     def test_output_and_storage(self):
         argv = rl.build_record_argv('/data/bag')
         assert argv[:3] == ['ros2', 'bag', 'record']
@@ -317,6 +324,20 @@ class TestCli:
         assert rl.build_parser().parse_args(['start']).storage is None
         with pytest.raises(SystemExit):
             rl.build_parser().parse_args(['start', '--storage', 'mcap'])
+
+    def test_start_refuses_a_storage_the_car_lacks(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(rl, 'STATE_FILE', tmp_path / 'absent')
+        monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {'STORAGE': 'mcap'})
+        assert rl.main(['start']) == 1
+        assert "storage 'mcap' is not installed" in capsys.readouterr().err
+
+    def test_start_refuses_when_exclude_drops_every_named_topic(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(rl, 'STATE_FILE', tmp_path / 'absent')
+        monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {})
+        assert rl.main(['start', '--topics', '/scan', '--exclude', '/sc.*']) == 1
+        assert 'nothing to record' in capsys.readouterr().err
 
     def test_stop_has_a_finalize_timeout(self):
         args = rl.build_parser().parse_args(['stop'])
