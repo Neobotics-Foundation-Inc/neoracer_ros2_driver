@@ -38,8 +38,8 @@ LIDAR_ACCURACY = 0.02
 # Tape on the dev car, 2026-11-12 (mm above the floor): the chassis tub's
 # underside, and the LakiBeam's top. The spec's 184 mm runs from the tub's
 # underside to the LiDAR's top. The real body sits higher than the CAD.
-CAR_TUB_UNDERSIDE_MM = 30.0
-CAR_LIDAR_TOP_MM = 218.0
+CAR_TUB_UNDERSIDE_MM = 28.0
+CAR_LIDAR_TOP_MM = 214.0
 SPEC_TUB_TO_LIDAR_TOP_MM = 184.0
 
 
