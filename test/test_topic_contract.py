@@ -172,7 +172,7 @@ TABLE = (
     Row(
         '/joy',
         'sensor_msgs/msg/Joy',
-        publishers=(End('controller_node', f'{CONTROLLER}:190', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:231', REL),),
         subscribers=(
             End(LIB, 'library/real/controller_real.py:89 (depth 1)', REL),
             _fork('controller_real.py:89 (depth 1)', REL),
@@ -201,14 +201,14 @@ TABLE = (
     Row(
         '/imu/fused',
         'sensor_msgs/msg/Imu',
-        publishers=(End('controller_node', f'{CONTROLLER}:164', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:205', REL),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(57)),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
     Row(
         '/mag',
         'sensor_msgs/msg/MagneticField',
-        publishers=(End('controller_node', f'{CONTROLLER}:192', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:233', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (CONTROLLER, "create_publisher(MagneticField, '/mag', qos_profile_sensor_data)"),
@@ -218,7 +218,7 @@ TABLE = (
     Row(
         '/encoder/speed',
         'std_msgs/msg/Float32',
-        publishers=(End('controller_node', f'{CONTROLLER}:179', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:220', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(58)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
@@ -227,7 +227,7 @@ TABLE = (
     Row(
         '/battery/state',
         'sensor_msgs/msg/BatteryState',
-        publishers=(End('controller_node', f'{CONTROLLER}:170', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:211', REL),),
         subscribers=(End(LIB, 'library/real/physics_real.py:78 (depth 10)', REL),),
         evidence=((CONTROLLER, "create_publisher(BatteryState, '/battery/state', 10)"),),
         note='added by F07; the library subscribes RELIABLE, so /battery/state must stay RELIABLE',
@@ -235,7 +235,7 @@ TABLE = (
     Row(
         '/rc/channels',
         'std_msgs/msg/Float32MultiArray',
-        publishers=(End('controller_node', f'{CONTROLLER}:182', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:223', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (
@@ -375,7 +375,7 @@ TABLE = (
     Row(
         '/odom',
         'nav_msgs/msg/Odometry',
-        publishers=(End('controller_node', f'{CONTROLLER}:165', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:206', REL),),
         subscribers=ODOM_READERS,
         evidence=((CONTROLLER, "create_publisher(Odometry, '/odom', 10)"),),
     ),
@@ -412,7 +412,7 @@ TABLE = (
         '/motor',
         'ackermann_msgs/msg/AckermannDriveStamped',
         publishers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:42', BE),),
-        subscribers=(End('controller_node', f'{CONTROLLER}:155', BE),),
+        subscribers=(End('controller_node', f'{CONTROLLER}:196', BE),),
         evidence=(
             (
                 'neoracer_ros2_driver/throttle_node.py',
@@ -428,7 +428,7 @@ TABLE = (
     Row(
         '/battery',
         'sensor_msgs/msg/BatteryState',
-        publishers=(End('controller_node', f'{CONTROLLER}:167', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:208', BE),),
         subscribers=(End('8080 dashboard', 'scripts/dashboard.py:154', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(BatteryState, '/battery', qos_profile_sensor_data)"),
@@ -438,7 +438,7 @@ TABLE = (
     Row(
         '/battery/voltage',
         'std_msgs/msg/Float32',
-        publishers=(End('controller_node', f'{CONTROLLER}:176', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:217', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/battery/voltage', qos_profile_sensor_data)"),
         ),
@@ -448,16 +448,21 @@ TABLE = (
     Row(
         '/rc/link',
         'std_msgs/msg/Bool',
-        publishers=(End('controller_node', f'{CONTROLLER}:186', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:227', BE),),
         evidence=((CONTROLLER, "create_publisher(Bool, '/rc/link', qos_profile_sensor_data)"),),
         note='added by F08; the mux subscribes in F12',
     ),
     Row(
         '/odom/integrated',
         'nav_msgs/msg/Odometry',
+        publishers=(End('controller_node', f'{CONTROLLER}:327', BE),),
         subscribers=(End('analyze_odom and calibrate_dynamics', 'upstream scripts', BE),),
-        pending='F09',
-        note='read by the calibrations (F39) and analyze_odom (F40)',
+        evidence=(
+            (CONTROLLER, 'create_publisher(Odometry, topic, qos_profile_sensor_data)'),
+            ('config/odom.yaml', 'odometry.topic: "/odom/integrated"'),
+            ('launch/controller.launch.py', "('odom_config', 'odom.yaml')"),
+        ),
+        note='added by F09; read by the calibrations (F39) and analyze_odom (F40)',
     ),
     Row(
         'TF base_link -> laser',
