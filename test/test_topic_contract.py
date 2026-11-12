@@ -120,6 +120,8 @@ CONTROLLER = 'neoracer_ros2_driver/controller.py'
 PHYSICS = 'library/real/physics_real.py:54'
 FORK_PHYSICS = 'physics_real.py:57 (depth 1)'
 AUTONOMY = 'launch/autonomy.launch.py'
+FRAMES_URDF = 'urdf/neoracer.urdf.xacro'
+TELEOP = 'launch/teleop.launch.py'
 SLAM_INCLUDE = (
     AUTONOMY,
     "get_package_share_directory('osracer_slam'), 'launch', 'slam_toolbox.launch.py'",
@@ -432,28 +434,36 @@ TABLE = (
     Row(
         'TF base_link -> laser',
         'tf2_msgs/msg/TFMessage',
+        publishers=(End('robot_state_publisher (frames, /tf_static)', FRAMES_URDF, REL, TL),),
         subscribers=(End('SLAM and the lidar calibration', 'upstream F24 and F36', REL, TL),),
+        evidence=((FRAMES_URDF, '<child link="laser" />'), (TELEOP, "'frames': 'true'")),
         kind='frame',
-        pending='F05',
-        note='the 0.9.0 frame tree; library v0.9.2-bot reads its yaw in the 0.9.2 port',
+        note='added by F05; library v0.9.2-bot reads its yaw in the 0.9.2 port',
     ),
     # -- read by the deployed library fork through the vendor autonomy stack --
     Row(
         'TF map -> base_footprint',
         'tf2_msgs/msg/TFMessage',
         publishers=(
-            End('robot_localization EKF (odom -> base_footprint)', f'{AUTONOMY}:130', REL),
+            End('robot_localization EKF (odom -> base_link)', f'{AUTONOMY}:130', REL),
+            End('robot_state_publisher (base_link -> base_footprint, static)', FRAMES_URDF, REL),
             End('slam_toolbox (map -> odom)', f'{AUTONOMY} slam:=true', REL),
         ),
         subscribers=(
             _fork('slam_real.py:77 (lookup_transform)', REL),
             _fork('nav_real.py:64 (lookup_transform)', REL),
         ),
-        evidence=((AUTONOMY, "'base_link_frame': 'base_footprint'"), SLAM_INCLUDE),
+        evidence=(
+            (AUTONOMY, "'base_link_frame': 'base_link'"),
+            (FRAMES_URDF, '<child link="base_footprint" />'),
+            (TELEOP, "'frames': 'true'"),
+            SLAM_INCLUDE,
+        ),
         kind='frame',
         note=(
-            f'{VENDOR}; F05 keeps base_footprint as a child of base_link for one release '
-            'and F24 keeps map -> odom'
+            f'{VENDOR}; since F05 the EKF publishes odom -> base_link and the teleop frames '
+            'publish base_footprint as a static child of base_link for one release; '
+            'F24 keeps map -> odom'
         ),
     ),
     Row(
