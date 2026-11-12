@@ -11,9 +11,9 @@ throttle_node:
     # While mapping (/autonomy/status mode mapping), /motor speed is clipped to
     # this, after the per-direction caps above. It is a fraction of
     # max_speed_mps in controller.yaml: 0.083 x 6.0 m/s is about 0.5 m/s, so
-    # change it with max_speed_mps. Smaller commands pass unchanged; the ESP32
-    # speed loop has no floor. The 0.5 m/s speed hold check on the car confirms
-    # the value.
+    # change it whenever max_speed_mps changes. Smaller commands pass unchanged;
+    # the ESP32 speed loop has no floor. On the floor the dev car's encoder read
+    # about 0.55 m/s at this value, with no stall or oscillation (2026-11-12).
     mapping_speed_cap: 0.083
     # While mapping, /motor steering is clipped to this; 1.0 is off. It is a
     # fraction of /motor steering, which max_steering already limits to 0.625,

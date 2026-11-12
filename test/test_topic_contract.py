@@ -688,7 +688,10 @@ def test_qos_rule():
 
 @pytest.mark.parametrize('row', TABLE, ids=lambda r: r.name)
 def test_the_driver_side_is_in_the_sources(row):
-    _skip_unless_live(row)
+    # A pending row may already name a reader in this repo (the throttle node
+    # on /autonomy/status); that reader is checked before the publisher lands.
+    if not (row.pending and row.evidence):
+        _skip_unless_live(row)
     assert row.evidence, f'{row.name} has no evidence in the driver sources'
     for path, text in row.evidence:
         source = _squash(_code_text(ROOT / path))

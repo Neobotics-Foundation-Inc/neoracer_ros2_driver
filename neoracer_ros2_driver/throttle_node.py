@@ -7,9 +7,9 @@ max_steering_angle_deg in controller.yaml), and the ESP32's speed loop holds
 the m/s it is sent, with no floor. While /autonomy/status reports mode
 'mapping', speed is also clipped to mapping_speed_cap and steering to
 mapping_steering_cap (1.0, off, by default). The caps lift when the status
-reports another mode. Nothing publishes /autonomy/status until the autonomy
-node lands, so the mapping caps stay off until then. The steering trim lives
-in the ESP32 firmware (`trim set`), not here.
+reports another mode. With nothing publishing /autonomy/status, the mapping
+caps stay off. The steering trim lives in the ESP32 firmware (`trim set`), not
+here.
 """
 
 from ackermann_msgs.msg import AckermannDriveStamped
