@@ -448,14 +448,23 @@ TABLE = (
     Row(
         '/odom/integrated',
         'nav_msgs/msg/Odometry',
-        publishers=(End('controller_node', f'{CONTROLLER}:327', BE),),
-        subscribers=(End('analyze_odom and calibrate_dynamics', 'upstream scripts', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:337', BE),),
+        subscribers=(
+            End(
+                'calibrate_odom (F37)',
+                'upstream scripts/calibration/calibrate_common.py:292',
+                BE,
+            ),
+        ),
         evidence=(
             (CONTROLLER, 'create_publisher(Odometry, topic, qos_profile_sensor_data)'),
             ('config/odom.yaml', 'odometry.topic: "/odom/integrated"'),
             ('launch/controller.launch.py', "('odom_config', 'odom.yaml')"),
         ),
-        note='added by F09; read by the calibrations (F39) and analyze_odom (F40)',
+        note=(
+            'added by F09; read by calibrate_odom (F37), calibrate_dynamics (F39) '
+            'and analyze_odom (F40)'
+        ),
     ),
     Row(
         'TF base_link -> laser',

@@ -92,6 +92,16 @@ that transform and a frame takes one parent. Firmware `/odom` is unchanged.
 Older firmware that sends separate `i` and `o` frames gets no
 `/odom/integrated`; the controller logs that once.
 
+A bad `odometry.source`, `odometry.yaw_rate_axis`, `odometry.publish_rate_hz`,
+`odometry.stale_input_sec`, `odometry.bias_tau_sec` or `odometry.zero_hold_sec`
+is logged as an error and replaced by its default. Upstream's node stops
+instead, but this node also carries the drive commands. A value of the wrong
+type, for example 2.0 for the axis, still stops the node at startup. If
+`publish_tf` in `controller.yaml` and `odometry.publish_tf` are both on, only
+`/odom/integrated` writes `odom -> base_link`, and the controller logs a
+warning. The `/imu/fused` gyro is already bias-corrected by the ESP32; the
+stopped-car estimate removes what is left.
+
 ## FlySky RC -> `/joy` mapping
 
 The 10 `r` channels are converted to a Joy message that satisfies three

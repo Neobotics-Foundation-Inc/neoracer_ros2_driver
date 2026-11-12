@@ -300,6 +300,108 @@ class TestControllerOdometry:
         assert node.transforms[-1].header.stamp == node.sent[-1].header.stamp
 
 
+def _setup_node(controller, monkeypatch, params=None, legacy_tf=False):
+    """Run the controller's _setup_odometry on a stand-in node with these parameter values."""
+    params = params or {}
+    monkeypatch.setattr(controller, 'TransformBroadcaster', lambda node: 'odometry tf')
+    node = controller.ControllerNode
+
+    class _SetupNode:
+        _setup_odometry = node._setup_odometry
+        _note_split_frames = node._note_split_frames
+
+        def __init__(self):
+            self.errors, self.warnings, self.infos = [], [], []
+            self.topics = []
+            self.tf_broadcaster = 'legacy tf' if legacy_tf else None
+
+        def declare_parameter(self, name, default, *descriptor):
+            return SimpleNamespace(value=params.get(name, default))
+
+        def create_publisher(self, msg_type, topic, qos):
+            self.topics.append(topic)
+            return SimpleNamespace(publish=lambda msg: None)
+
+        def get_logger(self):
+            return SimpleNamespace(
+                error=self.errors.append, warn=self.warnings.append, info=self.infos.append
+            )
+
+    stand_in = _SetupNode()
+    stand_in._setup_odometry()
+    return stand_in
+
+
+class TestOdometrySetup:
+    def test_defaults_publish_from_the_firmware_pose_without_tf(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch)
+        assert node.topics == ['/odom/integrated']
+        assert node._odometry is None and node._odom_tf is None
+        assert node.errors == [] and node.warnings == []
+        assert node.infos[-1].endswith('from the firmware pose; TF odom -> base_link off')
+
+    def test_a_bad_source_falls_back_to_firmware(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.source': 'integrate'})
+        assert node._odometry is None
+        assert len(node.errors) == 1 and 'odometry.source' in node.errors[0]
+        assert 'from the firmware pose' in node.infos[-1]
+
+    def test_a_bad_axis_falls_back_to_z(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.yaw_rate_axis': 5})
+        assert node._yaw_axis == 2
+        assert len(node.errors) == 1 and 'odometry.yaw_rate_axis' in node.errors[0]
+
+    def test_a_bad_rate_falls_back_to_50_hz(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.publish_rate_hz': 0.0})
+        assert node._odom_period == pytest.approx(0.02)
+        assert len(node.errors) == 1 and 'odometry.publish_rate_hz' in node.errors[0]
+
+    @pytest.mark.parametrize(
+        'name, value, attribute, default',
+        [
+            ('odometry.stale_input_sec', 0.0, 'stale_sec', 0.25),
+            ('odometry.stale_input_sec', -1.0, 'stale_sec', 0.25),
+            ('odometry.bias_tau_sec', 0.0, 'bias_tau_sec', 30.0),
+            ('odometry.zero_hold_sec', -1.0, 'zero_hold_sec', 1.0),
+        ],
+    )
+    def test_bad_timings_fall_back_to_their_defaults(
+        self, controller, monkeypatch, name, value, attribute, default
+    ):
+        params = {'odometry.source': 'integrated', name: value}
+        node = _setup_node(controller, monkeypatch, params)
+        assert getattr(node._odometry, attribute) == default
+        assert len(node.errors) == 1 and name in node.errors[0]
+
+    def test_a_zero_hold_of_zero_is_allowed(self, controller, monkeypatch):
+        params = {'odometry.source': 'integrated', 'odometry.zero_hold_sec': 0.0}
+        node = _setup_node(controller, monkeypatch, params)
+        assert node._odometry.zero_hold_sec == 0.0 and node.errors == []
+
+    def test_with_both_tf_switches_on_only_odometry_writes(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.publish_tf': True}, legacy_tf=True)
+        assert node._odom_tf == 'odometry tf'
+        assert node.tf_broadcaster is None
+        assert len(node.warnings) == 1 and 'both on' in node.warnings[0]
+        assert node.infos[-1].endswith('TF odom -> base_link on')
+
+    def test_odometry_tf_alone_needs_no_warning(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.publish_tf': True})
+        assert node._odom_tf == 'odometry tf' and node.warnings == []
+
+    def test_disabled_odometry_creates_no_publisher(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.enable': False})
+        assert node.topics == [] and node._pub_odom_integrated is None
+        node._note_split_frames()
+        assert node.warnings == []
+
+    def test_split_frames_warn_once(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch)
+        node._note_split_frames()
+        node._note_split_frames()
+        assert len(node.warnings) == 1 and 's frame' in node.warnings[0]
+
+
 def _odom_params():
     return yaml.safe_load((ROOT / 'config' / 'odom.yaml').read_text())['controller_node'][
         'ros__parameters'
