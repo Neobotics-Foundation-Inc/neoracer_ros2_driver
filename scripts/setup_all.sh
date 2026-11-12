@@ -49,7 +49,7 @@ echo "    moving per-car files into the car profile (~/.config/racecar)"
     source /opt/ros/humble/setup.bash
     # shellcheck disable=SC1091
     source "$HOME/ros2_ws/install/setup.bash"
-    python3 "$SCRIPT_DIR/racecar_profile.py" migrate
+    python3 "$SCRIPT_DIR/neoracer_profile.py" migrate
 )
 
 echo

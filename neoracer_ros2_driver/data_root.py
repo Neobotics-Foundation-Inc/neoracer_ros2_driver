@@ -2,7 +2,7 @@
 Where the car's data goes: the data root.
 
 Everything the car produces (bags, maps, sessions, captures, datasets,
-dashboard logs, health reports) goes under one folder, ~/racecar_data.
+dashboard logs, health reports) goes under one folder, ~/neoracer_data.
 Settings never go here; they live in the car profile (car_profile.py).
 
 The folder is deliberately not ~/data: neoracer-installer removes
@@ -31,14 +31,14 @@ RUN_FILE = Path('/run/racecar/data_root')
 # The same, as KEY=value for the units' EnvironmentFile=.
 RUN_ENV_FILE = Path('/run/racecar/environment')
 # The default root's name under the home folder.
-DEFAULT_NAME = 'racecar_data'
+DEFAULT_NAME = 'neoracer_data'
 SUBDIRS = ('bags', 'images', 'datasets', 'maps', 'slam_eval', 'dashboards', 'health')
 
 _resolved: tuple[Path, str] | None = None
 
 
 def fallback() -> Path:
-    """Return the default root, ~/racecar_data under the home folder."""
+    """Return the default root, ~/neoracer_data under the home folder."""
     return Path.home() / DEFAULT_NAME
 
 

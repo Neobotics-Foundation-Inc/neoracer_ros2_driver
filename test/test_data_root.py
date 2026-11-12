@@ -17,7 +17,7 @@ def fresh(monkeypatch):
 
 class TestResolve:
     def test_default_root_under_home(self):
-        assert data_root.resolve() == (Path.home() / 'racecar_data', '')
+        assert data_root.resolve() == (Path.home() / 'neoracer_data', '')
 
     def test_default_is_outside_the_folders_the_installer_removes(self):
         root = data_root.fallback()
@@ -37,14 +37,14 @@ class TestCurrent:
     def test_run_file_next(self, fresh, monkeypatch, tmp_path):
         monkeypatch.delenv(data_root.DATA_ENV)
         run_file = tmp_path / 'data_root'
-        run_file.write_text('/home/racecar/racecar_data\n')
+        run_file.write_text('/home/racecar/neoracer_data\n')
         monkeypatch.setattr(data_root, 'RUN_FILE', run_file)
-        assert data_root.current()[0] == Path('/home/racecar/racecar_data')
+        assert data_root.current()[0] == Path('/home/racecar/neoracer_data')
 
     def test_default_last(self, fresh, monkeypatch, tmp_path):
         monkeypatch.delenv(data_root.DATA_ENV)
         monkeypatch.setattr(data_root, 'RUN_FILE', tmp_path / 'missing')
-        assert data_root.current() == (Path.home() / 'racecar_data', '')
+        assert data_root.current() == (Path.home() / 'neoracer_data', '')
 
     def test_worked_out_once(self, fresh, monkeypatch, tmp_path):
         monkeypatch.setenv(data_root.DATA_ENV, str(tmp_path / 'a'))
@@ -77,10 +77,10 @@ def test_units_and_shells_get_the_variable():
         assert 'After=neoracer-data.service' in text, unit
     service = (SCRIPTS / 'neoracer-data.service').read_text()
     assert 'data_root.py write' in service and 'RuntimeDirectoryPreserve=yes' in service
-    assert 'RACECAR_DATA_DIR' in (SCRIPTS / 'profile.d-racecar-data.sh').read_text()
+    assert 'RACECAR_DATA_DIR' in (SCRIPTS / 'profile.d-neoracer-data.sh').read_text()
     assert 'neoracer-data.service' in (SCRIPTS / 'setup_services.sh').read_text()
     assert 'export RACECAR_DATA_DIR' in (SCRIPTS / 'racecar-tool.sh').read_text()
-    assert 'racecar_data' in (SCRIPTS / 'setup_jupyter.sh').read_text()
+    assert 'neoracer_data' in (SCRIPTS / 'setup_jupyter.sh').read_text()
 
 
 def test_session_problem(data_root_dir, monkeypatch):
