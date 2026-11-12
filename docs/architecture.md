@@ -62,7 +62,7 @@ run different hardware behind identical names:
 | --- | --- | --- |
 | `/camera/color` | RealSense D435i color, remapped | USB webcam, JPEG-in-Image |
 | `/imu/fused` | `imu_fusion_node` blending D435i and LSM9DS1 | ESP32 IMU, single source |
-| `/mag`, `/encoder/speed`, `/battery/voltage`, `/rc/channels` | `pit_node` from the Teensy | `controller` from the ESP32 |
+| `/mag`, `/encoder/speed`, `/battery/voltage`, `/rc/channels`, `/rc/link` | `pit_node` from the Teensy | `controller` from the ESP32 |
 | `/edgetpu/inference` | Coral EdgeTPU, tflite | Orin iGPU, YOLO through TensorRT |
 | `/dotmatrix/text` | MAX7219 chain, 24x8 | USB-UART 8x8 panel |
 | `/scan`, `/joy`, `/drive`, `/motor`, `/mux_out`, `/gamepad_drive` | same | same |

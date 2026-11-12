@@ -20,6 +20,10 @@ from neoracer_ros2_driver.limits import clamp
 # The firmware reports -1 on every channel when the FlySky transmitter is off,
 # so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
 RC_FAILSAFE_BELOW = 500
+# The ESP32 reports the receiver's channels as raw SBUS counts, 0 to 2047,
+# and sends -1 on every channel while the receiver has no signal.
+RC_COUNT_MIN = 0
+RC_COUNT_MAX = 2047
 
 # 3S LiPo bounds for the charge fraction in /battery/state (the vendor stack's
 # battery_voltage_min/max).
@@ -191,6 +195,18 @@ def _set_button(buttons, idx, value=1):
     """Set ``buttons[idx] = value`` when ``idx`` is a valid in-range index."""
     if idx is not None and 0 <= idx < len(buttons):
         buttons[idx] = value
+
+
+def rc_link_up(channels, count_min=RC_COUNT_MIN, count_max=RC_COUNT_MAX):
+    """
+    Report whether the transmitter link is up: every raw channel is an SBUS count.
+
+    The firmware sends -1 on every channel while the receiver has no signal.
+    Use this, not the normalized channels, for transmitter presence: the
+    failsafe mapping turns a dead channel and a stick held low into the same
+    neutral value. One frame's verdict; freshness belongs to the consumer.
+    """
+    return bool(channels) and all(count_min <= c <= count_max for c in channels)
 
 
 def rc_to_channels(channels, cfg):

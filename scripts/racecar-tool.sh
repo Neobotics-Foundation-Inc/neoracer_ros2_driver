@@ -88,6 +88,16 @@ racecar() {
 
     case "$cmd" in
         build)
+            # A source file deleted since the last --symlink-install build
+            # leaves a dangling link that setup.py's scripts/*.py glob picks up,
+            # and setuptools then refuses to copy it.
+            local tree link
+            for tree in "$ws/build/$pkg" "$ws/install/$pkg"; do
+                [[ -d "$tree" ]] || continue
+                while IFS= read -r -d '' link; do
+                    rm -- "$link" && echo "  removed dangling symlink: $link"
+                done < <(find "$tree" -xtype l -print0)
+            done
             ( cd "$ws" && colcon build --packages-select "$pkg" --symlink-install "$@" ) \
                 && source "$ws/install/setup.bash"
             ;;
