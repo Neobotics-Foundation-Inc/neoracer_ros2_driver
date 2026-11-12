@@ -35,6 +35,7 @@ sudo apt-get install -y \
     ros-humble-rqt-common-plugins \
     ros-humble-rqt-image-view \
     ros-humble-foxglove-bridge \
+    ros-humble-rosbag2-storage-mcap \
     ros-dev-tools \
     python3-colcon-common-extensions \
     python3-rosdep \

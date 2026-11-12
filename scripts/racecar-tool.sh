@@ -144,6 +144,12 @@ racecar() {
             python3 "$pkg_dir/neoracer_ros2_driver/data_root.py" "$@"
             ;;
 
+        log)
+            # ROS 2 bag recording and analysis. Thin wrapper: the work and its
+            # tests live in scripts/neoracer_log.py.
+            python3 "${RACECAR_LOG_SCRIPT:-$pkg_dir/scripts/neoracer_log.py}" "$@"
+            ;;
+
         source)
             # shellcheck disable=SC1091
             source "$ws/install/setup.bash"
@@ -1050,6 +1056,24 @@ Commands:
     data                Where the car's data goes (the data root): ~/neoracer_data,
                         outside the folders the installer removes. Programs
                         read it from $RACECAR_DATA_DIR.
+    log <action>        Record and analyze ROS 2 bags. Actions:
+                          start [name]        record; bag is <timestamp>_<name>
+                                                --topics A B    default: all
+                                                --exclude REGEX
+                                                --dir PATH      default: bags/ under
+                                                                the data root
+                                                --name NAME     full bag name
+                                                --storage mcap|sqlite3
+                                                --force         record anyway when
+                                                                the rate outruns the disk
+                          stop                SIGINT, so rosbag2 finalizes the bag
+                          status [--json]     size, rate, elapsed, time until full
+                          list                recorded bags, newest first
+                          analyze [bag]       duration, size, per-topic counts and
+                                              rates; defaults to the newest bag
+                          config              show or set persisted defaults
+                        Every topic together is about 4.5 MB/s, most of it the
+                        camera.
     source              Source the workspace overlay into the current shell.
     ws [name]           Switch this shell between workspaces: neoracer or
                         osracer (the vendor stack preinstalled in ~/osracer_ws).
@@ -1152,7 +1176,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test profile data lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile data log lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -1216,6 +1240,29 @@ _racecar_complete() {
         mapping)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "slam_toolbox gmapping cartographer save rviz" -- "$cur") )
+            fi
+            ;;
+        log)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "start stop status list analyze config help" -- "$cur") )
+            else
+                case "${COMP_WORDS[2]}" in
+                    start)
+                        COMPREPLY=( $(compgen -W "--topics --exclude --dir --name --storage --force --help" -- "$cur") )
+                        ;;
+                    stop)
+                        COMPREPLY=( $(compgen -W "--timeout --help" -- "$cur") )
+                        ;;
+                    status|analyze)
+                        COMPREPLY=( $(compgen -W "--json --help" -- "$cur") )
+                        ;;
+                    config)
+                        COMPREPLY=( $(compgen -W "--topics --dir --storage --reset --help" -- "$cur") )
+                        ;;
+                    list)
+                        COMPREPLY=( $(compgen -W "--dir --help" -- "$cur") )
+                        ;;
+                esac
             fi
             ;;
         navigation)
