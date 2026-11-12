@@ -1,14 +1,19 @@
 """Unit tests for the ESP32 bridge helpers in controller_lib (no ROS required)."""
 
-from neoracer_ros2_driver import controller_lib as cl
+from pathlib import Path
 
-# Mapping config matching the config/controller.yaml defaults.
+from neoracer_ros2_driver import controller_lib as cl
+import yaml
+
+CONTROLLER_YAML = Path(__file__).resolve().parent.parent / 'config' / 'controller.yaml'
+
+# Mapping config matching the config/controller.yaml defaults, in SBUS counts.
 DEFAULT_CFG = {
-    'rc_min': 1000,
-    'rc_center': 1500,
-    'rc_max': 2000,
+    'rc_min': 240,
+    'rc_center': 1025,
+    'rc_max': 1810,
     'rc_deadband': 0.05,
-    'rc_failsafe_below': 500,
+    'rc_failsafe_below': 0,
     'num_axes': 6,
     'num_buttons': 11,
     'trigger_axes': [2, 5],
@@ -31,8 +36,8 @@ DEFAULT_CFG = {
 
 
 def _channels(**overrides):
-    """Build a 10-channel RC list defaulting every channel to center (1500)."""
-    ch = [1500] * 10
+    """Build a 10-channel RC list defaulting every channel to center (1025)."""
+    ch = [1025] * 10
     for i, v in overrides.items():
         ch[int(i)] = v
     return ch
@@ -118,20 +123,20 @@ def test_rc_to_joy_shape_and_trigger_rest():
 
 
 def test_rc_to_joy_throttle_and_steering():
-    axes, _ = cl.rc_to_joy(_channels(**{'2': 2000, '0': 1000}), DEFAULT_CFG)
+    axes, _ = cl.rc_to_joy(_channels(**{'2': 1810, '0': 240}), DEFAULT_CFG)
     assert axes[1] == 1.0  # throttle channel 2 full -> axis 1
     assert axes[3] == -1.0  # steering channel 0 min -> axis 3
 
 
 def test_rc_to_joy_mode_switch_manual_autonomy_idle():
     # mode channel 4 high -> autonomy button 5
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 2000}), DEFAULT_CFG)
+    _, buttons = cl.rc_to_joy(_channels(**{'4': 1810}), DEFAULT_CFG)
     assert buttons[5] == 1 and buttons[4] == 0
     # mid -> manual button 4
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 1500}), DEFAULT_CFG)
+    _, buttons = cl.rc_to_joy(_channels(**{'4': 1025}), DEFAULT_CFG)
     assert buttons[4] == 1 and buttons[5] == 0
     # low -> neither
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 1000}), DEFAULT_CFG)
+    _, buttons = cl.rc_to_joy(_channels(**{'4': 240}), DEFAULT_CFG)
     assert buttons[4] == 0 and buttons[5] == 0
 
 
@@ -145,7 +150,7 @@ def test_rc_to_joy_failsafe_is_neutral():
 
 def test_rc_to_joy_aux_buttons():
     cfg = dict(DEFAULT_CFG, aux_button_channels=[6], aux_button_indices=[0])
-    _, buttons = cl.rc_to_joy(_channels(**{'6': 2000}), cfg)
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1810}), cfg)
     assert buttons[0] == 1
 
 
@@ -154,7 +159,7 @@ def test_rc_to_joy_aux_buttons():
 
 def test_rc_to_channels_preserves_firmware_order_and_length():
     # Centered stick reads 0.0; full deflection reads +-1.0, in channel order.
-    out = cl.rc_to_channels(_channels(**{'0': 2000, '9': 1000}), DEFAULT_CFG)
+    out = cl.rc_to_channels(_channels(**{'0': 1810, '9': 240}), DEFAULT_CFG)
     assert len(out) == 10
     assert out[0] == 1.0
     assert out[9] == -1.0
@@ -163,6 +168,19 @@ def test_rc_to_channels_preserves_firmware_order_and_length():
 
 def test_rc_to_channels_failsafe_is_neutral():
     assert cl.rc_to_channels([-1] * 10, DEFAULT_CFG) == [0.0] * 10
+
+
+def test_rc_to_channels_on_the_sbus_scale():
+    # The car's own readings: sticks centred near 1023, full throw at the
+    # firmware's 240 and 1810, a switch held low at 240. Each reads as itself.
+    out = cl.rc_to_channels([1023, 240, 1810, 1025, 240, 240, 240, 1810, 1025, 1025], DEFAULT_CFG)
+    assert out == [0.0, -1.0, 1.0, 0.0, -1.0, -1.0, -1.0, 1.0, 0.0, 0.0]
+
+
+def test_default_cfg_matches_the_shipped_yaml():
+    shipped = yaml.safe_load(CONTROLLER_YAML.read_text())['controller_node']['ros__parameters']
+    for key in ('rc_min', 'rc_center', 'rc_max', 'rc_deadband', 'rc_failsafe_below'):
+        assert shipped[key] == DEFAULT_CFG[key], key
 
 
 def test_rc_to_channels_empty_and_none():
@@ -184,10 +202,15 @@ def test_battery_fraction_3s():
 # ---------- rc_link_up ----------
 
 
-def test_rc_link_up_for_pulse_widths():
+def test_rc_link_up_for_sbus_counts():
     assert cl.rc_link_up(_channels())
-    assert cl.rc_link_up(_channels(**{'0': 1000, '1': 2000}))
-    assert cl.rc_link_up(_channels(**{'0': 500, '1': 2500}))  # both band edges inclusive
+    assert cl.rc_link_up(_channels(**{'0': 240, '1': 1810}))
+    assert cl.rc_link_up(_channels(**{'0': 0, '1': 2047}))  # both band edges inclusive
+
+
+def test_rc_link_up_with_switches_held_low():
+    # Switches at their low end read 240; a live link, as on the car.
+    assert cl.rc_link_up(_channels(**{'4': 240, '5': 240, '6': 240}))
 
 
 def test_rc_link_down_when_the_transmitter_is_off():
@@ -198,10 +221,10 @@ def test_rc_link_down_on_one_dead_channel():
     assert not cl.rc_link_up(_channels(**{'3': -1}))
 
 
-def test_rc_link_down_on_an_impossible_width():
+def test_rc_link_down_on_an_impossible_count():
     assert not cl.rc_link_up(_channels(**{'3': 2600}))
-    assert not cl.rc_link_up(_channels(**{'3': 2501}))
-    assert not cl.rc_link_up(_channels(**{'3': 499}))
+    assert not cl.rc_link_up(_channels(**{'3': 2048}))
+    assert not cl.rc_link_up(_channels(**{'3': -2}))
 
 
 def test_rc_link_down_with_no_channels():

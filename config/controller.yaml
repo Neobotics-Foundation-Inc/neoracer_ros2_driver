@@ -32,12 +32,14 @@ controller_node:
     # are a starting point - confirm them on-car with `ros2 topic echo /joy` while
     # moving each stick/switch, then adjust. Indices are 0-based into "r".
     #
-    # Pulse-width calibration (microseconds):
-    rc_min: 1000
-    rc_center: 1500
-    rc_max: 2000
+    # Calibration in SBUS counts, the units of the "r" line. The firmware maps
+    # the same 240 to 1810 span onto the servo and the ESC in manual mode
+    # (SBUS_MIN and SBUS_MAX in its config.h), and 1025 is the midpoint.
+    rc_min: 240
+    rc_center: 1025
+    rc_max: 1810
     rc_deadband: 0.05           # normalized; |value| below this snaps to 0
-    rc_failsafe_below: 500      # any channel below this is treated as no-signal -> neutral
+    rc_failsafe_below: 0        # the firmware's -1 (no signal) maps to neutral
 
     # Joy frame shape. Triggers (axes 2 & 5) rest at +1.0 to match the Xbox
     # convention the student library and the mux arming check assume.

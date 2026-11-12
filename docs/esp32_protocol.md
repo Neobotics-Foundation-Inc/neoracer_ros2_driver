@@ -17,7 +17,7 @@ firmware streamed IMU and odometry as separate lines. The driver parses both.
 | `b` | `b volts` | battery voltage @ ~0.5 Hz (V1.1) | `/battery/state` (sensor_msgs/BatteryState: voltage, 3S charge fraction, current NaN), `/battery` (the same message, kept one more release) + `/battery/voltage` |
 | `i` | `i qx qy qz qw ax ay az gx gy gz` | IMU: quaternion, accel (m/s^2), gyro (rad/s) (legacy, pre-V1.1) | `/imu/fused` (sensor_msgs/Imu) |
 | `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) (legacy, pre-V1.1) | `/odom` (nav_msgs/Odometry) + `/encoder/speed` |
-| `r` | `r c1 c2 ... c10` | FlySky RC channels (ints; `-1` = no signal) | `/joy` (sensor_msgs/Joy) + `/rc/channels` + `/rc/link` (std_msgs/Bool, true while every channel is a pulse width) |
+| `r` | `r c1 c2 ... c10` | FlySky RC channels (ints; `-1` = no signal) | `/joy` (sensor_msgs/Joy) + `/rc/channels` + `/rc/link` (std_msgs/Bool, true while every channel is an SBUS count, false while the firmware reports `-1`) |
 | `m` | `m x y z` | magnetometer (Gauss) | `/mag` (sensor_msgs/MagneticField) |
 
 The firmware also emits admin chatter (`FW...`, `DIAG...`, `LINK...`, `link`
@@ -52,7 +52,7 @@ consumers at once - `gamepad_node` (reads `axes[1]`/`axes[3]`), `mux_node`
 student controller API (Xbox-style layout). Everything is parameterized in
 `config/controller.yaml`:
 
-- `rc_min/center/max` (1000/1500/2000 us) + `rc_deadband` calibrate each channel
+- `rc_min/center/max` (240/1025/1810 SBUS counts, the firmware's own span) + `rc_deadband` calibrate each channel
   to `[-1, 1]`; a reading below `rc_failsafe_below` (e.g. `-1`) -> neutral.
 - `throttle_channel` -> `axes[1]`, `steering_channel` -> `axes[3]`.
 - `mode_channel` is a 3-position switch: low -> idle, mid -> manual (`buttons[4]`),
