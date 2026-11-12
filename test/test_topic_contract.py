@@ -14,7 +14,11 @@ publisher; a TRANSIENT_LOCAL subscriber needs a TRANSIENT_LOCAL publisher).
 Every read of the deployed fork must be live: the 0.9.0 driver may not break
 the cars in the field.
 
-The readers' QoS comes from their sources at the refs named in each End.
+Evidence is matched against code only: comments, docstrings and YAML or
+XML comments are stripped first, so a commented-out publisher does not count.
+A `path:line` reference into this repo must point at the line that sets the
+topic up, so the references cannot drift. The readers' QoS comes from their
+sources at the refs named in each End.
 Publishers outside this repo are checked against the 0.6.1 baseline bag
 recorded on the dev car on 2026-11-11 (BASELINE). Rows a later port feature
 adds are skipped with that feature's name until it lands, so the table grows
@@ -22,8 +26,10 @@ as the port does.
 """
 
 from dataclasses import dataclass
+import io
 from pathlib import Path
 import re
+import tokenize
 
 import pytest
 
@@ -122,6 +128,10 @@ FORK_PHYSICS = 'physics_real.py:57 (depth 1)'
 AUTONOMY = 'launch/autonomy.launch.py'
 FRAMES_URDF = 'urdf/neoracer.urdf.xacro'
 TELEOP = 'launch/teleop.launch.py'
+TOOL = 'scripts/racecar-tool.sh'
+# racecar mapping and racecar navigation start the vendor SLAM and Nav2.
+MAPPING_CMD = (TOOL, 'exec ros2 launch osracer_slam "$sub.launch.py"')
+NAVIGATION_CMD = (TOOL, 'exec ros2 launch osracer_navigation nav2.launch.py')
 SLAM_INCLUDE = (
     AUTONOMY,
     "get_package_share_directory('osracer_slam'), 'launch', 'slam_toolbox.launch.py'",
@@ -155,14 +165,17 @@ TABLE = (
     Row(
         '/joy',
         'sensor_msgs/msg/Joy',
-        publishers=(End('controller_node', f'{CONTROLLER}:176', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:190', REL),),
         subscribers=(
             End(LIB, 'library/real/controller_real.py:89 (depth 1)', REL),
             _fork('controller_real.py:89 (depth 1)', REL),
             End('mux_node', 'neoracer_ros2_driver/mux_node.py:96', BE),
             End('gamepad_node', 'neoracer_ros2_driver/gamepad_node.py:51', BE),
         ),
-        evidence=((CONTROLLER, "create_publisher(Joy, '/joy', 10)"),),
+        evidence=(
+            (CONTROLLER, "create_publisher(Joy, '/joy', 10)"),
+            ('config/controller.yaml', 'publish_joy: true'),
+        ),
         note='both libraries subscribe RELIABLE, so /joy must stay RELIABLE',
     ),
     Row(
@@ -170,19 +183,25 @@ TABLE = (
         'sensor_msgs/msg/LaserScan',
         publishers=(End('lakibeam1 scan node', 'launch/lidar.launch.py', REL),),
         subscribers=SCAN_READERS,
-        evidence=(('launch/lidar.launch.py', 'lakibeam1'),),
+        evidence=(
+            ('launch/lidar.launch.py', 'lakibeam1'),
+            (
+                'launch/lidar.launch.py',
+                "DeclareLaunchArgument('output_topic', default_value='scan')",
+            ),
+        ),
     ),
     Row(
         '/imu/fused',
         'sensor_msgs/msg/Imu',
-        publishers=(End('controller_node', f'{CONTROLLER}:150', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:164', REL),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
     Row(
         '/mag',
         'sensor_msgs/msg/MagneticField',
-        publishers=(End('controller_node', f'{CONTROLLER}:178', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:192', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (CONTROLLER, "create_publisher(MagneticField, '/mag', qos_profile_sensor_data)"),
@@ -192,7 +211,7 @@ TABLE = (
     Row(
         '/encoder/speed',
         'std_msgs/msg/Float32',
-        publishers=(End('controller_node', f'{CONTROLLER}:165', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:179', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
@@ -201,15 +220,15 @@ TABLE = (
     Row(
         '/battery/state',
         'sensor_msgs/msg/BatteryState',
-        publishers=(End('controller_node', f'{CONTROLLER}:156', REL),),
-        subscribers=(End(LIB, PHYSICS, BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:170', REL),),
+        subscribers=(End(LIB, 'library/real/physics_real.py:78 (depth 10)', REL),),
         evidence=((CONTROLLER, "create_publisher(BatteryState, '/battery/state', 10)"),),
-        note='added by F07',
+        note='added by F07; the library subscribes RELIABLE, so /battery/state must stay RELIABLE',
     ),
     Row(
         '/rc/channels',
         'std_msgs/msg/Float32MultiArray',
-        publishers=(End('controller_node', f'{CONTROLLER}:168', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:182', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
         evidence=(
             (
@@ -237,6 +256,7 @@ TABLE = (
                 'neoracer_ros2_driver/inference_node.py',
                 "declare_parameter('detections_topic', '/edgetpu/inference')",
             ),
+            ('config/inference.yaml', 'detections_topic: "/edgetpu/inference"'),
         ),
         note='pursuit and smartfollow subscribe RELIABLE, so detections must stay RELIABLE',
     ),
@@ -273,14 +293,14 @@ TABLE = (
         '/map',
         'nav_msgs/msg/OccupancyGrid',
         publishers=(
-            End('slam_toolbox', f'{AUTONOMY} slam:=true (osracer_slam)', REL, TL),
-            End('nav2 map_server', f'{AUTONOMY} nav:=true (osracer_navigation)', REL, TL),
+            End('slam_toolbox', f'racecar mapping ({TOOL}), {AUTONOMY} slam:=true', REL, TL),
+            End('nav2 map_server', f'racecar navigation ({TOOL}), {AUTONOMY} nav:=true', REL, TL),
         ),
         subscribers=(
             End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),
             _fork('slam_real.py:52 (latched)', REL, TL),
         ),
-        evidence=(SLAM_INCLUDE, NAV_INCLUDE),
+        evidence=(SLAM_INCLUDE, NAV_INCLUDE, MAPPING_CMD, NAVIGATION_CMD),
         note=f'{VENDOR}; F24 replaces the vendor SLAM and must keep /map latched',
     ),
     Row(
@@ -329,6 +349,7 @@ TABLE = (
                 'neoracer_ros2_driver/led_matrix_node.py',
                 "declare_parameter('input_topic', '/dotmatrix/text')",
             ),
+            ('config/led_matrix.yaml', 'input_topic: "/dotmatrix/text"'),
         ),
     ),
     Row(
@@ -347,7 +368,7 @@ TABLE = (
     Row(
         '/odom',
         'nav_msgs/msg/Odometry',
-        publishers=(End('controller_node', f'{CONTROLLER}:151', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:165', REL),),
         subscribers=ODOM_READERS,
         evidence=((CONTROLLER, "create_publisher(Odometry, '/odom', 10)"),),
     ),
@@ -384,7 +405,7 @@ TABLE = (
         '/motor',
         'ackermann_msgs/msg/AckermannDriveStamped',
         publishers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:42', BE),),
-        subscribers=(End('controller_node', f'{CONTROLLER}:141', BE),),
+        subscribers=(End('controller_node', f'{CONTROLLER}:155', BE),),
         evidence=(
             (
                 'neoracer_ros2_driver/throttle_node.py',
@@ -400,8 +421,8 @@ TABLE = (
     Row(
         '/battery',
         'sensor_msgs/msg/BatteryState',
-        publishers=(End('controller_node', f'{CONTROLLER}:153', BE),),
-        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:123', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:167', BE),),
+        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:152', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(BatteryState, '/battery', qos_profile_sensor_data)"),
         ),
@@ -410,7 +431,7 @@ TABLE = (
     Row(
         '/battery/voltage',
         'std_msgs/msg/Float32',
-        publishers=(End('controller_node', f'{CONTROLLER}:162', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:176', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/battery/voltage', qos_profile_sensor_data)"),
         ),
@@ -420,7 +441,7 @@ TABLE = (
     Row(
         '/rc/link',
         'std_msgs/msg/Bool',
-        publishers=(End('controller_node', f'{CONTROLLER}:172', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:186', BE),),
         evidence=((CONTROLLER, "create_publisher(Bool, '/rc/link', qos_profile_sensor_data)"),),
         note='added by F08; the mux subscribes in F12',
     ),
@@ -445,9 +466,14 @@ TABLE = (
         'TF map -> base_footprint',
         'tf2_msgs/msg/TFMessage',
         publishers=(
-            End('robot_localization EKF (odom -> base_link)', f'{AUTONOMY}:130', REL),
+            End('robot_localization EKF (odom -> base_link)', f'{AUTONOMY}:118', REL),
             End('robot_state_publisher (base_link -> base_footprint, static)', FRAMES_URDF, REL),
-            End('slam_toolbox (map -> odom)', f'{AUTONOMY} slam:=true', REL),
+            End(
+                'slam_toolbox (map -> odom)',
+                f'racecar mapping ({TOOL}), {AUTONOMY} slam:=true',
+                REL,
+            ),
+            End('AMCL (map -> odom)', f'racecar navigation ({TOOL}), osracer_navigation', REL),
         ),
         subscribers=(
             _fork('slam_real.py:77 (lookup_transform)', REL),
@@ -458,19 +484,22 @@ TABLE = (
             (FRAMES_URDF, '<child link="base_footprint" />'),
             (TELEOP, "'frames': 'true'"),
             SLAM_INCLUDE,
+            MAPPING_CMD,
+            NAV_INCLUDE,
+            NAVIGATION_CMD,
         ),
         kind='frame',
         note=(
             f'{VENDOR}; since F05 the EKF publishes odom -> base_link and the teleop frames '
             'publish base_footprint as a static child of base_link for one release; '
-            'F24 keeps map -> odom'
+            'F24 keeps map -> odom (slam_toolbox when mapping, AMCL when navigating)'
         ),
     ),
     Row(
         '/slam_toolbox/serialize_map',
         'slam_toolbox/srv/SerializePoseGraph',
         subscribers=(_fork('slam_real.py:63 (client)', REL),),
-        evidence=(SLAM_INCLUDE,),
+        evidence=(SLAM_INCLUDE, MAPPING_CMD),
         kind='service',
         note=f'{VENDOR}; F24 must keep slam_toolbox under this name until F45',
     ),
@@ -478,7 +507,7 @@ TABLE = (
         '/slam_toolbox/deserialize_map',
         'slam_toolbox/srv/DeserializePoseGraph',
         subscribers=(_fork('slam_real.py:66 (client)', REL),),
-        evidence=(SLAM_INCLUDE,),
+        evidence=(SLAM_INCLUDE, MAPPING_CMD),
         kind='service',
         note=VENDOR,
     ),
@@ -486,7 +515,7 @@ TABLE = (
         '/slam_toolbox/clear_changes',
         'slam_toolbox/srv/Clear',
         subscribers=(_fork('slam_real.py:69 (client)', REL),),
-        evidence=(SLAM_INCLUDE,),
+        evidence=(SLAM_INCLUDE, MAPPING_CMD),
         kind='service',
         note=VENDOR,
     ),
@@ -494,7 +523,7 @@ TABLE = (
         '/compute_path_to_pose',
         'nav2_msgs/action/ComputePathToPose',
         subscribers=(_fork('nav_real.py:48 (action client)', REL),),
-        evidence=(NAV_INCLUDE,),
+        evidence=(NAV_INCLUDE, NAVIGATION_CMD),
         kind='action',
         note='live under racecar navigation (vendor Nav2); plan D1 decides how rc.nav is served',
     ),
@@ -546,6 +575,59 @@ def _squash(text):
     return re.sub(r'\s+', '', text)
 
 
+def _python_code(text):
+    """Return Python source without comments, docstrings or bare string statements."""
+    tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    skip = {tokenize.NL, tokenize.COMMENT}
+    starts = {None, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT}
+    kept, prev = [], None
+    for i, tok in enumerate(tokens):
+        if tok.type == tokenize.COMMENT:
+            continue
+        if tok.type == tokenize.STRING and prev in starts:
+            after = i + 1
+            nxt = next((n for n in tokens[after:] if n.type not in skip), None)
+            if nxt is None or nxt.type in (tokenize.NEWLINE, tokenize.ENDMARKER):
+                prev = tok.type
+                continue
+        kept.append(tok.string)
+        if tok.type not in skip:
+            prev = tok.type
+    return ' '.join(kept)
+
+
+def _yaml_code(text):
+    """Return YAML without `#` comments (a `#` at a line start or after a space)."""
+    lines = []
+    for line in text.splitlines():
+        quote, cut = None, len(line)
+        for i, ch in enumerate(line):
+            if quote:
+                quote = None if ch == quote else quote
+            elif ch in '"\'':
+                quote = ch
+            elif ch == '#' and (i == 0 or line[i - 1].isspace()):
+                cut = i
+                break
+        lines.append(line[:cut])
+    return '\n'.join(lines)
+
+
+def _code_text(path):
+    """Return a source file's text with its comments and docstrings removed."""
+    text = Path(path).read_text()
+    name = Path(path).name
+    if name.endswith('.py'):
+        return _python_code(text)
+    if name.endswith(('.yaml', '.yml')):
+        return _yaml_code(text)
+    if name.endswith(('.xacro', '.urdf', '.xml', '.launch')):
+        return re.sub(r'<!--.*?-->', '', text, flags=re.S)
+    if name.endswith('.sh'):
+        return '\n'.join(ln for ln in text.splitlines() if not ln.lstrip().startswith('#'))
+    return text
+
+
 def _skip_unless_live(row):
     if row.absent:
         pytest.skip(f'{row.name}: not on the NeoRacer ({row.absent})')
@@ -577,7 +659,7 @@ def test_the_driver_side_is_in_the_sources(row):
     _skip_unless_live(row)
     assert row.evidence, f'{row.name} has no evidence in the driver sources'
     for path, text in row.evidence:
-        source = _squash((ROOT / path).read_text())
+        source = _squash(_code_text(ROOT / path))
         assert _squash(text) in source, f'{row.name}: {path} lacks {text!r}'
 
 
@@ -640,6 +722,53 @@ def test_every_fork_write_reaches_the_driver():
         row = rows[name]
         assert any(p.who == FORK for p in row.publishers), name
         assert row in LIVE and row.subscribers, name
+
+
+def test_comments_and_docstrings_do_not_count(tmp_path):
+    py = tmp_path / 'node.py'
+    py.write_text(
+        '"""Module: create_publisher(Joy, \'/joy\', 10)."""\n\n\n'
+        'def make(node):\n'
+        '    """create_publisher(Imu, \'/imu/fused\', 10)"""\n'
+        "    # node.create_publisher(Odometry, '/odom', 10)\n"
+        "    return node.create_publisher(Bool, '/rc/link', 1)  # live\n"
+    )
+    code = _squash(_code_text(py))
+    assert _squash("create_publisher(Joy, '/joy', 10)") not in code
+    assert _squash("create_publisher(Imu, '/imu/fused', 10)") not in code
+    assert _squash("create_publisher(Odometry, '/odom', 10)") not in code
+    assert _squash("create_publisher(Bool, '/rc/link', 1)") in code
+    yml = tmp_path / 'node.yaml'
+    yml.write_text('# publish_joy: true\nlabel: "a # b"  # trailing\npublish_mag: true\n')
+    code = _squash(_code_text(yml))
+    assert 'publish_joy:true' not in code
+    assert 'publish_mag:true' in code and 'label:"a#b"' in code
+    xacro = tmp_path / 'car.urdf.xacro'
+    xacro.write_text('<robot><!-- <child link="laser" /> --><child link="base_link" /></robot>')
+    code = _squash(_code_text(xacro))
+    assert '<childlink="laser"/>' not in code and '<childlink="base_link"/>' in code
+
+
+def _repo_line_refs():
+    for row in TABLE:
+        for end in row.publishers + row.subscribers:
+            m = re.match(r'([\w./-]+\.(?:py|yaml|xacro|sh)):(\d+)', end.source)
+            if m and (ROOT / m.group(1)).is_file():
+                yield row, end, m.group(1), int(m.group(2))
+
+
+@pytest.mark.parametrize(
+    'row,end,path,line',
+    list(_repo_line_refs()),
+    ids=lambda v: v if isinstance(v, (str, int)) else getattr(v, 'name', getattr(v, 'who', '')),
+)
+def test_line_references_point_at_the_topic(row, end, path, line):
+    # The referenced line, or one of the two after it (a call split over
+    # lines), names the topic, the message type or the node.
+    first, last = line - 1, line + 2
+    window = ' '.join((ROOT / path).read_text().splitlines()[first:last])
+    needles = {row.name, row.msg_type.rsplit('/', 1)[-1], end.who.split()[0]}
+    assert any(n in window for n in needles), f'{path}:{line} for {row.name} ({end.who})'
 
 
 def test_the_table_covers_the_feature_map():
