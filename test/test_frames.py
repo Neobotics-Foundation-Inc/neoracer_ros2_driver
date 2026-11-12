@@ -35,6 +35,12 @@ SPEC_OUTLINE_BOTTOM_Z = -0.02298
 # return straight ahead (m), and the LakiBeam's documented accuracy (m).
 CAR_WALL_RANGE = 0.306
 LIDAR_ACCURACY = 0.02
+# Tape on the dev car, 2026-11-12 (mm above the floor): the chassis tub's
+# underside, and the LakiBeam's top. The spec's 184 mm runs from the tub's
+# underside to the LiDAR's top. The real body sits higher than the CAD.
+CAR_TUB_UNDERSIDE_MM = 30.0
+CAR_LIDAR_TOP_MM = 218.0
+SPEC_TUB_TO_LIDAR_TOP_MM = 184.0
 
 
 def _spec_to_base_link_mm(p: tuple[float, float, float]) -> list[float]:
@@ -253,22 +259,31 @@ class TestNeoRacer:
         assert len(children) == len(set(children))
         assert links - set(children) == {'base_link'}
 
-    def test_offsets_are_the_spec_in_base_link(self, values):
-        for key, point in (('laser', SPEC_LIDAR), ('camera', SPEC_CAMERA), ('imu', SPEC_IMU)):
+    def test_offsets_are_the_spec_in_base_link_lifted_as_measured(self, values):
+        # x and y are the spec's; z adds the lift the tape measured on the car.
+        spec_tub = _spec_to_base_link_mm((0.0, 0.0, SPEC_OUTLINE_BOTTOM_Z))[2]
+        body_lift = CAR_TUB_UNDERSIDE_MM - spec_tub
+        lidar_lift = CAR_LIDAR_TOP_MM - (spec_tub + SPEC_TUB_TO_LIDAR_TOP_MM)
+        for key, point, lift in (
+            ('laser', SPEC_LIDAR, lidar_lift),
+            ('camera', SPEC_CAMERA, body_lift),
+            ('imu', SPEC_IMU, body_lift),
+        ):
+            want = _spec_to_base_link_mm(point)
+            want[2] += lift
             got = [values[f'{key}_x_mm'], values[f'{key}_y_mm'], values[f'{key}_z_mm']]
-            assert got == pytest.approx(_spec_to_base_link_mm(point), abs=0.01), key
+            assert got == pytest.approx(want, abs=0.01), key
 
     def test_footprint_is_the_spec_outline(self, values):
         front = _spec_to_base_link_mm((SPEC_OUTLINE_FRONT_X, 0.0, 0.0))[0]
         rear = _spec_to_base_link_mm((SPEC_OUTLINE_REAR_X, 0.0, 0.0))[0]
-        bottom = _spec_to_base_link_mm((0.0, 0.0, SPEC_OUTLINE_BOTTOM_Z))[2]
         assert values['footprint_front_x_mm'] == pytest.approx(front, abs=0.01)
         assert values['footprint_rear_x_mm'] == pytest.approx(rear, abs=0.01)
         assert values['footprint_left_y_mm'] == pytest.approx(SPEC_OUTLINE_LEFT_Y * 1e3, abs=0.01)
         assert values['footprint_right_y_mm'] == pytest.approx(
             SPEC_OUTLINE_RIGHT_Y * 1e3, abs=0.01
         )
-        assert values['ride_height_mm'] == pytest.approx(bottom, abs=0.01)
+        assert values['ride_height_mm'] == pytest.approx(CAR_TUB_UNDERSIDE_MM, abs=0.01)
 
     def test_lidar_matches_the_wall_check(self, values):
         # The CAD's front of the body ahead of the scan center, against the
