@@ -304,6 +304,9 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius
   font: 600 13px/18px var(--nr-font-sans); white-space: pre; z-index: 5; }
 .nr-chart .empty { position: absolute; inset: 0; display: grid; place-items: center; }
 
+/* ── Code and command output (upstream's rcn-code) ── */
+pre.nr-code, .nr-code { background: var(--nr-well); color: var(--nr-ink-2); font: 400 13px/20px var(--nr-font-mono); border: 1px solid var(--nr-edge); border-radius: var(--nr-radius-md); padding: 12px 16px; white-space: pre-wrap; margin: 0; }
+
 /* ── Icons from /ui/icons.svg: 24 px line drawings, 2 px stroke, round caps ── */
 .nr-icon { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 

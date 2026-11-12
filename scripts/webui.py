@@ -19,7 +19,7 @@ CACHE_CONTROL = 'max-age=300'
 # Pages link the shared files as /ui/<file>?v=ASSET_VERSION; bump it when
 # neoracer.css, charts.js, theme.js or lost.js changes, so browsers fetch the
 # new copy at once.
-ASSET_VERSION = '1'
+ASSET_VERSION = '2'
 TYPES = {
     '.css': 'text/css; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
