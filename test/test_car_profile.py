@@ -1,4 +1,4 @@
-"""Tests for neoracer_ros2_driver.car_profile and scripts/racecar_profile.py."""
+"""Tests for neoracer_ros2_driver.car_profile and scripts/neoracer_profile.py."""
 
 from datetime import datetime
 from pathlib import Path
@@ -166,14 +166,14 @@ class TestExportImport:
 
 class TestCommand:
     def test_path_and_show(self, car_profile_dir, capsys):
-        cli = load_script('racecar_profile')
+        cli = load_script('neoracer_profile')
         assert cli.main(['path']) == 0
         assert capsys.readouterr().out.strip() == str(car_profile_dir)
         assert cli.main([]) == 0
         assert f'Car profile: {car_profile_dir}' in capsys.readouterr().out
 
     def test_check_names_ignored_files(self, tree, monkeypatch, capsys):
-        cli = load_script('racecar_profile')
+        cli = load_script('neoracer_profile')
         config, dashboards = tree
         monkeypatch.setattr(cli, 'PACKAGE_ROOT', config.parent)
         monkeypatch.setattr(cli, 'HERE', dashboards.parent)
@@ -183,9 +183,9 @@ class TestCommand:
 
     def test_tool_and_setup_run_it(self):
         tool = (ROOT / 'scripts' / 'racecar-tool.sh').read_text()
-        assert 'scripts/racecar_profile.py' in tool
-        assert 'racecar_profile.py" migrate' in (ROOT / 'scripts' / 'setup_all.sh').read_text()
-        assert 'racecar_profile.py" check' in (ROOT / 'scripts' / 'launch_teleop.sh').read_text()
+        assert 'scripts/neoracer_profile.py' in tool
+        assert 'neoracer_profile.py" migrate' in (ROOT / 'scripts' / 'setup_all.sh').read_text()
+        assert 'neoracer_profile.py" check' in (ROOT / 'scripts' / 'launch_teleop.sh').read_text()
 
 
 def test_the_driver_folder_has_no_per_car_files_in_git():

@@ -113,8 +113,8 @@ racecar() {
 
         profile)
             # This car's settings outside the driver folder; see
-            # scripts/racecar_profile.py and neoracer_ros2_driver/car_profile.py.
-            python3 "${RACECAR_PROFILE_SCRIPT:-$pkg_dir/scripts/racecar_profile.py}" "$@"
+            # scripts/neoracer_profile.py and neoracer_ros2_driver/car_profile.py.
+            python3 "${RACECAR_PROFILE_SCRIPT:-$pkg_dir/scripts/neoracer_profile.py}" "$@"
             ;;
 
         source)
