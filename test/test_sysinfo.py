@@ -28,6 +28,23 @@ CAR_HWMON_NAMES = ['usb_charger', 'pwmfan', 'ina3221', 'pwm_tach', 'soctherm_oc'
 CAR_CPU_MAX_KHZ = '1728000'
 CAR_CPU_CUR_KHZ = '1344000'
 CAR_NVPMODEL = 'NV Power Mode: 25W\n1\n'
+# The INA3221 power monitor on the dev car, 2026-11-12: labels, bus voltages
+# (mV) and currents (mA). in4 to in6 are the shunt voltages; in7 is their sum.
+CAR_INA3221_LABELS = {1: 'VDD_IN', 2: 'VDD_CPU_GPU_CV', 3: 'VDD_SOC', 7: 'sum of shunt voltages'}
+CAR_INA3221_IN = {1: 5072, 2: 5064, 3: 5072, 4: 6600, 5: 1840, 6: 1640, 7: 12520}
+CAR_INA3221_CURR = {1: 1320, 2: 376, 3: 328, 4: 2240}
+# The fan on the dev car, 2026-11-12: pwmfan pwm1 and pwm_tach rpm.
+CAR_FAN_PWM = '41'
+CAR_FAN_RPM = '1641'
+# The devfreq entries on the dev car, 2026-11-12, with their cur_freq in Hz.
+CAR_DEVFREQ = {
+    '15340000.vic': 435200000,
+    '15380000.nvjpg': 499200000,
+    '15480000.nvdec': 524800000,
+    '15540000.nvjpg': 499200000,
+    '15a50000.ofa': 537600000,
+    '17000000.gpu': 306000000,
+}
 CAR_TEGRASTATS = [
     '11-11-2026 23:28:49 RAM 2771/7620MB (lfb 2x4MB) SWAP 0/3810MB (cached 0MB) '
     'CPU [57%@1190,43%@1190,53%@1190,52%@1190,52%@729,52%@729] GR3D_FREQ 78% '
@@ -444,3 +461,85 @@ class TestFormatUptime:
 
     def test_the_cars_uptime(self):
         assert sysinfo.format_uptime(CAR_UPTIME_SEC) == '16m'
+
+
+def _power_tree(root):
+    """Build a hwmon tree holding the car's INA3221 files."""
+    h = root / 'hwmon2'
+    h.mkdir(parents=True)
+    (h / 'name').write_text('ina3221\n')
+    for n, label in CAR_INA3221_LABELS.items():
+        (h / f'in{n}_label').write_text(label + '\n')
+    for n, mv in CAR_INA3221_IN.items():
+        (h / f'in{n}_input').write_text(f'{mv}\n')
+    for n, ma in CAR_INA3221_CURR.items():
+        (h / f'curr{n}_input').write_text(f'{ma}\n')
+    return root
+
+
+class TestPowerRails:
+    def test_the_cars_rails(self, tmp_path):
+        rails = sysinfo.read_power_rails(_power_tree(tmp_path))
+        assert rails == {
+            'VDD_CPU_GPU_CV': {'mv': 5064, 'ma': 376, 'mw': 1904},
+            'VDD_IN': {'mv': 5072, 'ma': 1320, 'mw': 6695},
+            'VDD_SOC': {'mv': 5072, 'ma': 328, 'mw': 1664},
+        }
+
+    def test_the_sum_of_shunt_voltages_is_left_out(self, tmp_path):
+        assert 'sum of shunt voltages' not in sysinfo.read_power_rails(_power_tree(tmp_path))
+
+    def test_no_power_monitor_is_empty(self, tmp_path):
+        assert sysinfo.read_power_rails(_hwmon_tree(tmp_path)) == {}
+
+
+class TestFan:
+    def _fan_tree(self, root, pwm=CAR_FAN_PWM, rpm=CAR_FAN_RPM):
+        for i, (name, file, value) in enumerate(
+            [('pwmfan', 'pwm1', pwm), ('pwm_tach', 'rpm', rpm)], start=1
+        ):
+            h = root / f'hwmon{i}'
+            h.mkdir()
+            (h / 'name').write_text(name + '\n')
+            if value is not None:
+                (h / file).write_text(value + '\n')
+        return root
+
+    def test_the_cars_fan(self, tmp_path):
+        fan = sysinfo.read_fan(self._fan_tree(tmp_path))
+        assert fan == {'pwm': 41, 'percent': 16, 'rpm': 1641}
+
+    def test_a_missing_tachometer_reading_is_none(self, tmp_path):
+        fan = sysinfo.read_fan(self._fan_tree(tmp_path, rpm=None))
+        assert fan == {'pwm': 41, 'percent': 16, 'rpm': None}
+
+    def test_no_fan_is_none(self, tmp_path):
+        (tmp_path / 'hwmon0').mkdir()
+        (tmp_path / 'hwmon0' / 'name').write_text('ina3221\n')
+        assert sysinfo.read_fan(tmp_path) is None
+
+
+class TestGpu:
+    # The car's GPU max_freq and load were not read; 1020000000 and 412 are
+    # made up, in the units the files use (Hz, tenths of a percent).
+    def _devfreq_tree(self, root, load='412'):
+        for name, hz in CAR_DEVFREQ.items():
+            d = root / name
+            d.mkdir()
+            (d / 'cur_freq').write_text(f'{hz}\n')
+            if name.endswith('.gpu'):
+                (d / 'max_freq').write_text('1020000000\n')
+                (d / 'device').mkdir()
+                if load is not None:
+                    (d / 'device' / 'load').write_text(load + '\n')
+        return root
+
+    def test_finds_the_gpu_among_the_cars_engines(self, tmp_path):
+        gpu = sysinfo.read_gpu(self._devfreq_tree(tmp_path))
+        assert gpu == {'load_pct': 41.2, 'cur_mhz': 306.0, 'max_mhz': 1020.0}
+
+    def test_a_missing_load_file_is_none(self, tmp_path):
+        assert sysinfo.read_gpu(self._devfreq_tree(tmp_path, load=None))['load_pct'] is None
+
+    def test_no_gpu_is_none(self, tmp_path):
+        assert sysinfo.read_gpu(tmp_path) is None

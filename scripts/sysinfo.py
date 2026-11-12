@@ -36,6 +36,14 @@ CPUFREQ_DIR = Path('/sys/devices/system/cpu/cpu0/cpufreq')
 SOC_TEMP_ZONE = 'tj-thermal'
 # hwmon driver name of the SoC's over-current throttle event counters.
 OC_HWMON_NAME = 'soctherm_oc'
+# hwmon driver names of the board's power monitor, the fan's PWM output and
+# the fan's tachometer.
+POWER_HWMON_NAME = 'ina3221'
+FAN_PWM_HWMON_NAME = 'pwmfan'
+FAN_TACH_HWMON_NAME = 'pwm_tach'
+DEVFREQ_DIR = Path('/sys/class/devfreq')
+# The GPU's devfreq entry is named after its bus address, 17000000.gpu on the Orin.
+GPU_DEVFREQ_SUFFIX = '.gpu'
 
 # RealSense publishes its per-stream rates on /diagnostics under these names.
 REALSENSE_DIAGNOSTIC_NAMES = {
@@ -186,19 +194,24 @@ def read_soc_temp(root: Path = THERMAL_DIR) -> float | None:
     return max(zones.values()) if zones else None
 
 
-def oc_hwmon_dir(root: Path = HWMON_DIR) -> Path | None:
+def hwmon_by_name(name: str, root: Path = HWMON_DIR) -> Path | None:
     """
-    Locate the SoC's over-current throttle counters, or None.
+    Locate the hwmon device whose driver is `name`, or None.
 
     hwmon numbering is not stable across boots, so match on the driver name.
     """
     for h in sorted(root.glob('hwmon*')):
         try:
-            if (h / 'name').read_text().strip() == OC_HWMON_NAME:
+            if (h / 'name').read_text().strip() == name:
                 return h
         except OSError:
             continue
     return None
+
+
+def oc_hwmon_dir(root: Path = HWMON_DIR) -> Path | None:
+    """Locate the SoC's over-current throttle counters, or None."""
+    return hwmon_by_name(OC_HWMON_NAME, root)
 
 
 def read_throttled(root: Path = HWMON_DIR) -> tuple[int | None, list[str]]:
@@ -241,6 +254,82 @@ def decode_throttled(text: str) -> tuple[int | None, list[str]]:
             flags |= 1 << (k - 1)
             active.append(f'over-current throttling oc{k} has occurred ({counts[k]} events)')
     return (flags, active)
+
+
+def _read_int(path: Path) -> int | None:
+    try:
+        return int(path.read_text().strip())
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def read_power_rails(root: Path = HWMON_DIR) -> dict[str, dict[str, int]]:
+    """
+    Return {rail label: {'mv', 'ma', 'mw'}} from the board's power monitor.
+
+    The INA3221 reports each channel's bus voltage (inN_input, mV) and current
+    (currN_input, mA); VDD_IN is the whole board. A labelled input with no
+    current, such as the sum of shunt voltages, is left out. Empty when the
+    board has no power monitor.
+    """
+    rails: dict[str, dict[str, int]] = {}
+    hwmon = hwmon_by_name(POWER_HWMON_NAME, root)
+    if hwmon is None:
+        return rails
+    for label_file in sorted(hwmon.glob('in*_label')):
+        channel = label_file.name.removeprefix('in').removesuffix('_label')
+        try:
+            label = label_file.read_text().strip()
+        except OSError:
+            continue
+        mv = _read_int(hwmon / f'in{channel}_input')
+        ma = _read_int(hwmon / f'curr{channel}_input')
+        if label and mv is not None and ma is not None:
+            rails[label] = {'mv': mv, 'ma': ma, 'mw': round(mv * ma / 1000)}
+    return rails
+
+
+def read_fan(root: Path = HWMON_DIR) -> dict[str, int | None] | None:
+    """
+    Return the fan's drive and speed, {'pwm': 0 to 255, 'percent', 'rpm'}, or None.
+
+    The duty comes from the pwmfan driver and the speed from the pwm_tach
+    tachometer; either value is None when its file does not read.
+    """
+    fan = hwmon_by_name(FAN_PWM_HWMON_NAME, root)
+    tach = hwmon_by_name(FAN_TACH_HWMON_NAME, root)
+    if fan is None and tach is None:
+        return None
+    pwm = _read_int(fan / 'pwm1') if fan is not None else None
+    rpm = _read_int(tach / 'rpm') if tach is not None else None
+    percent = round(pwm * 100 / 255) if pwm is not None else None
+    return {'pwm': pwm, 'percent': percent, 'rpm': rpm}
+
+
+def gpu_devfreq_dir(root: Path = DEVFREQ_DIR) -> Path | None:
+    """Locate the GPU's devfreq entry, or None."""
+    return next(iter(sorted(root.glob(f'*{GPU_DEVFREQ_SUFFIX}'))), None)
+
+
+def read_gpu(root: Path = DEVFREQ_DIR) -> dict[str, float | None] | None:
+    """
+    Return the GPU's load and clock, {'load_pct', 'cur_mhz', 'max_mhz'}, or None.
+
+    The clocks come from the GPU's devfreq entry in Hz. The load comes from the
+    GPU device's `load` file in tenths of a percent, the value tegrastats shows
+    as GR3D_FREQ. All three are file reads, cheap enough for a dashboard poll.
+    """
+    gpu = gpu_devfreq_dir(root)
+    if gpu is None:
+        return None
+    cur = _read_int(gpu / 'cur_freq')
+    top = _read_int(gpu / 'max_freq')
+    load = _read_int(gpu / 'device' / 'load')
+    return {
+        'load_pct': load / 10 if load is not None else None,
+        'cur_mhz': cur / 1e6 if cur is not None else None,
+        'max_mhz': top / 1e6 if top is not None else None,
+    }
 
 
 def read_cpu_times() -> tuple[int, int] | None:
