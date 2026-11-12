@@ -168,7 +168,7 @@ class ControllerNode(Node):
         self.rc_pub = self.create_publisher(
             Float32MultiArray, '/rc/channels', qos_profile_sensor_data
         )
-        # Link state from the raw pulse widths; see controller_lib.rc_link_up.
+        # Link state from the raw SBUS counts; see controller_lib.rc_link_up.
         self.rc_link_pub = self.create_publisher(Bool, '/rc/link', qos_profile_sensor_data)
         self._unknown_tags = set()
         # /joy is RELIABLE so the student controller API (a RELIABLE subscriber)
@@ -388,7 +388,7 @@ class ControllerNode(Node):
 
     def pub_rc_link(self, data):
         """Publish whether the transmitter link is up, from the raw ``r`` channels."""
-        up = controller_lib.rc_link_up(data['channels'], self._joy_cfg['rc_failsafe_below'])
+        up = controller_lib.rc_link_up(data['channels'])
         self.rc_link_pub.publish(Bool(data=up))
 
     def pub_mag(self, data):

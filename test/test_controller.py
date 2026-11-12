@@ -184,24 +184,36 @@ def test_battery_fraction_3s():
 # ---------- rc_link_up ----------
 
 
-def test_rc_link_up_for_pulse_widths():
+# Frames read on the dev car on 2026-11-11: at rest with the switches low, the
+# first frame after the handset comes back on, and the frame while it is off.
+CAR_REST_FRAME = [1023, 1023, 1023, 1023, 240, 240, 240, 240, 1023, 1023]
+CAR_RECONNECT_FRAME = [1023] * 10
+CAR_NO_SIGNAL_FRAME = [-1] * 10
+
+
+def test_rc_link_up_for_sbus_counts():
     assert cl.rc_link_up(_channels())
-    assert cl.rc_link_up(_channels(**{'0': 1000, '1': 2000}))
-    assert cl.rc_link_up(_channels(**{'0': 500, '1': 2500}))  # both band edges inclusive
+    assert cl.rc_link_up(_channels(**{'0': 240, '1': 1807}))
+    assert cl.rc_link_up(_channels(**{'0': 0, '1': 2047}))  # both band edges inclusive
+
+
+def test_rc_link_up_on_the_cars_frames():
+    assert cl.rc_link_up(CAR_REST_FRAME)
+    assert cl.rc_link_up(CAR_RECONNECT_FRAME)
 
 
 def test_rc_link_down_when_the_transmitter_is_off():
-    assert not cl.rc_link_up([-1] * 10)
+    assert not cl.rc_link_up(CAR_NO_SIGNAL_FRAME)
 
 
 def test_rc_link_down_on_one_dead_channel():
     assert not cl.rc_link_up(_channels(**{'3': -1}))
 
 
-def test_rc_link_down_on_an_impossible_width():
+def test_rc_link_down_on_an_impossible_count():
     assert not cl.rc_link_up(_channels(**{'3': 2600}))
-    assert not cl.rc_link_up(_channels(**{'3': 2501}))
-    assert not cl.rc_link_up(_channels(**{'3': 499}))
+    assert not cl.rc_link_up(_channels(**{'3': 2048}))
+    assert not cl.rc_link_up(_channels(**{'3': -2}))
 
 
 def test_rc_link_down_with_no_channels():
