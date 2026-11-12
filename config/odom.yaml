@@ -19,6 +19,7 @@ controller_node:
     # TF odom -> base_link from this topic. Off: the robot_localization EKF in
     # the autonomy launch publishes that transform, and a frame takes one
     # parent. Turn it on only where nothing else publishes odom -> base_link.
+    # With publish_tf in controller.yaml also on, only this one writes.
     odometry.publish_tf: false
 
     # /imu/fused is in REP-103 body axes (controller.yaml), so yaw rate is z: axis 2.

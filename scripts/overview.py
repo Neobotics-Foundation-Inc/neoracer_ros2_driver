@@ -31,6 +31,8 @@ import numpy as np
 
 IDLE_SEC = 10.0
 CAMERA_IDLE_SEC = 3.0
+# A camera frame older than this is not served, so a stopped camera shows No data.
+FRAME_STALE_SEC = 1.0
 CAMERAS = ('color',)
 GRAPH_SEC = 30.0
 GRAPH_HZ = 10.0
@@ -296,11 +298,14 @@ class Overview:
             imu = self._decode('imu')
             if imu is not None:
                 g, a = imu[0].angular_velocity, imu[0].linear_acceleration
-                rates = [round(math.degrees(v), 1) for v in (g.x, g.y, g.z)]
-                accel = [round(v, 2) for v in (a.x, a.y, a.z)]
-                self.imu.append([round(now, 2), *rates, *accel])
+                row = [g.x, g.y, g.z, a.x, a.y, a.z]
+                # JSON has no NaN, and one bad row would break /api/overview.
+                if all(math.isfinite(v) for v in row):
+                    rates = [round(math.degrees(v), 1) for v in row[:3]]
+                    accel = [round(v, 2) for v in row[3:]]
+                    self.imu.append([round(now, 2), *rates, *accel])
             enc = self._decode('encoder')
-            if enc is not None:
+            if enc is not None and math.isfinite(float(enc[0].data)):
                 self.speed.append([round(now, 2), round(float(enc[0].data), 3)])
 
     # -- page data --
@@ -349,7 +354,7 @@ class Overview:
             if cached and time.monotonic() - cached[1] < max_age:
                 return cached[0]
             decoded = self._decode(name)
-        if decoded is None:
+        if decoded is None or time.monotonic() - decoded[1] > FRAME_STALE_SEC:
             return None
         msg = decoded[0]
         if msg.encoding == 'jpeg':

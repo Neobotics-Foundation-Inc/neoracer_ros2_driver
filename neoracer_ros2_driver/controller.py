@@ -266,7 +266,8 @@ class ControllerNode(Node):
         Declare the odometry.* parameters (config/odom.yaml) and set up /odom/integrated.
 
         A bad value is logged and replaced by its default rather than stopping
-        the node, because this node also carries the drive commands.
+        the node, because this node also carries the drive commands. A wrong
+        type, for example 2.0 for the axis, still stops the node at startup.
         """
         enable = bool(self.declare_parameter('odometry.enable', True).value)
         source = str(self.declare_parameter('odometry.source', 'firmware').value)
@@ -305,6 +306,15 @@ class ControllerNode(Node):
         if rate_hz <= 0.0:
             self.get_logger().error('odometry.publish_rate_hz must be positive; using 50')
             rate_hz = 50.0
+        if stale_sec <= 0.0:
+            self.get_logger().error('odometry.stale_input_sec must be positive; using 0.25')
+            stale_sec = 0.25
+        if bias_tau_sec <= 0.0:
+            self.get_logger().error('odometry.bias_tau_sec must be positive; using 30')
+            bias_tau_sec = 30.0
+        if zero_hold_sec < 0.0:
+            self.get_logger().error('odometry.zero_hold_sec must not be negative; using 1')
+            zero_hold_sec = 1.0
         self._yaw_axis = int(axis)
         self._yaw_gain = yaw_rate_sign * yaw_rate_scale
         self._speed_scale = speed_scale
