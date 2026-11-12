@@ -9,7 +9,7 @@ at once, then waits a doubling backoff; after five restarts that did not hold
 a minute of health it is given up until its device is replugged, it recovers
 on its own, or teleop restarts. A node whose device is unplugged is never
 restarted. Every poll writes watchdog_state.json into the session log
-directory, which the dashboards and `racecar status` read.
+directory, where sysinfo.read_watchdog_state() reads it.
 """
 
 from __future__ import annotations
@@ -29,12 +29,16 @@ import time
 from types import FrameType
 from typing import Any, IO
 
+# Off the car rclpy is missing; the policy and helpers still load for the
+# tests, and main() reports why rclpy did not import.
+RCLPY_IMPORT_ERROR: ImportError | None = None
 try:
     import rclpy
     from rclpy.node import Node
     from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
-except ImportError:  # off the car: the policy and helpers still load for the tests
+except ImportError as exc:
     rclpy = None
+    RCLPY_IMPORT_ERROR = exc
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -74,6 +78,9 @@ LAKIBEAM_LIB = '/install/lakibeam1/lib/lakibeam1/lakibeam1_scan_node'
 
 # The LakiBeam answers at 192.168.8.2 over a USB-C network link, which the
 # Jetson names usb0 (scripts/setup_networking.sh, launch/lidar.launch.py).
+# Every NeoRacer uses this link. A LakiBeam wired over Ethernet
+# (sensorip:=192.168.198.2) has no usb0, so its lidar would read as unplugged
+# and never be restarted.
 LIDAR_IFACE = 'usb0'
 NET_DIR = Path('/sys/class/net')
 
@@ -653,7 +660,7 @@ def main() -> None:
     )
 
     if rclpy is None:
-        log.error('rclpy is not importable; source ROS 2 Humble first')
+        log.error('rclpy is not importable (%s); source ROS 2 Humble first', RCLPY_IMPORT_ERROR)
         sys.exit(1)
 
     signal.signal(signal.SIGTERM, _signal_handler)
