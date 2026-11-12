@@ -152,6 +152,42 @@ def parse_serial_data(line: str):
     return None, None
 
 
+# The identity axis remap: the firmware's IMU axes are already REP-103 body
+# axes (x forward, y left, z up), as measured on the dev car on 2026-11-12.
+IDENTITY_AXIS_ORDER = (0, 1, 2)
+IDENTITY_AXIS_SIGN = (1.0, 1.0, 1.0)
+
+
+def remap_axes(vec, order, sign, scale=1.0):
+    """Reorder, sign-flip and scale a 3-vector: out[i] = scale * sign[i] * vec[order[i]]."""
+    return tuple(scale * float(sign[i]) * float(vec[int(order[i])]) for i in range(3))
+
+
+def axis_remap_problem(order, sign):
+    """
+    Return why an axis remap is not a signed permutation of the axes, or ''.
+
+    order must hold 0, 1 and 2 once each; sign must hold three values, each
+    1.0 or -1.0. The controller falls back to the identity on a problem, so a
+    mistyped car profile cannot scramble /imu/fused.
+    """
+    try:
+        if len(order) != 3 or sorted(int(i) for i in order) != [0, 1, 2]:
+            return f'axis order {list(order)} is not a permutation of [0, 1, 2]'
+        if len(sign) != 3 or any(float(s) not in (1.0, -1.0) for s in sign):
+            return f'axis sign {list(sign)} must hold three values, each 1.0 or -1.0'
+    except (TypeError, ValueError):
+        return f'axis order {order!r} and sign {sign!r} must be lists of numbers'
+    return ''
+
+
+def is_identity_remap(order, sign):
+    """Report whether an axis remap leaves every axis where it is."""
+    return [int(i) for i in order] == list(IDENTITY_AXIS_ORDER) and [
+        float(s) for s in sign
+    ] == list(IDENTITY_AXIS_SIGN)
+
+
 def quaternion_from_euler(roll, pitch, yaw):
     """Convert an euler attitude (rad) to a quaternion ``[x, y, z, w]``."""
     cy = math.cos(yaw * 0.5)

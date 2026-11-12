@@ -18,6 +18,22 @@ controller_node:
     odom_frame: "odom"
     base_frame: "base_footprint"
 
+    # ---- IMU axes (REP-103) ----
+    # /imu/fused and /mag are REP-103 body axes: x forward, y left, z up.
+    # out[i] = sign[i] * in[order[i]] on the firmware's values. The dev car
+    # reads REP-103 with the identity (2026-11-12, docs/esp32_protocol.md):
+    # level accel z +10.0, nose down accel x -4.5, left side down accel y
+    # -4.9, a left turn gyro z positive. A board mounted another way is fixed
+    # in the car profile, params/controller.yaml, with no code change; the
+    # firmware's /odom yaw stays in the board's own axes. An
+    # accel/gyro remap other than the identity marks the firmware's
+    # orientation unknown, since the firmware fuses it in the board's axes.
+    imu.accel_gyro_axis_order: [0, 1, 2]
+    imu.accel_gyro_axis_sign: [1.0, 1.0, 1.0]
+    # The magnetometer's axes have not been checked on a car yet.
+    imu.mag_axis_order: [0, 1, 2]
+    imu.mag_axis_sign: [1.0, 1.0, 1.0]
+
     # ---- Optional publications ----
     # odom -> base_footprint TF is owned by the EKF in the autonomy base
     # service (robot_localization fusing /odom + IMU). Turn this on only if
