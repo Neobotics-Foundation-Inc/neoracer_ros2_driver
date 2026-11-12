@@ -12,6 +12,7 @@ Jetson counterpart and return None.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 import json
 import os
@@ -525,3 +526,65 @@ def read_watchdog_state(log_dir: Path | None = None) -> dict[str, Any] | None:
     state['age_sec'] = age
     state['stale'] = age > WATCHDOG_STALE_POLLS * float(state.get('poll_sec', 5))
     return state
+
+
+# How often HostPoller reads the slow facts again; each is a subprocess.
+SLOW_FACTS_SEC = 60.0
+
+
+def cpu_load_pct(prev: tuple[int, int] | None, cur: tuple[int, int] | None) -> float | None:
+    """Return the CPU load in percent between two read_cpu_times() samples, or None."""
+    if prev is None or cur is None:
+        return None
+    busy, total = cur[0] - prev[0], cur[1] - prev[1]
+    if total <= 0:
+        return None
+    return round(100.0 * busy / total, 1)
+
+
+class HostPoller:
+    """
+    Every cheap host reading in one dict, for a page that polls every few seconds.
+
+    Everything is a file read except the power mode and the NTP state, one
+    subprocess each, which are read again at most every SLOW_FACTS_SEC. The
+    CPU load is the busy share since the previous poll, None on the first.
+    tegrastats is never run here: it takes about 2 s to print a line.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._cpu: tuple[int, int] | None = None
+        self._slow: dict[str, Any] = {}
+        self._slow_at: float | None = None
+
+    def poll(self) -> dict[str, Any]:
+        """Return the readings now; see the class docstring for what is cached."""
+        now = self._clock()
+        if self._slow_at is None or now - self._slow_at >= SLOW_FACTS_SEC:
+            name, mode = read_power_mode()
+            self._slow = {
+                'power_mode': {'name': name, 'id': mode},
+                'ntp_synchronized': ntp_synchronized(),
+            }
+            self._slow_at = now
+        cpu = read_cpu_times()
+        load = cpu_load_pct(self._cpu, cpu)
+        self._cpu = cpu
+        cur_mhz, max_mhz = read_arm_clock()
+        flags, active = read_throttled()
+        uptime = read_uptime()
+        return {
+            'soc_temp_c': read_soc_temp(),
+            'temps_c': read_thermal_zones(),
+            'cpu': {'load_pct': load, 'cur_mhz': cur_mhz, 'max_mhz': max_mhz},
+            'memory_mib': read_memory(),
+            'disk_gib': read_disk(),
+            'gpu': read_gpu(),
+            'power_rails': read_power_rails(),
+            'fan': read_fan(),
+            'throttle': {'flags': flags, 'active': active},
+            'uptime_s': uptime,
+            'uptime': format_uptime(uptime) if uptime is not None else None,
+            **self._slow,
+        }

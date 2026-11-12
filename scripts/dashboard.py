@@ -10,11 +10,19 @@ import signal
 import sys
 import threading
 import time
+from urllib.parse import urlparse
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import BatteryState
+
+# The shared web assets and the host readings live beside this file. It is run
+# by path, so its folder goes on the path before they are imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import sysinfo  # noqa: E402, I100  sibling script, after the path insert
+import webui  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -461,17 +469,79 @@ def _load_dashboard_html() -> str:
 
 DASHBOARD_HTML = _load_dashboard_html()
 
+# The System Health page: the Jetson's live readings and the battery, on the
+# shared /ui/ styles. Read on each request, so an edited health.html shows on
+# the next reload.
+_HEALTH_PATH = Path(__file__).resolve().parent / 'health.html'
+_host_poller = sysinfo.HostPoller()
+_host_lock = threading.Lock()
+
+
+def _battery_host():
+    """Battery reading for /api/host: volts, charge percent, age and state, or None."""
+    sampler = _sampler
+    reading = sampler.battery() if sampler is not None else None
+    if reading is None:
+        return None
+    volts, age = reading
+    pct = min(1.0, max(0.0, (volts - BATTERY_V_MIN) / (BATTERY_V_MAX - BATTERY_V_MIN)))
+    if age > BATTERY_STALE_SEC:
+        state = 'stale'
+    elif volts < BATTERY_V_MIN:
+        state = 'charge'
+    elif volts < BATTERY_V_LOW:
+        state = 'low'
+    else:
+        state = 'ok'
+    return {
+        'volts': round(volts, 2),
+        'pct': round(pct * 100),
+        'age_s': round(age, 1),
+        'state': state,
+    }
+
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    """Serve GET / (HTML) and GET /api/status (JSON snapshot)."""
+    """Serve / and /health (HTML), /api/status and /api/host (JSON), and /ui/ (shared files)."""
 
     def do_GET(self):
-        if self.path == '/':
+        asset = webui.static_file(self.path)
+        route = urlparse(self.path).path
+        if asset is not None:
+            self._send(asset[0], asset[1], webui.CACHE_CONTROL)
+        elif route == '/':
             self._serve_html()
-        elif self.path == '/api/status':
+        elif route == '/api/status':
             self._serve_status()
+        elif route == '/health':
+            self._serve_health()
+        elif route == '/api/host':
+            self._serve_host()
         else:
             self.send_error(404)
+
+    def _send(self, body, content_type, cache=None):
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        if cache:
+            self.send_header('Cache-Control', cache)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_health(self):
+        try:
+            body = _HEALTH_PATH.read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self._send(body, 'text/html; charset=utf-8', 'no-store')
+
+    def _serve_host(self):
+        with _host_lock:
+            data = dict(_host_poller.poll())
+        data['battery'] = _battery_host()
+        self._send(json.dumps(data).encode(), 'application/json', 'no-store')
 
     def _serve_html(self):
         content = DASHBOARD_HTML.encode()
