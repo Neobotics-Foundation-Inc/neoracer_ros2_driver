@@ -113,8 +113,8 @@ class ControllerNode(Node):
         # Frames.
         self.imu_frame = self.declare_parameter('imu_frame', 'imu_link').value
         self.odom_frame = self.declare_parameter('odom_frame', 'odom').value
-        self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
-        # Broadcast odom -> base_footprint alongside /odom. SLAM and Nav2
+        self.base_frame = self.declare_parameter('base_frame', 'base_link').value
+        # Broadcast odom -> base_link alongside /odom. SLAM and Nav2
         # need the transform, and this node is the single odometry source
         # (the vendor chassis node broadcast it the same way).
         self.publish_tf = self.declare_parameter('publish_tf', True).value
