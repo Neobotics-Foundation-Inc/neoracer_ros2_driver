@@ -62,11 +62,11 @@
   <section class="nr-panel nr-span-6" aria-labelledby="t-camera" data-ov>
     <div class="nr-head">
       <h2 class="nr-panel-title" id="t-camera">Camera</h2>
-      <button type="button" class="nr-btn small" id="camera-toggle">Show camera</button>
+      <button type="button" class="nr-btn small" id="camera-toggle">Pause camera</button>
     </div>
     <div class="nr-view ov-frame" id="camera-view" hidden><img id="camera-img" alt="The camera's latest frame"></div>
     <div class="nr-nodes" id="camera-empty" hidden></div>
-    <p class="nr-note" id="camera-paused">Paused.</p>
+    <p class="nr-note" id="camera-paused" hidden>Paused.</p>
   </section>
 
   <section class="nr-panel nr-span-6" aria-labelledby="t-lidar" data-ov>
@@ -299,7 +299,7 @@
   const BATTERY_VIEW_S = 30 * 60;    // the battery chart's window; temperature and RAM show 2 h
   const LIDAR_RANGE_M = 4;           // metres from the car to the view's short edge
   const SVGNS = 'http://www.w3.org/2000/svg';
-  let ov = null, runHist = null, showCamera = false, frameTick = 0, frameMisses = 0, onScreen = true;
+  let ov = null, runHist = null, showCamera = true, frameTick = 0, frameMisses = 0, onScreen = true;
   // One request of each kind at a time, so a slow link does not stack them up.
   let ovBusy = false, histBusy = false, histRetry = null;
 
@@ -408,8 +408,8 @@
     next.src = `/api/overview/color.jpg?t=${frameTick++}`;
   }
 
-  // The camera starts paused on every page load, as upstream does: its frames
-  // are most of the page's traffic. The button's label names what it does next.
+  // The camera shows as soon as the page opens. The server reads frames only
+  // while a page asks for them. The button's label names what it does next.
   function setCamera(on) {
     showCamera = on;
     frameMisses = 0;
