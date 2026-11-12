@@ -13,7 +13,7 @@ firmware streamed IMU and odometry as separate lines. The driver parses both.
 
 | Prefix | Format | Meaning | Published as |
 |--------|--------|---------|--------------|
-| `s` | `s px py pz vx vy vz yaw qx qy qz qw ax ay az gx gy gz` | state @ ~200 Hz: odometry + IMU in one frame (V1.1) | `/odom` + `/imu/fused` + `/encoder/speed` |
+| `s` | `s px py pz vx vy vz yaw qx qy qz qw ax ay az gx gy gz` | state @ ~200 Hz: odometry + IMU in one frame (V1.1) | `/odom` + `/imu/fused` + `/encoder/speed` + `/odom/integrated` |
 | `b` | `b volts` | battery voltage @ ~0.5 Hz (V1.1) | `/battery/state` (sensor_msgs/BatteryState: voltage, 3S charge fraction, current NaN), `/battery` (the same message, kept one more release) + `/battery/voltage` |
 | `i` | `i qx qy qz qw ax ay az gx gy gz` | IMU: quaternion, accel (m/s^2), gyro (rad/s) (legacy, pre-V1.1) | `/imu/fused` (sensor_msgs/Imu) |
 | `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) (legacy, pre-V1.1) | `/odom` (nav_msgs/Odometry) + `/encoder/speed` |
@@ -68,6 +68,39 @@ profile with no code change for `/imu/fused` and `/mag`; the firmware's
 `/odom` yaw stays in the board's own axes. A non-identity accel/gyro remap marks the
 firmware's orientation unknown (`orientation_covariance[0] = -1`), because the
 firmware fuses it in the board's own axes.
+
+## Integrated odometry
+
+The controller publishes `/odom/integrated` (nav_msgs/Odometry) at 50 Hz from
+the `s` frame, with the parameters in `config/odom.yaml`. Per-car values go in
+the car profile, `params/odom.yaml`. `odometry.source` picks the pose:
+
+- `firmware` (the default): the frame's own `px`, `py` and `yaw`, which the
+  ESP32 integrates on board, scales with `odom scale set` and bias-corrects
+  when the car is stopped. The twist carries `vx` and the `/imu/fused` yaw rate.
+- `integrated`: `odometry.py` integrates `vx` (times `odometry.speed_scale`)
+  and the `/imu/fused` gyro z (times `odometry.yaw_rate_sign` and
+  `odometry.yaw_rate_scale`), with a gyro bias estimate while the wheels are
+  stopped and an optional turn correction (`odometry.turn_gain`, with the
+  spec's 287.64 mm wheelbase). `vx` already carries the firmware's
+  `odom scale set` factor.
+
+Both sources stamp the message with the `/imu/fused` stamp of the frame. The
+`odom -> base_link` transform from this topic is off (`odometry.publish_tf:
+false`), because the robot_localization EKF in the autonomy launch publishes
+that transform and a frame takes one parent. Firmware `/odom` is unchanged.
+Older firmware that sends separate `i` and `o` frames gets no
+`/odom/integrated`; the controller logs that once.
+
+A bad `odometry.source`, `odometry.yaw_rate_axis`, `odometry.publish_rate_hz`,
+`odometry.stale_input_sec`, `odometry.bias_tau_sec` or `odometry.zero_hold_sec`
+is logged as an error and replaced by its default. Upstream's node stops
+instead, but this node also carries the drive commands. A value of the wrong
+type, for example 2.0 for the axis, still stops the node at startup. If
+`publish_tf` in `controller.yaml` and `odometry.publish_tf` are both on, only
+`/odom/integrated` writes `odom -> base_link`, and the controller logs a
+warning. The `/imu/fused` gyro is already bias-corrected by the ESP32; the
+stopped-car estimate removes what is left.
 
 ## FlySky RC -> `/joy` mapping
 

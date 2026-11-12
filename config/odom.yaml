@@ -1,0 +1,49 @@
+# Integrated odometry in controller_node (neoracer_ros2_driver/odometry.py):
+# /odom/integrated, and optionally TF odom -> base_link, from each ESP32 `s`
+# frame's body speed vx and the /imu/fused yaw rate. Loaded by
+# controller.launch.py after controller.yaml. Per-car scales go in the car
+# profile, params/odom.yaml. Frame names come from controller.yaml
+# (odom_frame, base_frame).
+controller_node:
+  ros__parameters:
+    odometry.enable: true
+    odometry.topic: "/odom/integrated"
+
+    # Where the pose comes from. firmware: the ESP32's own pose (the `s`
+    # frame's px, py, yaw), which the firmware scales with `odom scale set`
+    # and bias-corrects when stopped. integrated: odometry.py on vx and the
+    # gyro, with the scales, the bias hold and the turn correction below.
+    # The default is chosen from the on-car acceptance numbers (plan D4).
+    odometry.source: "firmware"
+
+    # TF odom -> base_link from this topic. Off: the robot_localization EKF in
+    # the autonomy launch publishes that transform, and a frame takes one
+    # parent. Turn it on only where nothing else publishes odom -> base_link.
+    # With publish_tf in controller.yaml also on, only this one writes.
+    odometry.publish_tf: false
+
+    # /imu/fused is in REP-103 body axes (controller.yaml), so yaw rate is z: axis 2.
+    odometry.yaw_rate_axis: 2
+    odometry.yaw_rate_sign: 1.0
+
+    # Per-car scales against the lidar (calibrate_odom.py): speed from a
+    # straight drive, yaw rate from circles. The integrated source only. vx
+    # already carries the firmware's own `odom scale set` factor.
+    odometry.speed_scale: 1.0
+    odometry.yaw_rate_scale: 1.0
+
+    # Turning: the encoder over-reads by turn_gain x (1/cos(delta) - 1), delta
+    # from the gyro (odometry.py). Per car, set by hand: calibrate_steering.py
+    # prints a fit (0.5 for a locked center shaft; 0 disables). The wheelbase
+    # is the spec's, from the CAD (neoracer-mujoco neoracer_spec).
+    odometry.turn_gain: 0.0
+    odometry.wheelbase_m: 0.28764
+    odometry.max_steer_deg: 30.0       # caps delta; the spec's inner-wheel lock
+
+    odometry.publish_rate_hz: 50.0     # /odom/integrated and its TF
+    odometry.stale_input_sec: 0.25     # `s` frame gap that holds the pose
+
+    # Stopped-car gyro bias estimate (the integrated source).
+    odometry.zero_hold_sec: 1.0        # encoder at 0 this long before it updates
+    odometry.zero_max_rate_dps: 2.0    # above this the car is being turned by hand
+    odometry.bias_tau_sec: 30.0        # low-pass time constant
