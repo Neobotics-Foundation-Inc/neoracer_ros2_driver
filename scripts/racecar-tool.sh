@@ -1063,7 +1063,7 @@ Commands:
                                                 --dir PATH      default: bags/ under
                                                                 the data root
                                                 --name NAME     full bag name
-                                                --storage sqlite3
+                                                --storage mcap|sqlite3
                                                 --force         record anyway when
                                                                 the rate outruns the disk
                           stop                SIGINT, so rosbag2 finalizes the bag

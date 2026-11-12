@@ -152,7 +152,7 @@ class TestRecordArgv:
         argv = rl.build_record_argv('/data/bag')
         assert argv[:3] == ['ros2', 'bag', 'record']
         assert '--output' in argv and '/data/bag' in argv
-        assert argv[argv.index('--storage') + 1] == 'sqlite3'
+        assert argv[argv.index('--storage') + 1] == 'mcap'
 
     @pytest.mark.parametrize(
         'topics,exclude',
@@ -320,16 +320,17 @@ class TestCli:
         assert args.test_name == 'lap1'
         assert args.topics is None
 
-    def test_storage_is_sqlite3_only(self):
+    def test_storage_choices_are_mcap_and_sqlite3(self):
         assert rl.build_parser().parse_args(['start']).storage is None
+        assert rl.build_parser().parse_args(['start', '--storage', 'sqlite3']).storage == 'sqlite3'
         with pytest.raises(SystemExit):
-            rl.build_parser().parse_args(['start', '--storage', 'mcap'])
+            rl.build_parser().parse_args(['start', '--storage', 'leveldb'])
 
     def test_start_refuses_a_storage_the_car_lacks(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(rl, 'STATE_FILE', tmp_path / 'absent')
-        monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {'STORAGE': 'mcap'})
+        monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {'STORAGE': 'leveldb'})
         assert rl.main(['start']) == 1
-        assert "storage 'mcap' is not installed" in capsys.readouterr().err
+        assert "storage 'leveldb' is not one this car can record" in capsys.readouterr().err
 
     def test_start_refuses_when_exclude_drops_every_named_topic(
         self, tmp_path, monkeypatch, capsys
@@ -402,3 +403,45 @@ def test_the_tool_runs_neoracer_log():
     top = next(line for line in complete.splitlines() if 'compgen -W "build test' in line)
     assert ' log ' in top
     assert 'start stop status list analyze config help' in complete
+
+
+class TestStorage:
+    """MCAP as upstream records, sqlite3 on a car whose setup predates MCAP."""
+
+    def test_mcap_by_default_when_installed(self):
+        assert rl.choose_storage(None, None, installed=lambda s: True) == ('mcap', '')
+
+    def test_default_falls_back_to_sqlite3_without_the_plugin(self):
+        storage, note = rl.choose_storage(None, None, installed=lambda s: s == 'sqlite3')
+        assert storage == 'sqlite3' and 'setup_ros2.sh installs it' in note
+
+    def test_an_asked_for_storage_that_is_missing_is_refused(self):
+        storage, why = rl.choose_storage('mcap', None, installed=lambda s: s == 'sqlite3')
+        assert storage is None and 'ros-humble-rosbag2-storage-mcap' in why
+
+    def test_the_flag_beats_the_config(self):
+        assert rl.choose_storage('sqlite3', 'mcap', installed=lambda s: True)[0] == 'sqlite3'
+
+    def test_mcap_is_found_on_the_ament_prefixes(self, tmp_path):
+        (tmp_path / 'share' / 'rosbag2_storage_mcap').mkdir(parents=True)
+        env = {'AMENT_PREFIX_PATH': f'/nowhere:{tmp_path}'}
+        assert rl.storage_installed('mcap', environ=env)
+        assert not rl.storage_installed('mcap', environ={'AMENT_PREFIX_PATH': '/nowhere'})
+        assert rl.storage_installed('sqlite3', environ={})
+
+    def test_a_bag_names_its_own_storage(self, tmp_path):
+        (tmp_path / 'a').mkdir()
+        (tmp_path / 'a' / 'a_0.mcap').write_bytes(b'')
+        (tmp_path / 'b').mkdir()
+        (tmp_path / 'b' / 'b_0.db3').write_bytes(b'')
+        assert rl.bag_storage(tmp_path / 'a') == 'mcap'
+        assert rl.bag_storage(tmp_path / 'b') == 'sqlite3'
+
+    def test_setup_and_the_manifest_install_mcap(self):
+        root = Path(rl.__file__).resolve().parent.parent
+        assert (
+            'ros-humble-rosbag2-storage-mcap' in (root / 'scripts' / 'setup_ros2.sh').read_text()
+        )
+        assert (
+            '<exec_depend>rosbag2_storage_mcap</exec_depend>' in (root / 'package.xml').read_text()
+        )

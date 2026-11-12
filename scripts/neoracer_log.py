@@ -13,7 +13,7 @@ the car publishes together is about 4.5 MB/s, most of it the camera, so a
 bag rarely outruns the disk; `start` still says so before it begins if a
 root on an SD card cannot keep up, instead of letting the bag quietly drop
 messages. The car runs ROS 2 Humble, so the `ros2 bag record` flags are
-Humble's and bags are sqlite3.
+Humble's. Bags are MCAP, upstream's format, and sqlite3 stays available.
 """
 
 import argparse
@@ -37,10 +37,13 @@ STATE_FILE = CONFIG_DIR / 'log.state'
 
 
 TIMESTAMP_FMT = '%Y%m%d_%H%M%S'
-# The car's rosbag2 (Humble) has the sqlite3 storage plugin only; mcap would
-# need ros-humble-rosbag2-storage-mcap, which setup does not install.
-DEFAULT_STORAGE = 'sqlite3'
-STORAGE_CHOICES = ('sqlite3',)
+# MCAP is upstream's format. On Humble it is the separate package
+# ros-humble-rosbag2-storage-mcap, which scripts/setup_ros2.sh installs;
+# sqlite3 is Humble's built-in plugin.
+DEFAULT_STORAGE = 'mcap'
+STORAGE_CHOICES = ('mcap', 'sqlite3')
+# The ament package each storage plugin installs, for storage_installed().
+STORAGE_PACKAGES = {'mcap': 'rosbag2_storage_mcap', 'sqlite3': 'rosbag2_storage_default_plugins'}
 
 # The camera dominates the write rate; it is the topic worth warning about.
 # Measured on the dev car's 0.6.1 baseline bag (2026-11-11): /camera/color at
@@ -102,6 +105,55 @@ def filter_topics(topics: Sequence[str], exclude: Sequence[str] | None) -> list[
         return list(topics)
     pattern = re.compile(exclude_regex(exclude))
     return [t for t in topics if not pattern.search(t)]
+
+
+def storage_installed(storage: str, environ: Mapping[str, str] | None = None) -> bool:
+    """Report whether a storage plugin's package is on the sourced ROS prefixes."""
+    if storage == 'sqlite3':
+        return True
+    package = STORAGE_PACKAGES.get(storage)
+    if package is None:
+        return False
+    prefixes = (os.environ if environ is None else environ).get('AMENT_PREFIX_PATH', '')
+    return any((Path(p) / 'share' / package).is_dir() for p in prefixes.split(':') if p)
+
+
+def choose_storage(
+    requested: str | None,
+    configured: str | None,
+    installed=storage_installed,
+) -> tuple[str | None, str]:
+    """
+    Pick the bag storage: the --storage flag, else log.conf, else MCAP.
+
+    Returns (storage, message). A storage the person asked for that is
+    unknown or not installed gives (None, why). The default MCAP on a car
+    whose setup has not installed its plugin yet falls back to sqlite3 with
+    a note, so racecar log keeps working on cars set up before the change.
+    """
+    storage = requested or configured or DEFAULT_STORAGE
+    if storage not in STORAGE_CHOICES:
+        return None, f'storage {storage!r} is not one this car can record; use mcap or sqlite3'
+    if installed(storage):
+        return storage, ''
+    if requested or configured:
+        return None, (
+            f'the {storage} storage plugin is not installed; run scripts/setup_ros2.sh '
+            f'or sudo apt install ros-humble-rosbag2-storage-{storage}'
+        )
+    return 'sqlite3', (
+        'note: mcap is not installed on this car yet, so this bag is sqlite3; '
+        'scripts/setup_ros2.sh installs it'
+    )
+
+
+def bag_storage(bag: Path) -> str:
+    """Name the storage a bag folder was written with, from its files."""
+    if any(bag.glob('*.mcap')):
+        return 'mcap'
+    if any(bag.glob('*.db3')):
+        return 'sqlite3'
+    return DEFAULT_STORAGE
 
 
 def build_record_argv(
@@ -318,14 +370,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         if not topics:
             print('every named topic matches --exclude; nothing to record', file=sys.stderr)
             return 1
-    storage = args.storage or cfg.get('STORAGE', DEFAULT_STORAGE)
-    if storage not in STORAGE_CHOICES:
-        print(
-            f'storage {storage!r} is not installed on this car; '
-            f'use {", ".join(STORAGE_CHOICES)} (check STORAGE in {CONFIG_FILE})',
-            file=sys.stderr,
-        )
+    storage, message = choose_storage(args.storage, cfg.get('STORAGE'))
+    if storage is None:
+        print(f'{message} (check STORAGE in {CONFIG_FILE})', file=sys.stderr)
         return 1
+    if message:
+        print(message)
     if not (args.dir or cfg.get('DIR')):
         from neoracer_ros2_driver.data_root import session_problem
 
@@ -467,7 +517,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f'  elapsed  {format_duration(elapsed)}')
     print(f'  size     {format_size(size)}  ({format_size(rate)}/s)')
     if size == 0 and elapsed > 2.0:
-        print('           (rosbag2 writes from a cache; a slow bag reads 0 until it flushes)')
+        print('           (mcap flushes in chunks; a slow bag reads 0 until the first flush)')
     print(
         f'  free     {format_size(free)}'
         + (f'  (full in about {format_duration(remaining)})' if remaining else '')
@@ -527,7 +577,7 @@ def read_bag_summary(bag: Path) -> dict[str, Any] | None:
     except ImportError:
         return None
     try:
-        meta = rosbag2_py.Info().read_metadata(str(bag), DEFAULT_STORAGE)
+        meta = rosbag2_py.Info().read_metadata(str(bag), bag_storage(bag))
     except (RuntimeError, OSError):
         return None
     return {
@@ -560,7 +610,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print(f'cannot read bag metadata for {bag}', file=sys.stderr)
         print(
             'is this a bag directory? a bag with no metadata.yaml can be rebuilt with: '
-            f'ros2 bag reindex {bag} {DEFAULT_STORAGE}',
+            f'ros2 bag reindex {bag} {bag_storage(bag)}',
             file=sys.stderr,
         )
         return 1
