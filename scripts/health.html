@@ -9,8 +9,24 @@
 <script src="/ui/theme.js?v=2"></script>
 <script src="/ui/charts.js?v=2" defer></script>
 <style>
-  /* This page only: the load chart's height. */
+  /* This page only: chart heights, and the sensor panels from scripts/overview.py. */
   .load-chart { height: 220px; }
+  /* a paused camera is one line, not a panel stretched to the lidar's height */
+  .nr-main > [data-ov] { align-self: start; }
+  .ov-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .ov-unit { margin-left: 6px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+  .ov-now { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ov-chart { height: 180px; }
+  .ov-hist { height: 160px; }
+  .ov-frame { aspect-ratio: 4 / 3; }
+  .ov-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .ov-lidar { aspect-ratio: 4 / 3; }
+  .ov-lidar svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .ov-lidar .ring { fill: none; stroke: var(--nr-edge); stroke-width: 1; }
+  .ov-lidar .tick { fill: var(--nr-ink-2); font: 500 12px var(--nr-font-sans); }
+  .ov-lidar .hits { fill: none; stroke: var(--nr-red); stroke-width: 3; stroke-linecap: round; }
+  .ov-lidar .car { fill: var(--nr-surface-2); stroke: var(--nr-ink); stroke-width: 1.5; }
+  .ov-lidar .nose { fill: var(--nr-ink); }
 </style>
 </head>
 <body>
@@ -41,6 +57,48 @@
       <div class="nr-stat" style="--len:5"><b id="s-temp">?</b><span>Junction</span></div>
       <div class="nr-stat" style="--len:5"><b id="s-fan">?</b><span>Fan</span></div>
     </div>
+  </section>
+
+  <section class="nr-panel nr-span-6" aria-labelledby="t-camera" data-ov>
+    <div class="nr-head">
+      <h2 class="nr-panel-title" id="t-camera">Camera</h2>
+      <button type="button" class="nr-btn small" id="camera-toggle" aria-pressed="false">Show camera</button>
+    </div>
+    <div class="nr-view ov-frame" id="camera-view" hidden><img id="camera-img" alt="The camera's latest frame"></div>
+    <div class="nr-nodes" id="camera-empty" hidden></div>
+    <p class="nr-note" id="camera-paused">Paused.</p>
+  </section>
+
+  <section class="nr-panel nr-span-6" aria-labelledby="t-lidar" data-ov>
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-lidar">Lidar</h2></div>
+    <div class="nr-view ov-lidar" id="lidar-view" role="img" aria-label="Lidar returns seen from above, the car at the centre facing up, rings every metre" hidden></div>
+    <div class="nr-nodes" id="lidar-empty" hidden></div>
+  </section>
+
+  <section class="nr-panel nr-span-8" aria-labelledby="t-imu" data-ov>
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-imu">IMU</h2></div>
+    <div class="ov-cards" id="imu-view" hidden>
+      <div class="nr-card">
+        <div class="nr-head"><span class="nr-sub">Gyro<span class="ov-unit">deg/s</span></span><span class="ov-now" id="gyro-now"></span></div>
+        <div class="nr-legend" id="gyro-legend"></div>
+        <div class="nr-chart ov-chart" id="gyro-chart"></div>
+      </div>
+      <div class="nr-card">
+        <div class="nr-head"><span class="nr-sub">Accel<span class="ov-unit">m/s²</span></span></div>
+        <div class="nr-legend" id="accel-legend"></div>
+        <div class="nr-chart ov-chart" id="accel-chart"></div>
+      </div>
+    </div>
+    <div class="nr-nodes" id="imu-empty" hidden></div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-encoder" data-ov>
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-encoder">Encoder</h2></div>
+    <div class="nr-card" id="encoder-view" hidden>
+      <div class="nr-head"><span class="nr-sub">Speed<span class="ov-unit">m/s</span></span><span class="ov-now" id="speed-now"></span></div>
+      <div class="nr-chart ov-chart" id="speed-chart"></div>
+    </div>
+    <div class="nr-nodes" id="encoder-empty" hidden></div>
   </section>
 
   <section class="nr-panel nr-span-6" aria-labelledby="t-temp">
@@ -74,6 +132,27 @@
       <div class="nr-field"><div class="name">Uptime <b id="f-uptime">?</b></div></div>
     </div>
     <div class="nr-nodes" id="board-status"></div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-history">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-history">History</h2></div>
+    <div class="ov-cards">
+      <div class="nr-card">
+        <div class="nr-head"><span class="nr-sub">Battery<span class="ov-unit">V</span></span></div>
+        <div class="nr-chart ov-hist" id="batt-chart"></div>
+        <div class="nr-nodes" id="batt-empty" hidden></div>
+      </div>
+      <div class="nr-card">
+        <div class="nr-head"><span class="nr-sub">Junction<span class="ov-unit">°C</span></span></div>
+        <div class="nr-chart ov-hist" id="junction-chart"></div>
+        <div class="nr-nodes" id="junction-empty" hidden></div>
+      </div>
+      <div class="nr-card">
+        <div class="nr-head"><span class="nr-sub">RAM used<span class="ov-unit">%</span></span></div>
+        <div class="nr-chart ov-hist" id="ram-chart"></div>
+        <div class="nr-nodes" id="ram-empty" hidden></div>
+      </div>
+    </div>
   </section>
 
   <section class="nr-panel" aria-labelledby="t-nodes">
@@ -211,10 +290,191 @@
     }
   }
 
-  window.addEventListener('resize', () => drawLoad(Date.now() / 1000));
+  // -- The sensor panels and the history, from scripts/overview.py --
+  const OV_POLL_MS = 500;            // scan, IMU and speed at 2 Hz, while the panels are on screen
+  const HISTORY_POLL_MS = 10000;     // the history moves in 10 s buckets
+  const FEED_STALE_S = 2;            // a feed older than this is No data
+  const WARM_S = 3;                  // feeds just opened get this long to arrive
+  const FRAME_MISSES = 4;            // failed frames before the camera is No data
+  const BATTERY_VIEW_S = 30 * 60;    // the battery chart's window; temperature and RAM show 2 h
+  const LIDAR_RANGE_M = 4;           // metres from the car to the view's short edge
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  let ov = null, runHist = null, showCamera = false, frameTick = 0, frameMisses = 0, onScreen = true;
+
+  function svgEl(tag, attrs, parent) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (parent) parent.append(e);
+    return e;
+  }
+
+  // live, wait (just opened) or none (missing), from the feed's age.
+  function feed(name) {
+    if (!ov) return 'wait';
+    const age = ov.ages[name];
+    if (age !== undefined && age < FEED_STALE_S) return 'live';
+    return ov.open_s < WARM_S ? 'wait' : 'none';
+  }
+
+  // A panel shows its view while the feed is live and one Check box while it is missing.
+  function showFeed(id, state, name) {
+    $(`${id}-view`).hidden = state !== 'live';
+    const empty = $(`${id}-empty`);
+    empty.hidden = state !== 'none';
+    if (state === 'none') empty.innerHTML = box('warn', name, null, '', 'No data');
+  }
+
+  function drawLidar() {
+    const view = $('lidar-view');
+    const w = view.clientWidth, h = view.clientHeight;
+    if (!w) return;
+    const s = Math.min(w, h) / 2 / LIDAR_RANGE_M, cx = w / 2, cy = h / 2;
+    const svg = svgEl('svg', { viewBox: `0 0 ${w} ${h}` });
+    for (let r = 1; r <= LIDAR_RANGE_M; r++) svgEl('circle', { class: 'ring', cx, cy, r: r * s }, svg);
+    svgEl('text', { class: 'tick', x: cx + 4, y: cy - 2 * s - 4 }, svg).textContent = '2 m';
+    // base_link: x forward (up on screen), y left.
+    const fp = ov.footprint;
+    if (fp) {
+      svgEl('rect', { class: 'car', x: cx - fp.left * s, y: cy - fp.front * s,
+        width: (fp.left - fp.right) * s, height: (fp.front - fp.rear) * s, rx: 2 }, svg);
+      const nx = cx - (fp.left + fp.right) / 2 * s, ny = cy - fp.front * s;
+      svgEl('path', { class: 'nose', d: `M${nx},${ny - 7}L${nx + 5},${ny + 2}L${nx - 5},${ny + 2}Z` }, svg);
+    }
+    let dots = '';
+    for (const [px, py] of ov.scan) {
+      const sx = cx - py * s, sy = cy - px * s;
+      if (sx >= 0 && sx <= w && sy >= 0 && sy <= h) dots += `M${sx.toFixed(1)},${sy.toFixed(1)}h0.01`;
+    }
+    svgEl('path', { class: 'hits', d: dots || 'M0,0' }, svg);
+    view.replaceChildren(svg);
+  }
+
+  const GYRO = [['Roll rate', 'a', 1], ['Pitch rate', 'b', 2], ['Yaw rate', 'c', 3]];
+  const ACCEL = [['X', 'a', 4], ['Y', 'b', 5], ['Z', 'c', 6]];
+  function drawImu(now, span) {
+    const rows = ov.imu;
+    const make = (spec, unit, digits, minSpan) => spec.map(([name, style, col]) =>
+      ({ name, style, axis: 'l', unit, digits, minSpan, pts: rows.map((p) => [p[0], p[col]]) }));
+    const gyro = make(GYRO, 'deg/s', 1, 5), accel = make(ACCEL, 'm/s²', 2, 0.5);
+    $('gyro-legend').innerHTML = NrCharts.legendHtml(gyro);
+    $('accel-legend').innerHTML = NrCharts.legendHtml(accel);
+    NrCharts.timeChart($('gyro-chart'), now - span, now, gyro, NrCharts.recentTicks(now), { gapSec: 1 });
+    NrCharts.timeChart($('accel-chart'), now - span, now, accel, NrCharts.recentTicks(now), { gapSec: 1 });
+    const last = rows[rows.length - 1];
+    $('gyro-now').textContent = last ? `Yaw ${num(last[3])}` : '';
+  }
+
+  function drawSpeed(now, span) {
+    const pts = ov.speed;
+    NrCharts.timeChart($('speed-chart'), now - span, now,
+      [{ name: 'Speed', style: 'a', axis: 'l', unit: 'm/s', digits: 2, minSpan: 0.2, pts }],
+      NrCharts.recentTicks(now), { gapSec: 1 });
+    const last = pts[pts.length - 1];
+    $('speed-now').textContent = last ? num(last[1], 2) : '';
+  }
+
+  function renderOverview() {
+    if (!ov || !window.NrCharts) return;
+    const now = ov.now, span = ov.graph_sec;
+    const lidar = feed('scan'), imu = feed('imu'), encoder = feed('encoder');
+    showFeed('lidar', lidar, 'Lidar');
+    showFeed('imu', imu, 'IMU');
+    showFeed('encoder', encoder, 'Encoder');
+    if (lidar === 'live') drawLidar();
+    if (imu === 'live') drawImu(now, span);
+    if (encoder === 'live') drawSpeed(now, span);
+  }
+
+  // The camera starts paused: its 60 Hz feed is most of what the panels cost the car.
+  function renderCamera() {
+    $('camera-paused').hidden = showCamera;
+    const missing = showCamera && frameMisses >= FRAME_MISSES;
+    $('camera-view').hidden = !showCamera || missing || !$('camera-img').getAttribute('src');
+    $('camera-empty').hidden = !missing;
+    if (missing) $('camera-empty').innerHTML = box('warn', 'Camera', null, '', 'No data');
+  }
+
+  function loadFrame() {
+    const img = $('camera-img');
+    if (img.dataset.busy) return;
+    img.dataset.busy = '1';
+    const next = new Image();
+    next.id = 'camera-img'; next.alt = img.alt;
+    // The new frame replaces the old element, so the browser never fetches it twice.
+    next.onload = () => { if (showCamera) img.replaceWith(next); else delete img.dataset.busy; frameMisses = 0; renderCamera(); };
+    next.onerror = () => { delete img.dataset.busy; frameMisses++; renderCamera(); };
+    next.src = `/api/overview/color.jpg?t=${frameTick++}`;
+  }
+
+  // The choice is kept per browser, so a page reopened shows what it showed.
+  function setCamera(on) {
+    showCamera = on;
+    frameMisses = 0;
+    const b = $('camera-toggle');
+    b.textContent = on ? 'Pause camera' : 'Show camera';
+    b.setAttribute('aria-pressed', String(on));
+    try { localStorage.setItem('nr-camera', on ? '1' : '0'); } catch (err) { /* private window */ }
+    renderCamera();
+    if (on) loadFrame();
+  }
+  $('camera-toggle').addEventListener('click', () => setCamera(!showCamera));
+  try { if (localStorage.getItem('nr-camera') === '1') setCamera(true); } catch (err) { /* as above */ }
+
+  function historyCard(id, name, unit, digits, minSpan, pts, t0, t1, ticks) {
+    const chart = $(`${id}-chart`), empty = $(`${id}-empty`);
+    const any = pts.some((p) => p[0] >= t0);
+    chart.hidden = !any;
+    empty.hidden = any;
+    if (!any) { empty.innerHTML = box('warn', name, null, '', 'No reading'); return; }
+    NrCharts.timeChart(chart, t0, t1, [{ name, style: 'a', axis: 'l', unit, digits, minSpan, pts }], ticks, { gapSec: 60 });
+  }
+
+  function renderHistory() {
+    if (!runHist || !window.NrCharts) return;
+    const t1 = runHist.now, t0 = t1 - runHist.window_sec;
+    const col = (rows, i) => rows.map((p) => [p[0], p[i]]);
+    historyCard('batt', 'Battery', 'V', 2, 0.1, col(runHist.battery, 1), t1 - BATTERY_VIEW_S, t1, NrCharts.clockTicksEvery(600));
+    historyCard('junction', 'Junction', '°C', 1, 2, col(runHist.system, 1), t0, t1, NrCharts.clockTicks);
+    historyCard('ram', 'RAM used', '%', 0, 5, col(runHist.system, 2), t0, t1, NrCharts.clockTicks);
+  }
+
+  async function pollOverview() {
+    if (!onScreen || document.hidden) return;
+    if (showCamera) loadFrame();
+    try {
+      ov = await get('/api/overview');
+      renderOverview();
+    } catch (err) { /* the host poll says when the car stops answering */ }
+  }
+
+  async function pollHistory() {
+    if (document.hidden) return;
+    try {
+      runHist = await get('/api/history');
+      renderHistory();
+      // Just after the server starts, the first samples are seconds away.
+      if (!runHist.system.length) setTimeout(pollHistory, 3000);
+    } catch (err) { /* as above */ }
+  }
+
+  // The feeds open on the car only while a sensor panel is on screen.
+  const seen = new Set();
+  const watch = new IntersectionObserver((entries) => {
+    for (const e of entries) { if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target); }
+    const was = onScreen;
+    onScreen = seen.size > 0;
+    if (onScreen && !was) pollOverview();
+  });
+  document.querySelectorAll('[data-ov]').forEach((el) => watch.observe(el));
+
+  window.addEventListener('resize', () => { drawLoad(Date.now() / 1000); renderOverview(); renderHistory(); });
 
   poll();
   setInterval(poll, POLL_MS);
+  pollOverview();
+  setInterval(pollOverview, OV_POLL_MS);
+  pollHistory();
+  setInterval(pollHistory, HISTORY_POLL_MS);
 })();
 </script>
 </body>
