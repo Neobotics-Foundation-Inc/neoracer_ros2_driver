@@ -37,7 +37,7 @@ def test_serves_fonts_logos_scripts_and_icons(webui):
         '/ui/../webui.py',
         '/ui/%2e%2e/webui.py',
         '/ui/fonts/../../dashboard.py',
-        '/ui/../kit.html',
+        '/ui/../health.html',
     ],
 )
 def test_refuses_anything_else(webui, path):
@@ -111,23 +111,33 @@ def test_icons_parse_and_have_ids(webui):
 def test_pages_link_shared_files_with_the_asset_version(webui):
     # A browser keeps /ui/ files for CACHE_CONTROL; the version query is what
     # makes it fetch a changed neoracer.css or charts.js at once.
-    for page in (SCRIPTS / 'kit.html',):
+    for page in (SCRIPTS / 'health.html',):
         text = page.read_text()
         for name in ('neoracer.css', 'charts.js', 'theme.js', 'lost.js'):
             for link in re.findall(rf'"/ui/{re.escape(name)}[^"]*"', text):
                 assert link == f'"/ui/{name}?v={webui.ASSET_VERSION}"', (page.name, link)
 
 
-def test_the_kit_page_shows_the_logo_for_each_theme():
-    text = (SCRIPTS / 'kit.html').read_text()
+def test_the_health_page_shows_the_logo_for_each_theme():
+    text = (SCRIPTS / 'health.html').read_text()
     assert 'class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg"' in text
     assert 'class="for-light" src="/ui/brand/neoracer-logo.svg"' in text
     assert 'data-theme-pick="dark"' in text and 'data-theme-pick="light"' in text
 
 
-def test_the_dashboard_serves_ui_kit_and_host():
+def test_the_dashboard_serves_ui_health_and_host():
     text = (SCRIPTS / 'dashboard.py').read_text()
     assert 'webui.static_file(self.path)' in text
-    # Routes compare the path without its query, so /kit?theme=light works.
+    # Routes compare the path without its query, so /health?theme=light works.
     assert 'route = urlparse(self.path).path' in text
-    assert "route == '/kit'" in text and "route == '/api/host'" in text
+    assert "route == '/health'" in text and "route == '/api/host'" in text
+    assert "data['battery'] = _battery_host()" in text
+
+
+def test_the_health_page_is_titled_and_shows_the_battery():
+    text = (SCRIPTS / 'health.html').read_text()
+    assert '<title>System Health · NeoRacer</title>' in text
+    assert '<h1 class="nr-title">System Health</h1>' in text
+    assert 'id="s-batt"' in text and 'batteryBox(batt)' in text
+    # The page shows the car, not a sample of every shared piece.
+    assert 'Pieces' not in text and 'nr-toast' not in text

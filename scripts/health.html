@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UI kit · NeoRacer</title>
+<title>System Health · NeoRacer</title>
 <link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/ui/neoracer.css?v=1">
 <script src="/ui/theme.js?v=1"></script>
@@ -22,7 +22,7 @@
     <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
   </a>
   <span class="nr-divider"></span>
-  <h1 class="nr-title">UI kit <span class="thin">· live</span></h1>
+  <h1 class="nr-title">System Health</h1>
   <div class="nr-meta">
     <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
     <div class="nr-seg" role="group" aria-label="Theme">
@@ -35,6 +35,7 @@
 <main class="nr-main" id="main">
   <section class="nr-summary" aria-label="Summary">
     <div class="nr-stats">
+      <div class="nr-stat" style="--len:5"><b id="s-batt">?</b><span>Battery</span></div>
       <div class="nr-stat" style="--len:5"><b id="s-cpu">?</b><span>CPU</span></div>
       <div class="nr-stat" style="--len:5"><b id="s-gpu">?</b><span>GPU</span></div>
       <div class="nr-stat" style="--len:6"><b id="s-ram">?</b><span>RAM used</span></div>
@@ -82,54 +83,7 @@
     <div class="nr-nodes" id="nodes"></div>
   </section>
 
-  <section class="nr-panel" aria-labelledby="t-pieces">
-    <div class="nr-head"><h2 class="nr-panel-title" id="t-pieces">Pieces</h2></div>
-    <div class="pieces">
-      <div class="nr-card">
-        <span class="nr-eyebrow">Status</span>
-        <div class="nr-nodes">
-          <div class="nr-status ok"><div class="top"><span class="name">Running</span><span class="value">30<small>Hz</small></span></div><span class="nr-sr">Running</span></div>
-          <div class="nr-status warn"><div class="top"><span class="name">Check</span></div><span class="nr-word">Not detected</span></div>
-          <div class="nr-status err"><div class="top"><span class="name">Fault</span></div><span class="nr-word">Jetson HOT</span></div>
-          <div class="nr-status off"><div class="top"><span class="name">Off</span></div><span class="nr-sr">Off</span></div>
-        </div>
-      </div>
-      <div class="nr-card">
-        <span class="nr-eyebrow">Buttons</span>
-        <div class="nr-actions">
-          <button class="nr-btn primary" type="button" id="toast-btn">Show toast <span class="k">T</span></button>
-          <button class="nr-btn" type="button">Outline</button>
-          <button class="nr-btn quiet" type="button">Quiet</button>
-          <button class="nr-btn small" type="button">Small</button>
-          <button class="nr-btn danger" type="button">Stop</button>
-          <button class="nr-btn" type="button" disabled>Disabled</button>
-        </div>
-        <div class="nr-actions">
-          <span class="nr-badge">Tag</span><span class="nr-badge ok">Ready</span><span class="nr-badge warn">Check</span>
-          <span class="nr-badge err">Fault</span><span class="nr-badge off">Off</span>
-        </div>
-      </div>
-      <div class="nr-card">
-        <span class="nr-eyebrow">Fields</span>
-        <div class="nr-fields">
-          <label class="nr-field"><span class="name">Speed cap <span class="unit">m/s</span>
-            <button class="nr-info" type="button" aria-label="About the speed cap">i<span class="tip">The fastest the car may drive under this page. A made-up field for the kit.</span></button></span>
-            <span class="nr-stepper"><button type="button" aria-label="Less" data-step="-0.1">-</button><input class="nr-input" type="number" id="cap" value="0.5" step="0.1" min="0" max="6"><button type="button" aria-label="More" data-step="0.1">+</button></span>
-          </label>
-          <label class="nr-field"><span class="name">Gain <b id="gain-v">40</b></span><input type="range" id="gain" min="0" max="100" value="40"></label>
-          <label class="nr-field"><span class="name">Map</span><select class="nr-input"><option>Track A</option><option>Track B</option></select></label>
-          <label class="nr-field"><span class="name">Topic</span><input class="nr-input" type="text" value="/scan"></label>
-        </div>
-        <p class="nr-note caution">Not applied</p>
-      </div>
-      <div class="nr-card">
-        <span class="nr-eyebrow">Icons</span>
-        <div class="icons" id="icons"></div>
-      </div>
-    </div>
-  </section>
 </main>
-<div id="nr-toast" role="status" aria-live="polite"></div>
 
 <script>
 (function () {
@@ -138,7 +92,6 @@
   const MISSES = 2;                     // missed polls before the page says it lost the car
   const HISTORY_S = 120;                // the load chart's window
   const TEMP_OK_C = 70, TEMP_HOT_C = 85; // the system page's limits
-  const ICONS = ['gauge', 'bolt', 'clock', 'battery', 'board', 'radar', 'camera', 'map', 'gamepad', 'terminal', 'check', 'alert'];
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const num = (v, d = 0) => (v === null || v === undefined ? '?' : Number(v).toFixed(d));
@@ -160,8 +113,16 @@
     return ['err', 'HOT'];
   }
 
+  // The 3S pack, from the 8080 server's battery reading: ok, low, charge (below 10.8 V) or stale.
+  function batteryBox(b) {
+    if (!b) return box('warn', 'Battery', null, '', 'No reading');
+    const look = { ok: ['ok', ''], low: ['warn', 'Low'], charge: ['err', 'CHARGE NOW'], stale: ['warn', 'No reading'] }[b.state] || ['warn', 'No reading'];
+    return box(look[0], 'Battery', num(b.volts, 1), 'V', look[1], `${b.pct}% of a 3S pack (10.8 to 12.6 V)`);
+  }
+
   function renderHost(h) {
-    const ram = h.memory_mib, rails = h.power_rails || {}, fan = h.fan || {}, gpu = h.gpu || {};
+    const ram = h.memory_mib, rails = h.power_rails || {}, fan = h.fan || {}, gpu = h.gpu || {}, batt = h.battery;
+    $('s-batt').innerHTML = batt && batt.state !== 'stale' ? `${num(batt.volts, 1)}<small>V</small>` : '?';
     $('s-cpu').innerHTML = h.cpu.load_pct === null ? '?' : `${num(h.cpu.load_pct)}<small>%</small>`;
     $('s-gpu').innerHTML = gpu.load_pct === null || gpu.load_pct === undefined ? '?' : `${num(gpu.load_pct)}<small>%</small>`;
     $('s-ram').innerHTML = ram ? `${num(ram.used / 1024, 1)}<small>GB</small>` : '?';
@@ -174,7 +135,7 @@
       return box(state, zone.replace('-thermal', ''), num(c, 1), '°C', word, zone);
     }).join('') || box('warn', 'Zones', null, '', 'No reading');
 
-    $('rails').innerHTML = Object.entries(rails).map(([label, r]) =>
+    $('rails').innerHTML = batteryBox(batt) + Object.entries(rails).map(([label, r]) =>
       box('ok', label.replace('VDD_', ''), num(r.mw / 1000, 2), 'W', '', `${label}: ${r.mv} mV, ${r.ma} mA`)).join('')
       || box('warn', 'Power monitor', null, '', 'Not detected');
     const pm = h.power_mode || {};
@@ -252,28 +213,6 @@
     }
   }
 
-  // The pieces: icons, the toast, the stepper, the slider.
-  $('icons').innerHTML = ICONS.map((id) =>
-    `<svg class="nr-icon" role="img" aria-label="${id}"><use href="/ui/icons.svg?v=1#${id}"></use></svg>`).join('');
-  let toastTimer;
-  function toast(text) {
-    const t = $('nr-toast'); t.textContent = text; t.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
-  }
-  $('toast-btn').addEventListener('click', () => toast('Saved to the car profile'));
-  document.addEventListener('keydown', (e) => { if (e.key === 't' && !e.target.closest('input, select')) toast('Saved to the car profile'); });
-  for (const b of document.querySelectorAll('[data-step]')) {
-    b.addEventListener('click', () => {
-      const cap = $('cap');
-      cap.value = Math.min(6, Math.max(0, Number(cap.value) + Number(b.dataset.step))).toFixed(1);
-    });
-  }
-  const gain = $('gain');
-  const showGain = () => { gain.style.setProperty('--v', `${gain.value}%`); $('gain-v').textContent = gain.value; };
-  gain.addEventListener('input', showGain); showGain();
-  for (const info of document.querySelectorAll('.nr-info')) {
-    info.addEventListener('click', (e) => { e.preventDefault(); info.classList.toggle('open'); });
-  }
   window.addEventListener('resize', () => drawLoad(Date.now() / 1000));
 
   poll();

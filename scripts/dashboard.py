@@ -469,15 +469,40 @@ def _load_dashboard_html() -> str:
 
 DASHBOARD_HTML = _load_dashboard_html()
 
-# The UI kit page: every shared piece of /ui/ with live host readings. Read on
-# each request, so an edited kit.html shows on the next reload.
-_KIT_PATH = Path(__file__).resolve().parent / 'kit.html'
+# The System Health page: the Jetson's live readings and the battery, on the
+# shared /ui/ styles. Read on each request, so an edited health.html shows on
+# the next reload.
+_HEALTH_PATH = Path(__file__).resolve().parent / 'health.html'
 _host_poller = sysinfo.HostPoller()
 _host_lock = threading.Lock()
 
 
+def _battery_host():
+    """Battery reading for /api/host: volts, charge percent, age and state, or None."""
+    sampler = _sampler
+    reading = sampler.battery() if sampler is not None else None
+    if reading is None:
+        return None
+    volts, age = reading
+    pct = min(1.0, max(0.0, (volts - BATTERY_V_MIN) / (BATTERY_V_MAX - BATTERY_V_MIN)))
+    if age > BATTERY_STALE_SEC:
+        state = 'stale'
+    elif volts < BATTERY_V_MIN:
+        state = 'charge'
+    elif volts < BATTERY_V_LOW:
+        state = 'low'
+    else:
+        state = 'ok'
+    return {
+        'volts': round(volts, 2),
+        'pct': round(pct * 100),
+        'age_s': round(age, 1),
+        'state': state,
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
-    """Serve / and /kit (HTML), /api/status and /api/host (JSON), and /ui/ (shared files)."""
+    """Serve / and /health (HTML), /api/status and /api/host (JSON), and /ui/ (shared files)."""
 
     def do_GET(self):
         asset = webui.static_file(self.path)
@@ -488,8 +513,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_html()
         elif route == '/api/status':
             self._serve_status()
-        elif route == '/kit':
-            self._serve_kit()
+        elif route == '/health':
+            self._serve_health()
         elif route == '/api/host':
             self._serve_host()
         else:
@@ -504,9 +529,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_kit(self):
+    def _serve_health(self):
         try:
-            body = _KIT_PATH.read_bytes()
+            body = _HEALTH_PATH.read_bytes()
         except OSError:
             self.send_error(404)
             return
@@ -514,7 +539,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _serve_host(self):
         with _host_lock:
-            data = _host_poller.poll()
+            data = dict(_host_poller.poll())
+        data['battery'] = _battery_host()
         self._send(json.dumps(data).encode(), 'application/json', 'no-store')
 
     def _serve_html(self):
