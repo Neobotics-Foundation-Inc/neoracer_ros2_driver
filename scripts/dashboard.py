@@ -2,7 +2,7 @@
 """Neoracer web dashboard: live node/topic monitor on port 8080 (stdlib HTTP + rclpy)."""
 
 from collections import deque
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 from pathlib import Path
@@ -21,7 +21,8 @@ from sensor_msgs.msg import BatteryState
 # by path, so its folder goes on the path before they are imported.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import sysinfo  # noqa: E402, I100  sibling script, after the path insert
+import overview  # noqa: E402, I100  sibling scripts, after the path insert
+import sysinfo  # noqa: E402
 import webui  # noqa: E402
 
 
@@ -171,6 +172,7 @@ class _RateSampler(Node):
 
     def _battery_cb(self, msg):
         self._battery = (float(msg.voltage), time.monotonic())
+        _battery_history.add(time.time(), float(msg.voltage))
 
     def battery(self):
         """Latest (volts, age_seconds), or None if no reading has arrived."""
@@ -238,6 +240,12 @@ class _RateSampler(Node):
 
 _sampler: _RateSampler = None
 _sampler_lock = threading.Lock()
+# The System Health page's sensor panels (overview.Overview once main() runs),
+# and its history charts: the battery voltage from /battery, the junction
+# temperature and memory in use from the monitor loop.
+_overview = None
+_battery_history = overview.History()
+_system_history = overview.History()
 
 
 def _measure_hz(topic: str):
@@ -409,6 +417,9 @@ def _monitor_loop() -> None:
                 hz = _measure_hz(topic)
                 rates[topic] = {'hz': hz, 'stale': hz is None or hz < 0.5}
 
+            overview.sample_system(_system_history, time.time(),
+                                   sysinfo.read_soc_temp(), sysinfo.read_memory())
+
             now = time.monotonic()
             if now - last_system_health >= SYSTEM_HEALTH_REFRESH_SEC:
                 system_health = _collect_system_health()
@@ -502,7 +513,12 @@ def _battery_host():
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    """Serve / and /health (HTML), /api/status and /api/host (JSON), and /ui/ (shared files)."""
+    """
+    Serve the pages, their JSON, the camera's latest frame, and /ui/ (shared files).
+
+    / and /health are HTML; /api/status, /api/host, /api/overview and
+    /api/history are JSON; /api/overview/color.jpg is the camera frame.
+    """
 
     def do_GET(self):
         asset = webui.static_file(self.path)
@@ -517,6 +533,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_health()
         elif route == '/api/host':
             self._serve_host()
+        elif route == '/api/overview':
+            self._serve_overview()
+        elif route == '/api/overview/color.jpg':
+            self._serve_frame('color')
+        elif route == '/api/history':
+            data = overview.history_state(_battery_history, _system_history, time.time())
+            self._send(json.dumps(data).encode(), 'application/json', 'no-store')
         else:
             self.send_error(404)
 
@@ -542,6 +565,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = dict(_host_poller.poll())
         data['battery'] = _battery_host()
         self._send(json.dumps(data).encode(), 'application/json', 'no-store')
+
+    def _serve_overview(self):
+        feeds = _overview
+        if feeds is None:
+            self.send_error(503)
+            return
+        feeds.touch()
+        self._send(json.dumps(feeds.state()).encode(), 'application/json', 'no-store')
+
+    def _serve_frame(self, name):
+        feeds = _overview
+        if feeds is not None:
+            feeds.touch_cameras()
+        frame = feeds.jpeg(name) if feeds is not None else None
+        if frame is None:
+            self.send_error(404)
+            return
+        self._send(frame, 'image/jpeg', 'no-store')
 
     def _serve_html(self):
         content = DASHBOARD_HTML.encode()
@@ -570,7 +611,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    global _monitor_running, _sampler
+    global _monitor_running, _sampler, _overview
 
     logdir = Path.home() / 'logs' / 'latest'
     handlers = [logging.StreamHandler(sys.stderr)]
@@ -591,6 +632,7 @@ def main() -> None:
     rclpy.init()
     with _sampler_lock:
         _sampler = _RateSampler(RATE_TOPICS)
+    _overview = overview.Overview(_sampler)
 
     def _spin_sampler():
         try:
@@ -608,7 +650,9 @@ def main() -> None:
     monitor.start()
     log.info('Background monitor started')
 
-    server = HTTPServer(('0.0.0.0', PORT), DashboardHandler)
+    # Threads, so a phone slow to take a camera frame holds up no other request.
+    server = ThreadingHTTPServer(('0.0.0.0', PORT), DashboardHandler)
+    server.daemon_threads = True
     log.info('Dashboard listening on http://0.0.0.0:%d', PORT)
 
     def _shutdown(signum, _frame):
