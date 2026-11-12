@@ -94,7 +94,7 @@ CAMERA_READERS = (
     _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:177'),
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:170'),
     End('inference_node', 'neoracer_ros2_driver/inference_node.py:135', BE),
-    _overview(55),
+    _overview(58),
 )
 ODOM_READERS = tuple(
     _sensor(f'{DASH} {name}', f'{name}_dashboard/{name}.py:{line}')
@@ -113,7 +113,7 @@ SCAN_READERS = (
     _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:175'),
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:171'),
     _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
-    _overview(56),
+    _overview(59),
 )
 DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
@@ -202,7 +202,7 @@ TABLE = (
         '/imu/fused',
         'sensor_msgs/msg/Imu',
         publishers=(End('controller_node', f'{CONTROLLER}:205', REL),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(57)),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(60)),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
     Row(
@@ -219,7 +219,7 @@ TABLE = (
         '/encoder/speed',
         'std_msgs/msg/Float32',
         publishers=(End('controller_node', f'{CONTROLLER}:220', BE),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(58)),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(61)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
         ),

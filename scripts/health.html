@@ -62,7 +62,7 @@
   <section class="nr-panel nr-span-6" aria-labelledby="t-camera" data-ov>
     <div class="nr-head">
       <h2 class="nr-panel-title" id="t-camera">Camera</h2>
-      <button type="button" class="nr-btn small" id="camera-toggle" aria-pressed="false">Show camera</button>
+      <button type="button" class="nr-btn small" id="camera-toggle">Show camera</button>
     </div>
     <div class="nr-view ov-frame" id="camera-view" hidden><img id="camera-img" alt="The camera's latest frame"></div>
     <div class="nr-nodes" id="camera-empty" hidden></div>
@@ -262,9 +262,9 @@
     $('nodes-count').textContent = nodes.length ? `${up} of ${nodes.length} running` : '';
   }
 
-  async function get(url) {
+  async function get(url, timeoutMs = POLL_MS - 200) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), POLL_MS - 200);
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       const r = await fetch(url, { cache: 'no-store', signal: ctl.signal });
       if (!r.ok) throw new Error(r.status);
@@ -300,6 +300,8 @@
   const LIDAR_RANGE_M = 4;           // metres from the car to the view's short edge
   const SVGNS = 'http://www.w3.org/2000/svg';
   let ov = null, runHist = null, showCamera = false, frameTick = 0, frameMisses = 0, onScreen = true;
+  // One request of each kind at a time, so a slow link does not stack them up.
+  let ovBusy = false, histBusy = false, histRetry = null;
 
   function svgEl(tag, attrs, parent) {
     const e = document.createElementNS(SVGNS, tag);
@@ -406,19 +408,16 @@
     next.src = `/api/overview/color.jpg?t=${frameTick++}`;
   }
 
-  // The choice is kept per browser, so a page reopened shows what it showed.
+  // The camera starts paused on every page load, as upstream does: its frames
+  // are most of the page's traffic. The button's label names what it does next.
   function setCamera(on) {
     showCamera = on;
     frameMisses = 0;
-    const b = $('camera-toggle');
-    b.textContent = on ? 'Pause camera' : 'Show camera';
-    b.setAttribute('aria-pressed', String(on));
-    try { localStorage.setItem('nr-camera', on ? '1' : '0'); } catch (err) { /* private window */ }
+    $('camera-toggle').textContent = on ? 'Pause camera' : 'Show camera';
     renderCamera();
     if (on) loadFrame();
   }
   $('camera-toggle').addEventListener('click', () => setCamera(!showCamera));
-  try { if (localStorage.getItem('nr-camera') === '1') setCamera(true); } catch (err) { /* as above */ }
 
   function historyCard(id, name, unit, digits, minSpan, pts, t0, t1, ticks) {
     const chart = $(`${id}-chart`), empty = $(`${id}-empty`);
@@ -441,20 +440,27 @@
   async function pollOverview() {
     if (!onScreen || document.hidden) return;
     if (showCamera) loadFrame();
+    if (ovBusy) return;
+    ovBusy = true;
     try {
       ov = await get('/api/overview');
       renderOverview();
     } catch (err) { /* the host poll says when the car stops answering */ }
+    finally { ovBusy = false; }
   }
 
   async function pollHistory() {
-    if (document.hidden) return;
+    if (document.hidden || histBusy) return;
+    histBusy = true;
     try {
-      runHist = await get('/api/history');
+      runHist = await get('/api/history', HISTORY_POLL_MS - 2000);
       renderHistory();
       // Just after the server starts, the first samples are seconds away.
-      if (!runHist.system.length) setTimeout(pollHistory, 3000);
+      if (!runHist.system.length && !histRetry) {
+        histRetry = setTimeout(() => { histRetry = null; pollHistory(); }, 3000);
+      }
     } catch (err) { /* as above */ }
+    finally { histBusy = false; }
   }
 
   // The feeds open on the car only while a sensor panel is on screen.

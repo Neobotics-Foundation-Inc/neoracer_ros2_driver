@@ -196,6 +196,17 @@ def test_a_jpeg_frame_is_served_as_the_camera_sent_it(ov):
     assert feed.jpeg('color') == JPEG
 
 
+def test_a_stopped_camera_is_not_served_its_last_frame(ov):
+    node = FakeNode()
+    feed = ov.Overview(node, deserialize=lambda data, cls: _frame('jpeg', data), config_dir=None)
+    feed.touch_cameras()
+    _cb(node, '/camera/color')(JPEG)
+    data, arrived = feed._latest['color']
+    feed._latest['color'] = (data, arrived - ov.FRAME_STALE_SEC - 0.1)
+    feed._jpeg.clear()
+    assert feed.jpeg('color') is None
+
+
 def test_a_jpeg_frame_without_the_jpeg_marker_is_not_served(ov):
     node = FakeNode()
     feed = ov.Overview(node, deserialize=lambda data, cls: _frame('jpeg', data), config_dir=None)
@@ -244,6 +255,23 @@ def test_imu_rows_carry_gyro_in_deg_per_s_and_accel_in_m_per_s2(ov):
     _cb(node, '/imu/fused')(b'x')
     feed.sample_once()
     assert feed.state()['imu'][-1][1:] == [0.0, 0.0, 90.0, 0.1, -0.2, 9.81]
+
+
+def test_a_non_finite_sample_is_left_out_of_the_graphs(ov):
+    imu = SimpleNamespace(
+        angular_velocity=SimpleNamespace(x=0.0, y=math.nan, z=0.0),
+        linear_acceleration=SimpleNamespace(x=0.0, y=0.0, z=9.81),
+        data=math.inf,
+    )
+    node = FakeNode()
+    feed = ov.Overview(node, deserialize=lambda data, cls: imu, config_dir=None)
+    feed.touch()
+    _cb(node, '/imu/fused')(b'x')
+    _cb(node, '/encoder/speed')(b'x')
+    feed.sample_once()
+    state = feed.state()
+    assert state['imu'] == [] and state['speed'] == []
+    json.dumps(state, allow_nan=False)
 
 
 def test_sampling_closes_the_camera_first_and_everything_when_idle(ov):
