@@ -11,7 +11,7 @@ Always-on control pipeline (FlySky RC and autonomy both flow through it):
     gamepad_node               -- /joy -> /gamepad_drive
         |                          (student autonomy publishes /drive)
         v
-    mux_node                   -- /gamepad_drive (LB) or /drive (RB) -> /mux_out
+    mux_node                   -- fresh /drive -> /mux_out (autonomy_passthrough)
         |
         v
     throttle_node              -- applies speed/steer caps, /mux_out -> /motor

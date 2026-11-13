@@ -44,7 +44,7 @@ One ESP32 carries the IMU, wheel odometry, the FlySky receiver, and the motor ES
 ```
 FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/gamepad_drive──┐
                           │                                                ├──> mux_node ──/mux_out──> throttle_node ──/motor──┐
-                          │        student library / Nav2 ──────/drive─────┘   (FlySky switch: idle | manual | autonomy)       │
+                          │        student library / Nav2 ──────/drive─────┘   (ESP32 mode switch: up manual, down auto)       │
                           │                                                                                                   │
                           └──> /imu/fused, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
 
@@ -66,11 +66,11 @@ Published topics:
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 - `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. On by default; see [Object detection](#object-detection).
 
-The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) enforces speed caps, arming, and manual/autonomy arbitration, so RC driving and autonomous code share one speed-limited path. A 3-position FlySky switch selects **idle / manual / autonomy**, mapped to the `/joy` buttons the mux reads. Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
+The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch decides who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
 Safety and uptime layers:
 
-- **Mux** gates commands behind the arming switch and zeroes output when the RC link drops.
+- **Mux** forwards fresh `/drive` and publishes zero once it is older than `command_timeout_sec` (0.5 s), so a stopped program stops the car. A lost handset does not zero it; see `config/mux.yaml`.
 - **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
 - **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` is held and not installed; see [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2).
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
@@ -260,7 +260,7 @@ racecar navigation rviz         # RViz goal-setting view, on the car's desktop
 
 `twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
 
-Autonomy commands enter through the same mux as manual driving, so the FlySky arming switch still governs the car.
+Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still decides whether the car follows them.
 
 ## Web dashboard
 
@@ -472,7 +472,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **No `/scan`.** Confirm the lidar answers: `ping 192.168.8.2`. If it doesn't, the USB-C link should bring up an interface at `192.168.8.1`; see [Networking](#networking-optional). Then read [Checking lidar health](#checking-lidar-health) before concluding the sensor is dead.
 
-**Car won't drive.** The mux only forwards commands when the FlySky switch arms manual or autonomy mode. Verify with `ros2 topic echo /joy`. Direction and the m/s mapping are tuned in `config/controller.yaml`.
+**Car won't drive.** The ESP32 follows the Jetson only with the handset's mode switch down (autonomy); with it up, the sticks drive. The mux forwards `/drive` only while it is fresh, so check `ros2 topic echo /mux_out --qos-reliability best_effort` while the program runs. Direction and the m/s mapping are tuned in `config/controller.yaml`.
 
 **`/camera/color` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
 
