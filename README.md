@@ -44,7 +44,7 @@ One ESP32 carries the IMU, wheel odometry, the FlySky receiver, and the motor ES
 ```
 FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/gamepad_drive──┐
                           │                                                ├──> mux_node ──/mux_out──> throttle_node ──/motor──┐
-                          │        student library / Nav2 ──────/drive─────┘   (FlySky switch: idle | manual | autonomy)       │
+                          │        student library / Nav2 ──────/drive─────┘   (ESP32 mode switch: up manual, down auto)       │
                           │                                                                                                   │
                           └──> /imu/fused, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
 
@@ -70,7 +70,7 @@ The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries t
 
 Safety and uptime layers:
 
-- **Mux** gates commands behind the arming switch and zeroes output when the RC link drops.
+- **Mux** forwards fresh `/drive` and publishes zero once it is older than `command_timeout_sec` (0.5 s), so a stopped program stops the car. A lost handset does not zero it; see `config/mux.yaml`.
 - **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
 - **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` is held and not installed; see [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2).
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
