@@ -189,6 +189,10 @@ racecar mapping save <name> # save the current map
 racecar navigation          # Nav2 on a saved map (teb default)
 racecar navigation rviz     # goal-setting RViz view (car desktop only)
 
+racecar calibrate           # guided calibration: lidar, odom, steering (dynamics by name)
+racecar calibrate status    # what is calibrated on this car, when, and the values
+racecar calibrate check     # each calibration against the live sensors
+
 racecar setup all           # the 7-phase orchestrator
 racecar setup networking    # WiFi AP + Ethernet + lidar subnet
 racecar update              # repo to latest main + full setup + service restart
@@ -205,6 +209,8 @@ racecar help                    # full usage
 ```
 
 `racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
+
+`racecar calibrate` keeps its results in the car profile under `~/.config/racecar`. The steering trim is set in the ESP32 firmware with `trim set`, which also trims manual driving, and the profile keeps a copy. Where a step drives the car by itself, it drives only while the handset's mode switch is down (autonomy); flip the switch up to stop. The step tools arrive one at a time, and a step whose tool is not in the driver yet shows as not installed.
 
 ## Networking (optional)
 

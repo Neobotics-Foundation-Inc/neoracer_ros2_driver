@@ -150,6 +150,11 @@ racecar() {
             python3 "${RACECAR_LOG_SCRIPT:-$pkg_dir/scripts/neoracer_log.py}" "$@"
             ;;
 
+        calibrate)
+            # Guided calibration; see scripts/calibration/calibrate.py.
+            python3 "${RACECAR_CALIBRATE_SCRIPT:-$pkg_dir/scripts/calibration/calibrate.py}" "$@"
+            ;;
+
         source)
             # shellcheck disable=SC1091
             source "$ws/install/setup.bash"
@@ -1074,6 +1079,27 @@ Commands:
                           config              show or set persisted defaults
                         Every topic together is about 4.5 MB/s, most of it the
                         camera.
+    calibrate [steps]   Calibrate the car in a guided session. Steps:
+                          lidar       lidar yaw from the direction of travel;
+                                      the car drives itself
+                          odom        gyro yaw scale (circles) and encoder
+                                      speed scale (straight drive), both
+                                      against the lidar
+                          steering    steering trim, set in the ESP32
+                                      firmware (trim set), with a copy in the
+                                      car profile; the car drives itself
+                          dynamics    steering angles, servo time, speeds
+                                      and stop distances for the simulator;
+                                      the car drives itself; no check
+                        The car drives itself only with the handset's mode
+                        switch DOWN (autonomy). Flip it UP to stop.
+                        No arguments: all but dynamics.
+                        `racecar calibrate status` lists what is calibrated
+                        on this car, when, and the stored values.
+                        `racecar calibrate check [steps]` verifies each
+                        calibration against the live sensors.
+                        To prepare a car: calibrate, restart teleop, then
+                        run the check.
     source              Source the workspace overlay into the current shell.
     ws [name]           Switch this shell between workspaces: neoracer or
                         osracer (the vendor stack preinstalled in ~/osracer_ws).
@@ -1176,11 +1202,14 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test profile data log lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile data log calibrate lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
     case "$sub" in
+        calibrate)
+            COMPREPLY=( $(compgen -W "status check lidar odom steering dynamics --help" -- "$cur") )
+            ;;
         launch)
             local launch_dir="$HOME/ros2_ws/src/neoracer_ros2_driver/launch"
             if [[ -d "$launch_dir" ]]; then
