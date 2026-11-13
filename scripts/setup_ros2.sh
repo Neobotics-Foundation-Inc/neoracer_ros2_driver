@@ -19,6 +19,8 @@ sudo apt-get update
 
 # Runtime: ros-base + the message/driver packages used by the racecar driver.
 # Dev:     ros-dev-tools (ament_cmake et al.), colcon, rosdep.
+# SLAM:    slam_toolbox for mapping; nav2 AMCL, map_server and lifecycle_manager
+#          for localization on a saved map (autonomy_node).
 # Diag:    rviz2, rqt, foxglove_bridge for visualization on a remote laptop.
 sudo apt-get install -y \
     ros-humble-ros-base \
@@ -29,6 +31,10 @@ sudo apt-get install -y \
     ros-humble-tf2-tools \
     ros-humble-topic-tools \
     ros-humble-diagnostic-updater \
+    ros-humble-slam-toolbox \
+    ros-humble-nav2-map-server \
+    ros-humble-nav2-amcl \
+    ros-humble-nav2-lifecycle-manager \
     ros-humble-rqt-graph \
     ros-humble-rviz2 \
     ros-humble-rqt \

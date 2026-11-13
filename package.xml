@@ -21,6 +21,8 @@
   <depend>std_msgs</depend>
   <depend>vision_msgs</depend>
   <depend>diagnostic_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_ros</depend>
 
   <!-- ESP32 + LED-matrix serial bridge -->
   <exec_depend>python3-serial</exec_depend>
@@ -32,6 +34,13 @@
   <exec_depend>rosbag2_storage_mcap</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <!-- autonomy_node: slam_toolbox for mapping; nav2 AMCL, map_server and
+       lifecycle_manager for localization on a saved map -->
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
   <!-- inference node also needs ultralytics and a Tegra torch build; both come
        from scripts/setup_ml.sh, which has no rosdep key on this platform -->
 

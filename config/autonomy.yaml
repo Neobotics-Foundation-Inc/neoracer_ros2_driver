@@ -1,0 +1,36 @@
+# autonomy_node (neoracer_ros2_driver/autonomy_node.py). The autonomy launch
+# starts it in every mode and sets mode, map, localizer, session, pose and
+# pose_source. Per-car overrides go in the car profile, params/autonomy.yaml.
+#
+# The numbers in the comments below were measured on upstream's car (a
+# RACECAR Neo with an RPLIDAR); they are the starting point until the NeoRacer
+# is tuned with the autonomy launch.
+autonomy_node:
+  ros__parameters:
+    pose_rate_hz: 20.0
+    autosave_period_sec: 60.0         # mapping
+    last_pose_period_sec: 5.0         # localization, while localized
+    # localized needs a scan within scan_timeout_sec and, in localization, the
+    # localizer's pose spread within these. Upstream's tuned AMCL reads 0.11 m
+    # and 5 to 7 deg while tracking; the slam_toolbox localizer's spread stays
+    # small even when it is lost, so these catch AMCL losses only. Becoming
+    # localized takes 0.6 of each (autonomy.Limits.enter_fraction).
+    scan_timeout_sec: 0.5
+    localized_max_xy_sd_m: 0.25
+    localized_max_yaw_sd_deg: 20.0
+    # localized in localization also needs the live scan to fit the map: the
+    # share of fit_beams returns within 0.1 m of a wall, scored fit_rate_hz
+    # times a second and averaged over fit_window_sec. On upstream's car,
+    # correct poses score 0.78 to 0.91 in a room; a car carried 2 m, 0.29 to
+    # 0.52. Losing it takes the mean under localized_min_fit; becoming
+    # localized, localized_enter_fit.
+    fit_rate_hz: 2.0
+    fit_beams: 180                    # of the LakiBeam's 1440 beams per scan
+    fit_min_range_m: 0.3              # upstream's self-return distance; not yet measured on the NeoRacer
+    fit_window_sec: 2.0
+    localized_min_fit: 0.5
+    localized_enter_fit: 0.65
+    # AMCL from a given or saved start pose: the pose is sent again with this
+    # spread once AMCL is up, so the scan corrects it before localized.
+    start_spread_xy_m: 0.25
+    start_spread_yaw_deg: 10.0
