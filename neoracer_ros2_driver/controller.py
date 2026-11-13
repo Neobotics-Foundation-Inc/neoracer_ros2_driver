@@ -163,11 +163,11 @@ class ControllerNode(Node):
         """Declare the FlySky->Joy mapping parameters and return them as a dict."""
         p = self.declare_parameter
         cfg = {
-            'rc_min': p('rc_min', 1000).value,
-            'rc_center': p('rc_center', 1500).value,
-            'rc_max': p('rc_max', 2000).value,
+            'rc_min': p('rc_min', 240).value,
+            'rc_center': p('rc_center', 1023).value,
+            'rc_max': p('rc_max', 1807).value,
             'rc_deadband': p('rc_deadband', 0.05).value,
-            'rc_failsafe_below': p('rc_failsafe_below', 500).value,
+            'rc_failsafe_below': p('rc_failsafe_below', 0).value,
             'num_axes': p('joy_num_axes', 6).value,
             'num_buttons': p('joy_num_buttons', 11).value,
             'trigger_axes': list(p('joy_trigger_axes', [2, 5]).value),
@@ -177,9 +177,9 @@ class ControllerNode(Node):
             'steering_axis': p('steering_axis', 3).value,
             'steering_channel': p('steering_channel', 0).value,
             'steering_sign': p('steering_sign', 1).value,
-            'mode_channel': p('mode_channel', 4).value,
-            'mode_mid_thresh': p('mode_mid_thresh', -0.5).value,
-            'mode_high_thresh': p('mode_high_thresh', 0.5).value,
+            'mode_channel': p('mode_channel', 6).value,
+            'mode_mid_thresh': p('mode_mid_thresh', -1.0).value,
+            'mode_high_thresh': p('mode_high_thresh', 0.608).value,
             'mode_idle_button': p('mode_idle_button', -1).value,
             'mode_manual_button': p('mode_manual_button', 4).value,
             'mode_autonomy_button': p('mode_autonomy_button', 5).value,

@@ -1,24 +1,30 @@
 """Unit tests for the ESP32 bridge helpers in controller_lib (no ROS required)."""
 
+from pathlib import Path
+import re
+
 from neoracer_ros2_driver import controller_lib as cl
+import yaml
 
+ROOT = Path(__file__).resolve().parent.parent
 
-# Mapping config matching the config/controller.yaml defaults.
+# Mapping config matching the config/controller.yaml defaults. The firmware
+# sends raw SBUS counts: sticks 240 to 1807, centre 1023, -1 on failsafe.
 DEFAULT_CFG = {
-    'rc_min': 1000, 'rc_center': 1500, 'rc_max': 2000,
-    'rc_deadband': 0.05, 'rc_failsafe_below': 500,
+    'rc_min': 240, 'rc_center': 1023, 'rc_max': 1807,
+    'rc_deadband': 0.05, 'rc_failsafe_below': 0,
     'num_axes': 6, 'num_buttons': 11, 'trigger_axes': [2, 5],
     'throttle_axis': 1, 'throttle_channel': 2, 'throttle_sign': 1,
     'steering_axis': 3, 'steering_channel': 0, 'steering_sign': 1,
-    'mode_channel': 4, 'mode_mid_thresh': -0.5, 'mode_high_thresh': 0.5,
+    'mode_channel': 6, 'mode_mid_thresh': -1.0, 'mode_high_thresh': 0.608,
     'mode_idle_button': -1, 'mode_manual_button': 4, 'mode_autonomy_button': 5,
     'aux_button_channels': [], 'aux_button_indices': [], 'aux_button_thresh': 0.5,
 }
 
 
 def _channels(**overrides):
-    """Build a 10-channel RC list defaulting every channel to center (1500)."""
-    ch = [1500] * 10
+    """Build a 10-channel RC list defaulting every channel to center (1023)."""
+    ch = [1023] * 10
     for i, v in overrides.items():
         ch[int(i)] = v
     return ch
@@ -99,21 +105,27 @@ def test_rc_to_joy_shape_and_trigger_rest():
 
 
 def test_rc_to_joy_throttle_and_steering():
-    axes, _ = cl.rc_to_joy(_channels(**{'2': 2000, '0': 1000}), DEFAULT_CFG)
+    axes, _ = cl.rc_to_joy(_channels(**{'2': 1807, '0': 240}), DEFAULT_CFG)
     assert axes[1] == 1.0   # throttle channel 2 full -> axis 1
     assert axes[3] == -1.0  # steering channel 0 min -> axis 3
 
 
-def test_rc_to_joy_mode_switch_manual_autonomy_idle():
-    # mode channel 4 high -> autonomy button 5
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 2000}), DEFAULT_CFG)
+def test_rc_to_joy_mode_switch_follows_the_firmware():
+    # The firmware: a count below 1500 on index 6 is manual, 1500 or more autonomy.
+    # Switch up (240) and middle (1023) -> manual button 4.
+    for count in (240, 1023):
+        _, buttons = cl.rc_to_joy(_channels(**{'6': count}), DEFAULT_CFG)
+        assert buttons[4] == 1 and buttons[5] == 0, count
+    # Switch down (1807) -> autonomy button 5.
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1807}), DEFAULT_CFG)
     assert buttons[5] == 1 and buttons[4] == 0
-    # mid -> manual button 4
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 1500}), DEFAULT_CFG)
+
+
+def test_rc_to_joy_mode_split_is_the_firmwares_1500():
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1499}), DEFAULT_CFG)
     assert buttons[4] == 1 and buttons[5] == 0
-    # low -> neither
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 1000}), DEFAULT_CFG)
-    assert buttons[4] == 0 and buttons[5] == 0
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1500}), DEFAULT_CFG)
+    assert buttons[5] == 1 and buttons[4] == 0
 
 
 def test_rc_to_joy_failsafe_is_neutral():
@@ -126,7 +138,7 @@ def test_rc_to_joy_failsafe_is_neutral():
 
 def test_rc_to_joy_aux_buttons():
     cfg = dict(DEFAULT_CFG, aux_button_channels=[6], aux_button_indices=[0])
-    _, buttons = cl.rc_to_joy(_channels(**{'6': 2000}), cfg)
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1807}), cfg)
     assert buttons[0] == 1
 
 
@@ -134,7 +146,7 @@ def test_rc_to_joy_aux_buttons():
 
 def test_rc_to_channels_preserves_firmware_order_and_length():
     # Centered stick reads 0.0; full deflection reads +-1.0, in channel order.
-    out = cl.rc_to_channels(_channels(**{'0': 2000, '9': 1000}), DEFAULT_CFG)
+    out = cl.rc_to_channels(_channels(**{'0': 1807, '9': 240}), DEFAULT_CFG)
     assert len(out) == 10
     assert out[0] == 1.0
     assert out[9] == -1.0
@@ -148,3 +160,41 @@ def test_rc_to_channels_failsafe_is_neutral():
 def test_rc_to_channels_empty_and_none():
     assert cl.rc_to_channels(None, DEFAULT_CFG) == []
     assert cl.rc_to_channels([], DEFAULT_CFG) == []
+
+
+# ---------- SBUS calibration ----------
+
+def test_sbus_centre_and_ends():
+    assert cl.normalize_channel(1023, 240, 1023, 1807, 0.05, 0) == 0.0
+    assert cl.normalize_channel(240, 240, 1023, 1807, 0.05, 0) == -1.0
+    assert cl.normalize_channel(1807, 240, 1023, 1807, 0.05, 0) == 1.0
+
+
+def test_a_real_240_is_a_value_not_failsafe():
+    assert cl.normalize_channel(240, 240, 1023, 1807, 0.05) == -1.0
+    axes, _ = cl.rc_to_joy(_channels(**{'2': 240}), DEFAULT_CFG)
+    assert axes[1] == -1.0
+
+
+def test_failsafe_minus_one_reads_neutral_with_no_buttons():
+    assert cl.normalize_channel(-1, 240, 1023, 1807, 0.05) == 0.0
+    axes, buttons = cl.rc_to_joy([-1] * 10, DEFAULT_CFG)
+    assert axes[1] == 0.0 and axes[3] == 0.0
+    assert not any(buttons)
+
+
+def test_centred_sticks_read_zero_on_both_topics():
+    axes, _ = cl.rc_to_joy(_channels(), DEFAULT_CFG)
+    assert axes[1] == 0.0 and axes[3] == 0.0
+    assert cl.rc_to_channels(_channels(), DEFAULT_CFG) == [0.0] * 10
+
+
+def test_shipped_yaml_and_code_defaults_match_the_test_config():
+    yaml_cfg = yaml.safe_load((ROOT / 'config' / 'controller.yaml').read_text())
+    params = yaml_cfg['controller_node']['ros__parameters']
+    source = (ROOT / 'neoracer_ros2_driver' / 'controller.py').read_text()
+    for key in ('rc_min', 'rc_center', 'rc_max', 'rc_failsafe_below', 'mode_channel',
+                'mode_mid_thresh', 'mode_high_thresh'):
+        assert params[key] == DEFAULT_CFG[key], key
+        match = re.search(rf"p\('{key}', ([-0-9.]+)\)", source)
+        assert match and float(match.group(1)) == DEFAULT_CFG[key], key

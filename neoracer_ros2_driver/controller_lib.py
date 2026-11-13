@@ -7,16 +7,17 @@ mapping can be unit-tested without a running ROS graph (see test/test_controller
 The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 - ``i qx qy qz qw ax ay az gx gy gz``   IMU   (quaternion, accel m/s^2, gyro rad/s)
 - ``o px py pz vx vy vz yaw``           odom  (position m, velocity m/s, yaw rad)
-- ``r c1 c2 ... c10``                   FlySky RC channels (ints; -1 == no signal)
+- ``r c1 c2 ... c10``                   FlySky RC channels (SBUS counts; -1 == receiver failsafe)
 - ``m x y z``                           magnetometer (Gauss)
 """
 
 import math
 
 # A raw RC channel reading below this is treated as "no signal" (failsafe).
-# The firmware reports -1 on every channel when the FlySky transmitter is off,
-# so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
-RC_FAILSAFE_BELOW = 500
+# The firmware sends raw SBUS counts, 0 to 2047 (sticks 240 to 1807, centre
+# 1023), and -1 on every channel on receiver failsafe, so only a negative
+# reading maps to neutral. A real 240, a stick or switch at its end, is a value.
+RC_FAILSAFE_BELOW = 0
 
 
 def clamp(value, low=-1.0, high=1.0):
@@ -159,7 +160,7 @@ def quaternion_from_euler(roll, pitch, yaw):
 def normalize_channel(raw, rc_min, rc_center, rc_max, deadband,
                       failsafe_below=RC_FAILSAFE_BELOW):
     """
-    Map a raw RC pulse width to ``[-1.0, 1.0]`` about its center.
+    Map a raw RC reading (an SBUS count) to ``[-1.0, 1.0]`` about its center.
 
     A reading below ``failsafe_below`` (e.g. the firmware's ``-1`` no-signal
     sentinel) returns ``0.0`` so a powered-off transmitter never commands full
@@ -245,8 +246,10 @@ def rc_to_joy(channels, cfg):
 
     buttons = [0] * cfg['num_buttons']
 
-    # --- 3-position mode switch -> manual / autonomy enable ---
+    # --- Mode switch -> manual / autonomy enable ---
     # below mid => idle, between mid and high => manual (LB), above high => autonomy (RB).
+    # controller.yaml sets the thresholds to the firmware's two states: a count
+    # below 1500 (switch up or middle) is manual, 1500 or more (down) autonomy.
     mc = cfg['mode_channel']
     if mc >= 0 and chan(mc) is not None and chan(mc) >= cfg['rc_failsafe_below']:
         m = norm(mc)
