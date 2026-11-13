@@ -16,7 +16,7 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 | `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/odom/integrated`, `/joy`, `/mag`, `/battery/state` (and `/battery` for one more release), and the scalar `rc.physics` topics | controller_lib, odometry, pyserial |
 | `controller_lib` (neoracer_ros2_driver/controller_lib.py) | pure parsing + FlySky-to-Joy mapping (unit-tested) | - |
 | `gamepad_node` (neoracer_ros2_driver/gamepad_node.py) | `/joy` to `/gamepad_drive` | ackermann_msgs |
-| `mux_node` (neoracer_ros2_driver/mux_node.py) | gate `/gamepad_drive` (manual) or `/drive` (autonomy) to `/mux_out` | - |
+| `mux_node` (neoracer_ros2_driver/mux_node.py) | forward fresh `/drive` to `/mux_out`, zero once stale (`autonomy_passthrough`, the default); with it off, gate `/gamepad_drive` (LB) or `/drive` (RB) | - |
 | `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps, and the mapping caps while `/autonomy/status` reports mapping; `/mux_out` to `/motor` | - |
 | `autonomy_node` (neoracer_ros2_driver/autonomy_node.py) | the one SLAM interface: `/autonomy/status` (latched, carries the mode the throttle node reads), `/autonomy/pose`, and the `/autonomy/save_map`, `/autonomy/autosave` and `/autonomy/global_localization` services; saves maps under `~/neoracer_data/maps`. It reads TF and publishes none. The autonomy launch starts it | autonomy, maps, slam_toolbox, nav2_map_server |
 | `autonomy` (neoracer_ros2_driver/autonomy.py) | pure localized test, scan fit and map files (unit-tested) | numpy, scipy |
@@ -32,7 +32,7 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 ```
 FlySky RC -> controller -> /joy -> gamepad_node -> /gamepad_drive ->
    mux_node -> /mux_out -> throttle_node -> /motor -> controller -> ESP32 ESC
-student lib -> /drive ------------------------^  (autonomy; gated by FlySky switch)
+student lib -> /drive ------------------------^  (autonomy; the ESP32 takes it with the mode switch down)
 ESP32 -> /imu/fused, /odom   Lakibeam -> /scan   USB cam -> /camera/color
 student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
 

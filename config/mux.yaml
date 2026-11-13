@@ -1,3 +1,18 @@
+# Who drives the NeoRacer
+#
+# The ESP32 firmware is the gate, not this node. It reads the handset's mode
+# switch (radio Ch7, SBUS index 6). Switch UP is manual: an SBUS count below
+# 1500, and the ESP32 drives from the sticks and ignores the Jetson's `v`
+# lines. Switch DOWN is autonomy: 1500 or more, and the ESP32 follows the
+# Jetson, which turns /motor into `v` lines. With the handset off or out of
+# range the ESP32 also follows the Jetson.
+#
+# autonomy_passthrough (on by default, declared in mux_node.py) makes this
+# node forward any fresh /drive onto /mux_out and publish zero once /drive is
+# older than command_timeout_sec. Those zeros are what stop a Jetson-driven
+# car when a program stops. The bumper gate, the boot-time arming and the
+# FlySky authority below apply only with autonomy_passthrough off, for a USB
+# gamepad with real bumpers. The mux has no override topic.
 mux_node:
   ros__parameters:
     gamepad_enable_button: 4   # LB -> manual
@@ -9,13 +24,32 @@ mux_node:
     # Publish zero if the active source goes stale (upstream node crash).
     command_timeout_sec: 0.5
 
-    # Fixed rate keeps the Maestro fed and gives the watchdog a steady signal.
+    # Fixed rate gives the controller and the watchdog a steady signal.
     publish_rate_hz: 50.0
 
     # Arming gate: at boot, wait this long AND require a centered Joy frame
     # before bumpers can leave IDLE. Defends against stuck-stick-at-power-on.
     startup_grace_sec: 1.0
     arm_axis_threshold: 0.2
-    # Xbox-mode triggers (LT/RT) rest at +1.0, not 0.0 - exclude from the
+    # Xbox-mode triggers (LT/RT) rest at +1.0, not 0.0; exclude from the
     # centered check or the mux never arms on EasySMX-in-Xbox-360-mode.
     arm_ignore_axes: [2, 5]
+
+    # FlySky authority (off by default)
+    # Enabled, with autonomy_passthrough off and a live transmitter, the mode
+    # channel takes the gate: middle idle, up manual (the gamepad source
+    # drives), down autonomous. Leave it off on the NeoRacer for now. The
+    # driver's /rc/channels scaling still assumes 1000 to 2000 us pulses while
+    # the board sends SBUS counts (240 to 1807, centre 1023); a NeoRacer fix
+    # on main corrects that. The firmware's mode switch has two states, and
+    # which way it reads here still has to be checked on the bench. Turn it on
+    # per car in the car profile's params/mux.yaml once both are done.
+    rc_authority_enable: false
+    rc_mode_channel: 6        # 0-indexed; radio Ch7, the mode switch
+    rc_mode_deadband: 0.35    # |value| below this reads as the middle position
+    rc_timeout_sec: 0.5       # stale /rc/link or /rc/channels drops authority
+    # The link must look good continuously for this long before it takes the
+    # gate; one bad frame hands the gate straight back.
+    rc_link_hold_sec: 1.0
+    rc_link_topic: "/rc/link"
+    rc_channels_topic: "/rc/channels"

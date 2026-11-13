@@ -81,6 +81,11 @@ def _fork(path, reliability=BE, durability=VOL):
     return End(FORK, f'{FORK_REF} library/real/{path}', reliability, durability)
 
 
+# The mux subscribes to the RC topics only with rc_authority_enable (off by default).
+MUX_RC = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py:273', BE)
+MUX_RC_LINK = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py:270', BE)
+
+
 def _overview(line):
     # The 8080 server's sensor panels (F30): opened while the page asks.
     return End('8080 dashboard', f'scripts/overview.py:{line} (qos_profile_sensor_data)', BE)
@@ -177,7 +182,7 @@ TABLE = (
         subscribers=(
             End(LIB, 'library/real/controller_real.py:89 (depth 1)', REL),
             _fork('controller_real.py:89 (depth 1)', REL),
-            End('mux_node', 'neoracer_ros2_driver/mux_node.py:96', BE),
+            End('mux_node', 'neoracer_ros2_driver/mux_node.py:263', BE),
             End('gamepad_node', 'neoracer_ros2_driver/gamepad_node.py:51', BE),
         ),
         evidence=(
@@ -237,13 +242,19 @@ TABLE = (
         '/rc/channels',
         'std_msgs/msg/Float32MultiArray',
         publishers=(End('controller_node', f'{CONTROLLER}:223', BE),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), MUX_RC),
         evidence=(
             (
                 CONTROLLER,
                 "create_publisher(Float32MultiArray, '/rc/channels', qos_profile_sensor_data)",
             ),
+            (
+                'neoracer_ros2_driver/mux_node.py',
+                "declare_parameter('rc_channels_topic', '/rc/channels')",
+            ),
+            ('config/mux.yaml', 'rc_channels_topic: "/rc/channels"'),
         ),
+        note='the mux reads it only with rc_authority_enable, off by default (F12)',
     ),
     Row(
         '/edgetpu/inference',
@@ -361,7 +372,7 @@ TABLE = (
         '/drive',
         'ackermann_msgs/msg/AckermannDriveStamped',
         publishers=DRIVE_WRITERS,
-        subscribers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:98', BE),),
+        subscribers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:265', BE),),
         evidence=(
             (
                 'neoracer_ros2_driver/mux_node.py',
@@ -415,7 +426,7 @@ TABLE = (
         '/gamepad_drive',
         'ackermann_msgs/msg/AckermannDriveStamped',
         publishers=(End('gamepad_node', 'neoracer_ros2_driver/gamepad_node.py:50', BE),),
-        subscribers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:97', BE),),
+        subscribers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:264', BE),),
         evidence=(
             (
                 'neoracer_ros2_driver/gamepad_node.py',
@@ -426,7 +437,7 @@ TABLE = (
     Row(
         '/mux_out',
         'ackermann_msgs/msg/AckermannDriveStamped',
-        publishers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:94', BE),),
+        publishers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:262', BE),),
         subscribers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:69', BE),),
         evidence=(
             (
@@ -480,8 +491,15 @@ TABLE = (
         '/rc/link',
         'std_msgs/msg/Bool',
         publishers=(End('controller_node', f'{CONTROLLER}:227', BE),),
-        evidence=((CONTROLLER, "create_publisher(Bool, '/rc/link', qos_profile_sensor_data)"),),
-        note='added by F08; the mux subscribes in F12',
+        subscribers=(MUX_RC_LINK,),
+        evidence=(
+            (CONTROLLER, "create_publisher(Bool, '/rc/link', qos_profile_sensor_data)"),
+            ('neoracer_ros2_driver/mux_node.py', "declare_parameter('rc_link_topic', '/rc/link')"),
+            ('config/mux.yaml', 'rc_link_topic: "/rc/link"'),
+        ),
+        note=(
+            'added by F08; the mux reads it only with rc_authority_enable, off by default (F12)'
+        ),
     ),
     Row(
         '/odom/integrated',
