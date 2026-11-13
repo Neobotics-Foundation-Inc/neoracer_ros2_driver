@@ -41,6 +41,7 @@ setup(
             'throttle_node = neoracer_ros2_driver.throttle_node:main',
             'led_matrix = neoracer_ros2_driver.led_matrix_node:main',
             'twist_bridge = neoracer_ros2_driver.twist_bridge_node:main',
+            'autonomy_node = neoracer_ros2_driver.autonomy_node:main',
         ],
     },
 )

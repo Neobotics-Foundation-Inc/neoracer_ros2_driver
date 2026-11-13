@@ -39,6 +39,7 @@ BE, REL = 'best_effort', 'reliable'
 VOL, TL = 'volatile', 'transient_local'
 
 LIB = 'library v0.9.0-bot'
+AUTONOMY_NODE = 'neoracer_ros2_driver/autonomy_node.py'
 DASH = 'dashboard'
 FORK = 'deployed library fork'
 # Neobotics-Foundation-Inc/racecar-neo-library, branch main, read at d8ca6ab.
@@ -119,6 +120,7 @@ SCAN_READERS = (
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:171'),
     _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
     _overview(61),
+    End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
 )
 DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
@@ -300,27 +302,30 @@ TABLE = (
     Row(
         '/autonomy/status',
         'diagnostic_msgs/msg/DiagnosticStatus',
-        publishers=(End('autonomy_node', 'upstream autonomy_node.py:209 (latched)', REL, TL),),
+        publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:209 (latched)', REL, TL),),
         subscribers=(
             End(LIB, 'library/real/slam_real.py:45 (latched)', REL, TL),
             End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:75 (latched)', REL, TL),
         ),
         evidence=(
+            (AUTONOMY_NODE, "create_publisher(DiagnosticStatus, '/autonomy/status', latched)"),
             (
                 'neoracer_ros2_driver/throttle_node.py',
                 "create_subscription(DiagnosticStatus, '/autonomy/status', self._status_cb, "
                 'latched)',
             ),
         ),
-        pending='F23',
-        note='the throttle node reads it for the mapping caps (F14)',
+        note='added by F23; the throttle node reads it for the mapping caps (F14)',
     ),
     Row(
         '/autonomy/pose',
         'geometry_msgs/msg/PoseWithCovarianceStamped',
-        publishers=(End('autonomy_node', 'upstream autonomy_node.py:208', REL),),
+        publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:208', REL),),
         subscribers=(End(LIB, 'library/real/slam_real.py:54 (depth 10)', REL),),
-        pending='F23',
+        evidence=(
+            (AUTONOMY_NODE, "create_publisher(PoseWithCovarianceStamped, '/autonomy/pose', 10)"),
+        ),
+        note='added by F23',
     ),
     Row(
         '/map',
@@ -332,6 +337,7 @@ TABLE = (
         subscribers=(
             End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),
             _fork('slam_real.py:52 (latched)', REL, TL),
+            End('autonomy_node', f'{AUTONOMY_NODE}:201 (latched, localization)', REL, TL),
         ),
         evidence=(SLAM_INCLUDE, NAV_INCLUDE, MAPPING_CMD, NAVIGATION_CMD),
         note=f'{VENDOR}; F24 replaces the vendor SLAM and must keep /map latched',
@@ -339,17 +345,32 @@ TABLE = (
     Row(
         '/autonomy/save_map',
         'std_srvs/srv/Trigger',
+        publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:211 (server)', REL),),
         subscribers=(End(LIB, 'library/real/slam_real.py:59 (client)', REL),),
+        evidence=(
+            (
+                AUTONOMY_NODE,
+                "create_service(Trigger, '/autonomy/save_map', self._on_save_map, "
+                'callback_group=clients)',
+            ),
+        ),
         kind='service',
-        pending='F23',
+        note='added by F23',
     ),
     Row(
         '/autonomy/global_localization',
         'std_srvs/srv/Trigger',
+        publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:217 (server)', REL),),
         subscribers=(End('map viewer', 'upstream scripts/mapview.py:378 (client)', REL),),
+        evidence=(
+            (
+                AUTONOMY_NODE,
+                "create_service(Trigger, '/autonomy/global_localization', self._on_global, "
+                'callback_group=clients)',
+            ),
+        ),
         kind='service',
-        pending='F23',
-        note='called by the map viewer (F26) and the SLAM validation (F41)',
+        note='added by F23; called by the map viewer (F26) and the SLAM validation (F41)',
     ),
     # -- written by the library and the dashboards --
     Row(
@@ -556,10 +577,16 @@ TABLE = (
     Row(
         '/slam_toolbox/serialize_map',
         'slam_toolbox/srv/SerializePoseGraph',
-        subscribers=(_fork('slam_real.py:63 (client)', REL),),
+        subscribers=(
+            _fork('slam_real.py:63 (client)', REL),
+            End('autonomy_node', f'{AUTONOMY_NODE}:223 (client, saves)', REL),
+        ),
         evidence=(SLAM_INCLUDE, MAPPING_CMD),
         kind='service',
-        note=f'{VENDOR}; F24 must keep slam_toolbox under this name until F45',
+        note=(
+            f'{VENDOR}; F24 must keep slam_toolbox under this name: autonomy_node saves '
+            'through it, and the fork reads it until F45'
+        ),
     ),
     Row(
         '/slam_toolbox/deserialize_map',
@@ -714,8 +741,9 @@ def test_qos_rule():
 
 @pytest.mark.parametrize('row', TABLE, ids=lambda r: r.name)
 def test_the_driver_side_is_in_the_sources(row):
-    # A pending row may already name a reader in this repo (the throttle node
-    # on /autonomy/status); that reader is checked before the publisher lands.
+    # A pending row may already name a reader in this repo (as the throttle
+    # node did on /autonomy/status before F23); that reader is checked before
+    # the publisher lands.
     if not (row.pending and row.evidence):
         _skip_unless_live(row)
     assert row.evidence, f'{row.name} has no evidence in the driver sources'
