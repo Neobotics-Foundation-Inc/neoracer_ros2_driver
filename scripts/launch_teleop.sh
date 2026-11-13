@@ -52,6 +52,13 @@ for el in /dev/shm/fastrtps_port*_el; do
     fi
 done
 
+# Features chosen for this boot (scripts/features.py): the camera, on by
+# default, and inference, off by default. Arguments given to this script win.
+# The feature arguments go first, so a ros2 launch option given to this script
+# (such as -a) still comes after every launch argument.
+mapfile -t FEATURE_ARGS < <(python3 "$SCRIPT_DIR/features.py" args "$@" || true)
+set -- "${FEATURE_ARGS[@]}" "$@"
+
 # Launch arguments, one per line, so the watchdog leaves subsystems disabled
 # at launch (<name>_enable:=false) alone.
 printf '%s\n' "$@" > "$LOG_DIR/launch_args"
