@@ -471,3 +471,42 @@ class TestShippedConfig:
         assert not hasattr(mux_node, 'SafetyOverride')
         assert 'override_timeout_sec' not in text and "'/mux/override" not in text
         assert 'override_timeout_sec' not in _shipped()
+
+
+def _held(mux, now, mode_value):
+    """Give the mux a transmitter that holds the gate, mode channel at mode_value."""
+    channels = [0.0] * 10
+    channels[6] = mode_value
+    mux._rc.observe_channels([0.0] * 10)
+    mux._rc.observe_channels([0.1] + [0.0] * 9)
+    mux._rc_link, mux._rc_link_stamp = True, now - 1.5
+    mux._rc_channels, mux._rc_channels_stamp = channels, now - 1.5
+    mux._rc_has_authority(now - 1.5)
+    mux._rc_link_stamp = mux._rc_channels_stamp = now
+
+
+class TestRcGate:
+    def test_passthrough_ignores_a_held_transmitter(self, monkeypatch):
+        mux = _Mux(rc_enable=True)
+        _held(mux, 10.0, 0.9)
+        assert mux._rc_has_authority(10.0) is True
+        mux._rc_has_authority = lambda now: pytest.fail('passthrough consulted the transmitter')
+        mux._latest_gamepad, mux._gamepad_stamp = 'gamepad', 9.9
+        mux._latest_auto, mux._auto_stamp = 'drive', 9.9
+        TestPassthrough._at(monkeypatch, 10.0)
+        mux._publish()
+        assert mux.sent == ['drive']
+
+    def test_with_passthrough_off_the_mode_channel_picks_the_source(self, monkeypatch):
+        mux = _Mux(rc_enable=True)
+        mux.passthrough = False
+        _held(mux, 10.0, 0.0)
+        mux._latest_gamepad, mux._gamepad_stamp = 'gamepad', 9.9
+        mux._latest_auto, mux._auto_stamp = 'drive', 9.9
+        TestPassthrough._at(monkeypatch, 10.0)
+        mux._publish()  # middle: arms the gate, publishes zero
+        mux._rc_channels[6] = 0.9
+        mux._publish()
+        mux._rc_channels[6] = -0.9
+        mux._publish()
+        assert mux.sent == ['zero', 'gamepad', 'drive']

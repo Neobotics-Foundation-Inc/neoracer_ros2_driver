@@ -4,8 +4,9 @@ Command mux: gates /gamepad_drive (LB) or /drive (RB) onto /mux_out.
 Timer-driven so the controller and the watchdog see a steady publish rate.
 Zeroes on joy disconnect or stale upstream commands (command_timeout_sec).
 
-On the NeoRacer the ESP32 firmware is the gate: it follows the Jetson only
-while the handset's mode switch is down (autonomy). So autonomy_passthrough is
+On the NeoRacer the ESP32 firmware is the gate: it follows the Jetson's `v`
+lines while the handset's mode switch is down (autonomy), and also when the
+handset is off or out of range. So autonomy_passthrough is
 on by default: the mux forwards any fresh /drive and publishes zero once it
 goes stale. The bumper gate, the boot-time arming and the FlySky authority
 below apply only with autonomy_passthrough off. config/mux.yaml describes the
@@ -16,7 +17,9 @@ default (rc_authority_enable): the link predicate is the least-verified part of
 the path, and the driver's /rc/channels scaling does not yet match the board's
 SBUS counts. Where it is enabled and a live transmitter is present, the mode
 channel selects idle, manual or autonomous and the bumpers are ignored;
-otherwise the bumpers govern.
+otherwise the bumpers govern. On the NeoRacer handset the mode switch reads the
+other way round, so it stays off; config/mux.yaml says what enabling it would
+do.
 
 Upstream's safety-controller override (/mux/override) is not part of this mux.
 """
@@ -202,9 +205,10 @@ class MuxNode(Node):
         self.declare_parameter('startup_grace_sec', 1.0)
         self.declare_parameter('arm_axis_threshold', 0.2)
         self.declare_parameter('arm_ignore_axes', [2, 5])
-        # On the NeoRacer the ESP32 firmware is the gate: it takes /motor only
-        # while the handset's mode switch is down (autonomy). So the mux
-        # forwards fresh /drive and lets the firmware decide. Set false only
+        # On the NeoRacer the ESP32 firmware is the gate: it follows the
+        # Jetson's `v` lines while the handset's mode switch is down
+        # (autonomy), and also when the handset is off or out of range. So the
+        # mux forwards fresh /drive and lets the firmware decide. Set false only
         # for a USB gamepad with real bumpers.
         self.declare_parameter('autonomy_passthrough', True)
 
@@ -279,11 +283,14 @@ class MuxNode(Node):
         self.create_timer(1.0 / publish_rate, self._publish)
 
         passthrough = bool(self.get_parameter('autonomy_passthrough').value)
+        rc_state = 'off'
+        if self._rc_enable:
+            rc_state = 'on, unused while autonomy_passthrough is on' if passthrough else 'on'
         self.get_logger().info(
             f'Mux ready: gamepad btn={self._gamepad_btn}, autonomy btn={self._auto_btn}, '
             f'joy timeout={self._joy_timeout}s, cmd timeout={self._cmd_timeout}s, '
             f'rate={publish_rate}Hz, '
-            f'rc_authority={"on" if self._rc_enable else "off"}, '
+            f'rc_authority={rc_state}, '
             f'autonomy_passthrough={"on" if passthrough else "off"}'
         )
 
