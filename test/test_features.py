@@ -16,33 +16,37 @@ def conf(tmp_path):
 
 class TestReadWrite:
     def test_defaults_without_a_file(self, features, conf):
-        assert features.read(conf, 'boot1') == {'camera': True, 'inference': False}
+        assert features.read(conf, 'boot1') == {'camera': True, 'detections': False}
 
     def test_round_trip_in_the_same_boot(self, features, conf):
-        features.write({'camera': True, 'inference': True}, conf, 'boot1')
-        assert features.read(conf, 'boot1') == {'camera': True, 'inference': True}
+        features.write({'camera': True, 'detections': True}, conf, 'boot1')
+        assert features.read(conf, 'boot1') == {'camera': True, 'detections': True}
 
     def test_a_reboot_returns_to_the_defaults(self, features, conf):
-        features.write({'camera': False, 'inference': False}, conf, 'boot1')
+        features.write({'camera': False, 'detections': False}, conf, 'boot1')
         assert features.read(conf, 'boot2') == features.DEFAULTS
 
     def test_unknown_boot_reads_defaults(self, features, conf):
-        features.write({'camera': False, 'inference': False}, conf, '')
+        features.write({'camera': False, 'detections': False}, conf, '')
         assert features.read(conf, '') == features.DEFAULTS
 
-    def test_inference_without_camera_reads_off(self, features, conf):
-        conf.write_text('BOOT_ID=b\nCAMERA=0\nINFERENCE=1\n')
-        assert features.read(conf, 'b') == {'camera': False, 'inference': False}
+    def test_a_file_that_is_not_text_reads_defaults(self, features, conf):
+        conf.write_bytes(b'\xff\xfeBOOT_ID=b\nCAMERA=0\n')
+        assert features.read(conf, 'b') == features.DEFAULTS
+
+    def test_detections_without_camera_read_off(self, features, conf):
+        conf.write_text('BOOT_ID=b\nCAMERA=0\nDETECTIONS=1\n')
+        assert features.read(conf, 'b') == {'camera': False, 'detections': False}
 
 
 class TestChange:
-    def test_inference_on_turns_the_camera_on(self, features):
-        out = features.change({'camera': False, 'inference': False}, 'inference', True)
-        assert out == {'camera': True, 'inference': True}
+    def test_detections_on_turn_the_camera_on(self, features):
+        out = features.change({'camera': False, 'detections': False}, 'detections', True)
+        assert out == {'camera': True, 'detections': True}
 
-    def test_camera_off_turns_inference_off(self, features):
-        out = features.change({'camera': True, 'inference': True}, 'camera', False)
-        assert out == {'camera': False, 'inference': False}
+    def test_camera_off_turns_detections_off(self, features):
+        out = features.change({'camera': True, 'detections': True}, 'camera', False)
+        assert out == {'camera': False, 'detections': False}
 
     def test_unknown_feature(self, features):
         with pytest.raises(ValueError):
@@ -51,7 +55,7 @@ class TestChange:
 
 class TestLaunchArgs:
     def test_one_argument_per_subsystem(self, features):
-        assert features.launch_args({'camera': True, 'inference': False}) == [
+        assert features.launch_args({'camera': True, 'detections': False}) == [
             'camera_enable:=true',
             'inference_enable:=false',
         ]
@@ -62,10 +66,10 @@ class TestLaunchArgs:
 
     def test_running_reads_the_launch_args_file(self, features, tmp_path):
         (tmp_path / 'launch_args').write_text('camera_enable:=false\ninference_enable:=true\n')
-        assert features.running(tmp_path) == {'camera': False, 'inference': True}
+        assert features.running(tmp_path) == {'camera': False, 'detections': True}
 
     def test_running_without_arguments_means_on(self, features, tmp_path):
-        assert features.running(tmp_path) == {'camera': True, 'inference': True}
+        assert features.running(tmp_path) == {'camera': True, 'detections': True}
 
     def test_launch_script_passes_the_features(self):
         from pathlib import Path
@@ -87,8 +91,8 @@ class TestNeoRacer:
         for subsystem in features.SUBSYSTEMS.values():
             assert f"'{subsystem}': 'true'" in text
 
-    def test_the_camera_boots_on_and_inference_off(self, features, conf):
-        assert features.DEFAULTS == {'camera': True, 'inference': False}
+    def test_the_camera_boots_on_and_detections_off(self, features, conf):
+        assert features.DEFAULTS == {'camera': True, 'detections': False}
         assert features.launch_args(features.read(conf, 'boot1')) == [
             'camera_enable:=true',
             'inference_enable:=false',

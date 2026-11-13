@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Teleop features that can be turned off to free the CPU: the camera and inference.
+Teleop features that can be turned off to free the CPU: the camera and detections.
 
 The choice is kept in ~/.config/racecar/features.conf; the 8080 dashboard
-writes it and restarts teleop once its tile lands (F32).
+writes it and restarts teleop.
 scripts/launch_teleop.sh turns it into `<subsystem>_enable` launch arguments,
 for the teleop service and for `racecar teleop`. Arguments given on the
 command line win. The file records the boot it was written in and is ignored
 after a reboot, so every boot starts from DEFAULTS: the camera on, because it
-is a core part of the API, and inference off, because the YOLO model holds the
-GPU and costs CPU on every camera frame. Inference needs the camera.
+is a core part of the API, and detections off, because the YOLO model of the
+inference node holds the GPU and costs CPU on every camera frame. Detections
+need the camera. The feature ids are upstream's; the subsystems are the
+NeoRacer's teleop launch arguments.
 
 Usage:
     features.py args [LAUNCH_ARG...]   launch arguments for teleop, one per line;
@@ -22,10 +24,10 @@ from pathlib import Path
 import sys
 
 # Feature id -> teleop.launch.py subsystem.
-SUBSYSTEMS = {'camera': 'camera', 'inference': 'inference'}
-DEFAULTS = {'camera': True, 'inference': False}
+SUBSYSTEMS = {'camera': 'camera', 'detections': 'inference'}
+DEFAULTS = {'camera': True, 'detections': False}
 # Inference runs on the camera image.
-NEEDS = {'inference': 'camera'}
+NEEDS = {'detections': 'camera'}
 
 BOOT_ID_PATH = Path('/proc/sys/kernel/random/boot_id')
 LAUNCH_ARGS_FILE = 'launch_args'
@@ -49,7 +51,7 @@ def read(path: Path | None = None, boot: str | None = None) -> dict[str, bool]:
     values = dict(DEFAULTS)
     try:
         lines = path.read_text().splitlines()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return values
     fields = dict(line.split('=', 1) for line in lines if '=' in line)
     if not boot or fields.get('BOOT_ID') != boot:

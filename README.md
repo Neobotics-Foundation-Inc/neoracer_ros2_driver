@@ -381,7 +381,7 @@ racecar teleop inference_enable:=true                      # with it
 ros2 topic echo /edgetpu/inference
 ```
 
-It is **off** at boot. `scripts/launch_teleop.sh`, which the teleop service and `racecar teleop` both run, reads the per-boot choice in `scripts/features.py`: the camera on and inference off, because inference is the most expensive subsystem (the model holds GPU memory for the life of the stack). The choice is kept in `~/.config/racecar/features.conf` for the current boot only; after a reboot the defaults apply again. A launch argument given on the command line wins, so `racecar teleop inference_enable:=true` runs it for that launch. Inference needs the camera: turning inference on turns the camera on, and turning the camera off turns inference off.
+It is **off** at boot. `scripts/launch_teleop.sh`, which the teleop service and `racecar teleop` both run, reads the per-boot choice in `scripts/features.py`: the camera on and inference off, because inference is the most expensive subsystem (the model holds GPU memory for the life of the stack). The choice is kept in `~/.config/racecar/features.conf` for the current boot only; after a reboot the defaults apply again. A launch argument given on the command line wins, so `racecar teleop inference_enable:=true` runs it for that launch. The stored choice keeps inference with the camera: turning inference on turns the camera on, and turning the camera off turns inference off. Launch arguments given on the command line are used as given and are not checked against each other.
 
 The node exits at startup if `racecar setup ml` has never run on the car (it logs `ultralytics is not importable`). The rest of the stack comes up regardless; only the detection card goes red.
 
@@ -455,7 +455,7 @@ racecar launch inference
 racecar launch autonomy
 ```
 
-Any subsystem can be toggled at launch. `lidar`, `camera`, `led_matrix`, and `inference` all default to on:
+Any subsystem can be toggled at launch. In `teleop.launch.py`, `lidar`, `camera`, `led_matrix`, and `inference` all default to on. The teleop service and `racecar teleop` pass `inference_enable:=false` unless inference is turned on for this boot (see [Object detection](#object-detection)):
 
 ```sh
 ros2 launch neoracer_ros2_driver teleop.launch.py camera_enable:=false
@@ -476,7 +476,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **`/camera/color` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
 
-**No `/edgetpu/inference`.** The node is on by default; confirm it was not disabled with `inference_enable:=false`. If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
+**No `/edgetpu/inference`.** The node is off at boot. `cat ~/logs/latest/launch_args` shows `inference_enable:=false` when teleop was launched without it; see [Object detection](#object-detection). If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
 
 **A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 

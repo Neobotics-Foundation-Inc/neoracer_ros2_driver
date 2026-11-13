@@ -21,7 +21,8 @@ from sensor_msgs.msg import BatteryState
 # by path, so its folder goes on the path before they are imported.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import overview  # noqa: E402, I100  sibling scripts, after the path insert
+import features  # noqa: E402, I100  sibling scripts, after the path insert
+import overview  # noqa: E402
 import sysinfo  # noqa: E402
 import webui  # noqa: E402
 
@@ -46,9 +47,9 @@ MONITORED = {
     'joy': {'topic': '/joy', 'label': 'FlySky RC (/joy)', 'supervised': False},
     'lidar': {'topic': '/scan', 'label': 'Lakibeam lidar', 'supervised': True},
     'camera': {'topic': '/camera/color', 'label': 'USB camera', 'supervised': True},
-    # Part of the default teleop stack, so absent is a fault, not a normal
-    # state. Still unsupervised: the watchdog does not restart it, and a car
-    # without the ML stack installed will show this red until `racecar setup ml`.
+    # Off at boot (scripts/features.py). While it was launched off, absent reads
+    # STANDBY. Still unsupervised: the watchdog does not restart it. With it
+    # turned on, a car without `racecar setup ml` shows it as not detected.
     'inference': {'topic': '/edgetpu/inference', 'label': 'YOLO inference',
                   'supervised': False},
     # Autonomy layer, started from scripts/launch_autonomy.sh while
@@ -390,6 +391,12 @@ def _monitor_loop() -> None:
             nodes = _get_node_list()
 
             node_status = {}
+            # By teleop subsystem, which is the card name here (the camera
+            # and inference cards). A card whose subsystem teleop was launched
+            # without reads STANDBY, not a fault.
+            launched = {
+                features.SUBSYSTEMS[feature]: on for feature, on in features.running().items()
+            }
             for name, cfg in MONITORED.items():
                 # Publisher count, not topic existence: the sampler's own
                 # subscriptions create the topics, so existence always reads
@@ -397,7 +404,7 @@ def _monitor_loop() -> None:
                 present = _count_publishers(cfg['topic']) > 0
                 if present:
                     status = 'healthy'
-                elif cfg.get('optional', False):
+                elif cfg.get('optional', False) or not launched.get(name, True):
                     status = 'off'
                 elif cfg.get('supervised', True):
                     status = 'dead'

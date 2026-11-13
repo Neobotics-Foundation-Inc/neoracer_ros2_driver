@@ -82,9 +82,9 @@ additions with no reference counterpart. They serve the SLAM and Nav2 layer
 
 ## GPU stack
 
-`inference_node` is the one driver node that uses the GPU. It is part of the
-default teleop stack, so the GPU is held for the life of that stack; disable it
-with `inference_enable:=false` to get the memory back. The stack is
+`inference_node` is the one driver node that uses the GPU. It is off at boot
+(`scripts/features.py`). Once it is turned on, the GPU is held for the life of
+the teleop stack; launch teleop without it to get the memory back. The stack is
 installed by `scripts/setup_ml.sh` into the user site so the systemd units (which
 run as the same user) can import it.
 
