@@ -67,14 +67,17 @@ def _declared_defaults():
 
 
 class TestNodeSource:
-    def test_the_yaml_sets_only_declared_parameters_at_their_defaults(self):
+    def test_the_yaml_sets_only_declared_parameters_of_their_type(self):
+        # The NeoRacer is tuned in the YAML, so the values may differ from the
+        # code's defaults, which stay upstream's. The type may not: Humble
+        # stops the node at startup on, for example, fit_rate_hz: 2 for 2.0.
         declared = _declared_defaults()
         shipped = yaml.safe_load((CONFIG / 'autonomy.yaml').read_text())
         params = shipped['autonomy_node']['ros__parameters']
         assert params, 'config/autonomy.yaml sets nothing'
         for name, value in params.items():
             assert name in declared, f'{name} is not declared by autonomy_node'
-            assert value == declared[name], name
+            assert type(value) is type(declared[name]), name
 
     def test_it_publishes_no_transform(self):
         # odom -> base_link comes from the controller and map -> odom from the
