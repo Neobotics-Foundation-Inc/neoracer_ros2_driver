@@ -1019,24 +1019,11 @@ __RC_SELFTEST_HELP__
             ;;
 
         status)
-            echo "=== USB peripherals ==="
-            lsusb | grep -iE "303a|1209|1bcf|2993|05a3|espressif|decxin|camera" || echo "  (none of the expected USB devices found)"
-            echo
-            echo "=== Stable device symlinks ==="
-            for s in osrbot_base osrbot_led_matrix osrbot_usb_cam; do
-                if [[ -e "/dev/$s" ]]; then
-                    printf "  /dev/%-18s -> %s\n" "$s" "$(readlink -f /dev/$s)"
-                else
-                    printf "  /dev/%-18s MISSING (run: racecar udev)\n" "$s"
-                fi
-            done
-            echo
-            echo "=== ros2 nodes running ==="
-            if command -v ros2 >/dev/null; then
-                ros2 node list 2>/dev/null || echo "  (no ROS daemon / no nodes)"
-            else
-                echo "  ros2 not on PATH"
-            fi
+            # Whole-car diagnostic. Read-only: it observes topics and reads
+            # sysfs, and never commands the hardware. Exits non-zero when a
+            # check fails (--strict: unless every check passed), so it is
+            # usable from a script.
+            python3 "${RACECAR_DIAGNOSE_SCRIPT:-$pkg_dir/scripts/diagnose.py}" "$@"
             ;;
 
         help|-h|--help|"")
@@ -1178,7 +1165,17 @@ Commands:
                           racecar selftest --led            (sends test text)
                           racecar selftest --led=HELLO      (sends custom text)
                         Requires led_matrix_node running (racecar launch led_matrix).
-    status              Show USB peripherals, device symlinks, and running ros2 nodes.
+    status [flags]      Whole-car diagnostic: devices, sensors, actuators,
+                        autonomy, system, services and network in one pass.
+                        Read-only. Exits non-zero when a check fails; WARN
+                        still exits 0.
+                          --quick             skip the ROS sampling phase
+                          --json              machine-readable output
+                          --strict            also exit non-zero on WARN/SKIP
+                          --section a,b       devices, sensors, actuators,
+                                              autonomy, system, services,
+                                              network
+                          --window SEC        ROS sample window (default 5.0)
     help                Show this message.
 
 Extra args are forwarded:
@@ -1209,6 +1206,9 @@ _racecar_complete() {
     case "$sub" in
         calibrate)
             COMPREPLY=( $(compgen -W "status check lidar odom steering dynamics --help" -- "$cur") )
+            ;;
+        status)
+            COMPREPLY=( $(compgen -W "--quick --json --strict --section --window --help" -- "$cur") )
             ;;
         launch)
             local launch_dir="$HOME/ros2_ws/src/neoracer_ros2_driver/launch"

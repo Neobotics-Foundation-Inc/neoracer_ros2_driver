@@ -127,7 +127,7 @@ sudo reboot
 After reboot, verify and start the stack:
 
 ```sh
-racecar status              # USB peripherals + /dev/osrbot_* symlinks + running nodes
+racecar status --quick      # devices, system, services and network, without ROS
 racecar service status      # units enabled by setup, teleop not yet running
 racecar service start       # starts neoracer-teleop (watchdog follows)
 ```
@@ -203,7 +203,7 @@ racecar library --select <dir>  # point the student library at a notebook tree
 racecar selftest --led[=TEXT]   # send test text to the 8x8 display
 racecar clear --led             # blank the display until something writes to it
 racecar udev                    # re-install the udev rules
-racecar status                  # peripherals + symlinks + running nodes
+racecar status                  # whole-car diagnostic (--quick, --json, --strict)
 racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
@@ -474,7 +474,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 ## Troubleshooting
 
-**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. Check IDs with `racecar status` or `udevadm info -n /dev/ttyACM0`.
+**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. `racecar status` shows which links are present; check a device's IDs with `lsusb` or `udevadm info -n /dev/ttyACM0`.
 
 **No `/scan`.** Confirm the lidar answers: `ping 192.168.8.2`. If it doesn't, the USB-C link should bring up an interface at `192.168.8.1`; see [Networking](#networking-optional). Then read [Checking lidar health](#checking-lidar-health) before concluding the sensor is dead.
 
