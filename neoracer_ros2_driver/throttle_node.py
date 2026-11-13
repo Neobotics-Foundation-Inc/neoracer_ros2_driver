@@ -55,8 +55,8 @@ class ThrottleNode(Node):
         self._max_fwd = self.get_parameter('max_speed_forward').value
         self._max_back = self.get_parameter('max_speed_backward').value
         self._max_steer = self.get_parameter('max_steering').value
-        self._mapping_cap = float(self.get_parameter('mapping_speed_cap').value)
-        self._mapping_steer = float(self.get_parameter('mapping_steering_cap').value)
+        self._mapping_cap = self._positive_param('mapping_speed_cap', 0.083)
+        self._mapping_steer = self._positive_param('mapping_steering_cap', 1.0)
         self._mapping = False
 
         qos = QoSProfile(
@@ -80,6 +80,19 @@ class ThrottleNode(Node):
             f'mapping_steering_cap={self._mapping_steer:g} '
             '(fractions of /motor, which the controller maps to m/s and degrees)'
         )
+
+    def _positive_param(self, name: str, default: float) -> float:
+        """
+        Return a cap parameter, or its default when it is not above 0.
+
+        A negative cap would turn every command, a stop included, into the
+        positive cap while mapping; a cap of 0 would hold the car still.
+        """
+        value = float(self.get_parameter(name).value)
+        if value > 0.0:
+            return value
+        self.get_logger().error(f'{name} must be above 0, got {value:g}; using {default:g}')
+        return default
 
     def _drive_cb(self, msg: AckermannDriveStamped) -> None:
         out = AckermannDriveStamped()

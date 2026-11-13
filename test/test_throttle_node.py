@@ -1,6 +1,7 @@
 """Unit tests for throttle math helpers and the shipped throttle caps."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -187,3 +188,32 @@ class TestThrottleNodeCallbacks:
             'Mapping caps (speed 0.083, steering 1) on',
             'Mapping caps (speed 0.083, steering 1) off',
         ]
+
+
+class TestCapGuard:
+    """A mapping cap that is not above 0 is replaced by its default, with an error."""
+
+    @staticmethod
+    def _node(**values):
+        node = ThrottleNode.__new__(ThrottleNode)
+        node.get_parameter = lambda name: SimpleNamespace(value=values[name])
+        node.logger = mock.Mock()
+        node.get_logger = lambda: node.logger
+        return node
+
+    @pytest.mark.parametrize('bad', [-0.083, 0.0, float('nan')])
+    def test_a_bad_speed_cap_uses_the_default(self, bad):
+        node = self._node(mapping_speed_cap=bad)
+        assert node._positive_param('mapping_speed_cap', 0.083) == 0.083
+        node.logger.error.assert_called_once()
+        assert 'mapping_speed_cap' in node.logger.error.call_args[0][0]
+
+    def test_a_negative_steering_cap_uses_the_default(self):
+        node = self._node(mapping_steering_cap=-0.3)
+        assert node._positive_param('mapping_steering_cap', 1.0) == 1.0
+        node.logger.error.assert_called_once()
+
+    def test_a_good_cap_is_kept_without_an_error(self):
+        node = self._node(mapping_speed_cap=0.05)
+        assert node._positive_param('mapping_speed_cap', 0.083) == 0.05
+        node.logger.error.assert_not_called()
