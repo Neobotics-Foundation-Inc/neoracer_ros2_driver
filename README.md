@@ -64,7 +64,7 @@ Published topics:
 - `/odom/integrated` (nav_msgs/Odometry): the car's pose at 50 Hz from the state frame, for the calibration tools. `odometry.source` in `config/odom.yaml` picks the ESP32's own pose (`firmware`, the default) or an integration of the body speed and the gyro yaw rate (`integrated`). Its `odom -> base_link` transform is off by default, because the autonomy launch's EKF publishes that transform
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
-- `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. On by default; see [Object detection](#object-detection).
+- `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. Off at boot by default; see [Object detection](#object-detection).
 
 The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch decides who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
@@ -376,12 +376,12 @@ Two things worth knowing before training on the car:
 
 ```sh
 racecar launch inference                                   # on its own
-racecar teleop                                             # with the rest of the stack (on by default)
-racecar teleop inference_enable:=false                     # without it
+racecar teleop                                             # the rest of the stack (inference off by default)
+racecar teleop inference_enable:=true                      # with it
 ros2 topic echo /edgetpu/inference
 ```
 
-It defaults to **on** in `teleop.launch.py`, so detections are on the graph without a launch argument. It is still the most expensive subsystem: the model holds GPU memory for the life of the stack. Launch with `inference_enable:=false` on a car whose student code never reads `/edgetpu/inference`, or to free the GPU for a `racecar compile` build.
+It is **off** at boot. `scripts/launch_teleop.sh`, which the teleop service and `racecar teleop` both run, reads the per-boot choice in `scripts/features.py`: the camera on and inference off, because inference is the most expensive subsystem (the model holds GPU memory for the life of the stack). The choice is kept in `~/.config/racecar/features.conf` for the current boot only; after a reboot the defaults apply again. A launch argument given on the command line wins, so `racecar teleop inference_enable:=true` runs it for that launch. Inference needs the camera: turning inference on turns the camera on, and turning the camera off turns inference off.
 
 The node exits at startup if `racecar setup ml` has never run on the car (it logs `ultralytics is not importable`). The rest of the stack comes up regardless; only the detection card goes red.
 
