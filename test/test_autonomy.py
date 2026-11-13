@@ -77,7 +77,10 @@ class TestNodeSource:
         assert params, 'config/autonomy.yaml sets nothing'
         for name, value in params.items():
             assert name in declared, f'{name} is not declared by autonomy_node'
-            assert type(value) is type(declared[name]), name
+            # Same type both ways: an int where a float is declared stops the node
+            # at startup on Humble, and bool must not pass as int.
+            default = declared[name]
+            assert isinstance(value, type(default)) and isinstance(default, type(value)), name
 
     def test_it_publishes_no_transform(self):
         # odom -> base_link comes from the controller and map -> odom from the
