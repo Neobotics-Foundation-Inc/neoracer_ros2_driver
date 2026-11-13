@@ -48,8 +48,9 @@ Adjust `throttle_channel` / `steering_channel` / `mode_channel` in
 - [ ] Flip to **autonomy** and publish `/drive` (or run a student script) -> wheels respond.
 - [ ] Release the switch (idle) -> wheels stop.
 - [ ] Verify drive **direction** and that top speed feels safe; tune
-  `max_speed_mps` / `steering_trim_deg` (`config/controller.yaml`) and the caps
-  in `config/throttle.yaml`.
+  `max_speed_mps` (`config/controller.yaml`), the caps in
+  `config/throttle.yaml`, and the steering trim in the ESP32 firmware with
+  `trim set`.
 
 ## 6. Watchdog
 ```sh
