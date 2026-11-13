@@ -286,8 +286,19 @@ TABLE = (
         '/autonomy/status',
         'diagnostic_msgs/msg/DiagnosticStatus',
         publishers=(End('autonomy_node', 'upstream autonomy_node.py:209 (latched)', REL, TL),),
-        subscribers=(End(LIB, 'library/real/slam_real.py:45 (latched)', REL, TL),),
+        subscribers=(
+            End(LIB, 'library/real/slam_real.py:45 (latched)', REL, TL),
+            End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:75 (latched)', REL, TL),
+        ),
+        evidence=(
+            (
+                'neoracer_ros2_driver/throttle_node.py',
+                "create_subscription(DiagnosticStatus, '/autonomy/status', self._status_cb, "
+                'latched)',
+            ),
+        ),
         pending='F23',
+        note='the throttle node reads it for the mapping caps (F14)',
     ),
     Row(
         '/autonomy/pose',
@@ -396,7 +407,7 @@ TABLE = (
         '/mux_out',
         'ackermann_msgs/msg/AckermannDriveStamped',
         publishers=(End('mux_node', 'neoracer_ros2_driver/mux_node.py:94', BE),),
-        subscribers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:43', BE),),
+        subscribers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:69', BE),),
         evidence=(
             (
                 'neoracer_ros2_driver/mux_node.py',
@@ -411,7 +422,7 @@ TABLE = (
     Row(
         '/motor',
         'ackermann_msgs/msg/AckermannDriveStamped',
-        publishers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:42', BE),),
+        publishers=(End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:68', BE),),
         subscribers=(End('controller_node', f'{CONTROLLER}:196', BE),),
         evidence=(
             (
@@ -677,7 +688,10 @@ def test_qos_rule():
 
 @pytest.mark.parametrize('row', TABLE, ids=lambda r: r.name)
 def test_the_driver_side_is_in_the_sources(row):
-    _skip_unless_live(row)
+    # A pending row may already name a reader in this repo (the throttle node
+    # on /autonomy/status); that reader is checked before the publisher lands.
+    if not (row.pending and row.evidence):
+        _skip_unless_live(row)
     assert row.evidence, f'{row.name} has no evidence in the driver sources'
     for path, text in row.evidence:
         source = _squash(_code_text(ROOT / path))

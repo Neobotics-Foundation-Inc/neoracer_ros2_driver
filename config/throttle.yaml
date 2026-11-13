@@ -1,9 +1,26 @@
 throttle_node:
   ros__parameters:
-    # Single source of truth for top speed. Fractions of full PWM swing.
-    # Speed runs the full ESC swing. Steering stays at 0.625 (the v1 +/-2500
-    # offset): past that the servo is commanded beyond full lock and stalls
-    # against the linkage.
+    # Single source of truth for top speed. Fractions of /motor, which the
+    # controller maps to m/s (max_speed_mps) and degrees (max_steering_angle_deg)
+    # in controller.yaml. Speed runs the full range. Steering stays at 0.625
+    # (the v1 +/-2500 offset): past that the servo is commanded beyond full
+    # lock and stalls against the linkage.
     max_speed_forward: 1.0
     max_speed_backward: 1.0
     max_steering: 0.625
+    # While mapping (/autonomy/status mode mapping), /motor speed is clipped to
+    # this, after the per-direction caps above. It is a fraction of
+    # max_speed_mps in controller.yaml: 0.083 x 6.0 m/s is about 0.5 m/s, so
+    # change it whenever max_speed_mps changes. Smaller commands pass unchanged;
+    # the ESP32 speed loop has no floor. On the floor the dev car's encoder read
+    # about 0.55 m/s at this value, with no stall or oscillation (2026-11-12).
+    # A value that is not above 0 is logged and replaced by 0.083.
+    mapping_speed_cap: 0.083
+    # While mapping, /motor steering is clipped to this; 1.0 is off. It is a
+    # fraction of /motor steering, which max_steering already limits to 0.625,
+    # so any value of 0.625 or more is off. Not tuned on the NeoRacer yet. A
+    # value that is not above 0 is logged and replaced by 1.0.
+    mapping_steering_cap: 1.0
+    # No steering trim here. The trim is set in the ESP32 firmware with
+    # `trim set`, so it also applies to manual driving, and steering_trim_deg
+    # in controller.yaml stays 0.
