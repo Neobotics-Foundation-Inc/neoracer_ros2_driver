@@ -120,6 +120,7 @@ SCAN_READERS = (
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:171'),
     _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
     _overview(61),
+    End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
 )
 DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
@@ -576,10 +577,16 @@ TABLE = (
     Row(
         '/slam_toolbox/serialize_map',
         'slam_toolbox/srv/SerializePoseGraph',
-        subscribers=(_fork('slam_real.py:63 (client)', REL),),
+        subscribers=(
+            _fork('slam_real.py:63 (client)', REL),
+            End('autonomy_node', f'{AUTONOMY_NODE}:223 (client, saves)', REL),
+        ),
         evidence=(SLAM_INCLUDE, MAPPING_CMD),
         kind='service',
-        note=f'{VENDOR}; F24 must keep slam_toolbox under this name until F45',
+        note=(
+            f'{VENDOR}; F24 must keep slam_toolbox under this name: autonomy_node saves '
+            'through it, and the fork reads it until F45'
+        ),
     ),
     Row(
         '/slam_toolbox/deserialize_map',
@@ -734,8 +741,9 @@ def test_qos_rule():
 
 @pytest.mark.parametrize('row', TABLE, ids=lambda r: r.name)
 def test_the_driver_side_is_in_the_sources(row):
-    # A pending row may already name a reader in this repo (the throttle node
-    # on /autonomy/status); that reader is checked before the publisher lands.
+    # A pending row may already name a reader in this repo (as the throttle
+    # node did on /autonomy/status before F23); that reader is checked before
+    # the publisher lands.
     if not (row.pending and row.evidence):
         _skip_unless_live(row)
     assert row.evidence, f'{row.name} has no evidence in the driver sources'
