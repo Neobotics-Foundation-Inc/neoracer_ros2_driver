@@ -21,6 +21,15 @@
   .ov-frame { aspect-ratio: 4 / 3; }
   .ov-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .ov-lidar { aspect-ratio: 4 / 3; }
+  /* On a large screen a 4:3 view would grow as wide as half the page and push
+     the IMU, the encoder and the history off screen, so it stops growing and
+     sits in the middle of its panel. */
+  .ov-frame, .ov-lidar {
+    width: 100%;
+    max-height: min(46vh, 560px);
+    max-width: calc(min(46vh, 560px) * 4 / 3);
+    margin-inline: auto;
+  }
   .ov-lidar svg { position: absolute; inset: 0; width: 100%; height: 100%; }
   .ov-lidar .ring { fill: none; stroke: var(--nr-edge); stroke-width: 1; }
   .ov-lidar .tick { fill: var(--nr-ink-2); font: 500 12px var(--nr-font-sans); }
