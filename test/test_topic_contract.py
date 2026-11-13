@@ -80,6 +80,11 @@ def _fork(path, reliability=BE, durability=VOL):
     return End(FORK, f'{FORK_REF} library/real/{path}', reliability, durability)
 
 
+def _overview(line):
+    # The 8080 server's sensor panels (F30): opened while the page asks.
+    return End('8080 dashboard', f'scripts/overview.py:{line} (qos_profile_sensor_data)', BE)
+
+
 CAMERA_READERS = (
     End(LIB, 'library/real/camera_real.py:64', BE),
     _fork('camera_real.py:49 (depth 10)'),
@@ -89,6 +94,7 @@ CAMERA_READERS = (
     _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:177'),
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:170'),
     End('inference_node', 'neoracer_ros2_driver/inference_node.py:135', BE),
+    _overview(60),
 )
 ODOM_READERS = tuple(
     _sensor(f'{DASH} {name}', f'{name}_dashboard/{name}.py:{line}')
@@ -107,6 +113,7 @@ SCAN_READERS = (
     _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:175'),
     _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:171'),
     _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
+    _overview(61),
 )
 DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
@@ -195,7 +202,7 @@ TABLE = (
         '/imu/fused',
         'sensor_msgs/msg/Imu',
         publishers=(End('controller_node', f'{CONTROLLER}:205', REL),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(62)),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
     Row(
@@ -212,7 +219,7 @@ TABLE = (
         '/encoder/speed',
         'std_msgs/msg/Float32',
         publishers=(End('controller_node', f'{CONTROLLER}:220', BE),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
+        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(63)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
         ),
@@ -422,7 +429,7 @@ TABLE = (
         '/battery',
         'sensor_msgs/msg/BatteryState',
         publishers=(End('controller_node', f'{CONTROLLER}:208', BE),),
-        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:152', BE),),
+        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:154', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(BatteryState, '/battery', qos_profile_sensor_data)"),
         ),
