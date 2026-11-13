@@ -66,7 +66,7 @@ Published topics:
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 - `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. Off at boot by default; see [Object detection](#object-detection).
 
-The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch decides who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
+The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch selects who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
 Safety and uptime layers:
 
@@ -266,7 +266,7 @@ racecar navigation rviz         # RViz goal-setting view, on the car's desktop
 
 `twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
 
-Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still decides whether the car follows them.
+Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
 ## Web dashboard
 
@@ -486,7 +486,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 
-**FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
+**FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. On receiver failsafe the ESP32 sends `-1` on every channel, which maps to neutral. With the mode switch down a handset that goes off is not reported: the channels repeat their last values.
 
 **JetPack dpkg errors.** Reset the dpkg info directory:
 

@@ -37,16 +37,21 @@ ros2 node list   # controller_node, gamepad_node, mux_node, throttle_node,
 With the transmitter ON, `ros2 topic echo /joy` and confirm:
 - [ ] throttle stick moves `axes[1]`, steering stick moves `axes[3]`
 - [ ] `axes[2]` and `axes[5]` rest at +1.0
-- [ ] the mode switch sets `buttons[4]` (manual) / `buttons[5]` (autonomy)
+- [ ] the mode switch up or in the middle sets `buttons[4]` (manual), down sets
+  `buttons[5]` (autonomy)
+- [ ] centred sticks read 0.0 on `axes[1]` and `axes[3]`
 
-Adjust `throttle_channel` / `steering_channel` / `mode_channel` in
-`config/controller.yaml` until they line up.
+The channels are calibrated for the SBUS counts the ESP32 sends (240, 1023,
+1807). A handset with other end points gets its own values in the car
+profile, `params/controller.yaml`.
 
 ## 5. Drive test (wheels off ground first)
-- [ ] Flip the FlySky switch to **manual** -> stick drives the wheels
-  (FlySky -> `/joy` -> gamepad -> mux -> throttle -> `/motor` -> ESP32).
-- [ ] Flip to **autonomy** and publish `/drive` (or run a student script) -> wheels respond.
-- [ ] Release the switch (idle) -> wheels stop.
+- [ ] Mode switch **up** (manual): the sticks drive the wheels. The ESP32 drives
+  from the receiver directly; nothing on the Jetson is in that path.
+- [ ] Mode switch **down** (autonomy) and publish `/drive` (or run a student
+  script): the wheels respond.
+- [ ] Stop the publisher: within 0.5 s the mux publishes zero and the wheels stop.
+- [ ] Flip the switch back up: the ESP32 ignores the Jetson again.
 - [ ] Verify drive **direction** and that top speed feels safe; tune
   `max_speed_mps` (`config/controller.yaml`), the caps in
   `config/throttle.yaml`, and the steering trim in the ESP32 firmware with

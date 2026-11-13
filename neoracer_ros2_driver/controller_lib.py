@@ -7,7 +7,7 @@ mapping can be unit-tested without a running ROS graph (see test/test_controller
 The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 - ``i qx qy qz qw ax ay az gx gy gz``   IMU   (quaternion, accel m/s^2, gyro rad/s)
 - ``o px py pz vx vy vz yaw``           odom  (position m, velocity m/s, yaw rad)
-- ``r c1 c2 ... c10``                   FlySky RC channels (ints; -1 == no signal)
+- ``r c1 c2 ... c10``                   FlySky RC channels (SBUS counts; -1 == receiver failsafe)
 - ``m x y z``                           magnetometer (Gauss)
 """
 
@@ -16,14 +16,13 @@ from typing import Any
 
 from neoracer_ros2_driver.limits import clamp
 
-# A raw RC channel reading below this is treated as "no signal" (failsafe).
-# The firmware reports -1 on every channel when the FlySky transmitter is off,
-# so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
-RC_FAILSAFE_BELOW = 500
-# The ESP32 reports the receiver's channels as raw SBUS counts, 0 to 2047,
-# and sends -1 on every channel while the receiver has no signal.
+# The ESP32 reports the receiver's channels as raw SBUS counts, 0 to 2047
+# (sticks 240 to 1807, centre 1023), and -1 on every channel on receiver
+# failsafe. A reading below RC_FAILSAFE_BELOW maps to neutral, so only that
+# -1 counts as no signal; a real 240, a stick or switch at its end, is a value.
 RC_COUNT_MIN = 0
 RC_COUNT_MAX = 2047
+RC_FAILSAFE_BELOW = RC_COUNT_MIN
 
 # 3S LiPo bounds for the charge fraction in /battery/state (the vendor stack's
 # battery_voltage_min/max).
@@ -135,7 +134,7 @@ def parse_serial_data(line: str):
         return data, 'o'
 
     if cmd_type == 'r' and len(parts) >= 2:
-        # r c1 c2 ... cN   (FlySky RC channels, ints; -1 == no signal)
+        # r c1 c2 ... cN   (FlySky RC channels, ints; -1 == receiver failsafe)
         data['channels'] = [int(float(v)) for v in parts[1:]]
         return data, 'r'
 
@@ -207,10 +206,10 @@ def quaternion_from_euler(roll, pitch, yaw):
 
 def normalize_channel(raw, rc_min, rc_center, rc_max, deadband, failsafe_below=RC_FAILSAFE_BELOW):
     """
-    Map a raw RC pulse width to ``[-1.0, 1.0]`` about its center.
+    Map a raw RC reading (an SBUS count) to ``[-1.0, 1.0]`` about its center.
 
-    A reading below ``failsafe_below`` (e.g. the firmware's ``-1`` no-signal
-    sentinel) returns ``0.0`` so a powered-off transmitter never commands full
+    A reading below ``failsafe_below`` (the firmware's ``-1`` on receiver
+    failsafe) returns ``0.0``, so a receiver failsafe frame never commands full
     scale. The two sides of center are scaled independently so an asymmetric
     ``rc_min``/``rc_max`` still yields a clean +-1 range. Values within
     ``deadband`` of center snap to ``0.0``.
@@ -237,7 +236,7 @@ def rc_link_up(channels, count_min=RC_COUNT_MIN, count_max=RC_COUNT_MAX):
     """
     Report whether the transmitter link is up: every raw channel is an SBUS count.
 
-    The firmware sends -1 on every channel while the receiver has no signal.
+    The firmware sends -1 on every channel on receiver failsafe.
     Use this, not the normalized channels, for transmitter presence: the
     failsafe mapping turns a dead channel and a stick held low into the same
     neutral value. One frame's verdict; freshness belongs to the consumer.
@@ -280,8 +279,8 @@ def rc_to_joy(channels, cfg):
                            and treats ``trigger_axes`` as resting at +1.0
       * student library -> Xbox-style axis/button layout
 
-    ``channels`` is the list from the ESP32 ``r`` line (``-1`` == no signal); a
-    failsafe/no-signal channel maps to neutral so the car stays idle.
+    ``channels`` is the list from the ESP32 ``r`` line (``-1`` == receiver
+    failsafe); a failsafe channel maps to neutral so the car stays idle.
     """
     n_axes = cfg['num_axes']
     axes = [0.0] * n_axes
@@ -315,8 +314,10 @@ def rc_to_joy(channels, cfg):
 
     buttons = [0] * cfg['num_buttons']
 
-    # --- 3-position mode switch -> manual / autonomy enable ---
+    # --- Mode switch -> manual / autonomy enable ---
     # below mid => idle, between mid and high => manual (LB), above high => autonomy (RB).
+    # controller.yaml sets the thresholds to the firmware's two states: a count
+    # below 1500 (switch up or middle) is manual, 1500 or more (down) autonomy.
     mc = cfg['mode_channel']
     if mc >= 0 and chan(mc) is not None and chan(mc) >= cfg['rc_failsafe_below']:
         m = norm(mc)
