@@ -97,7 +97,8 @@ DYNAMICS_KEYS = tuple(
 ODOM_SETUP = (
     'Use a room with walls or furniture nearby.\n'
     'Clear about 2 meters around the car for driving circles.\n'
-    'Clear a straight path of 3 to 5 meters that ends at a wall or furniture.'
+    'Clear a straight path of 2.5 to 4 meters that ends at a wall or furniture.\n'
+    'You drive the car with the handset, mode switch UP (manual).'
 )
 
 
