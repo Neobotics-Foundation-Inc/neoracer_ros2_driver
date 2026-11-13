@@ -56,8 +56,20 @@ def _ros_yaml(path: Path, node: str, params: dict) -> None:
 
 class TestSteps:
     def test_installed_follows_the_tool_file(self, cal, tools):
+        # The lidar tool imports calibrate_odom.py, so the lidar step needs it too.
         (tools / 'calibrate_odom.py').unlink()
-        assert [s.key for s in cal.STEPS if not s.installed] == ['odom']
+        assert [s.key for s in cal.STEPS if not s.installed] == ['lidar', 'odom']
+
+    def test_the_lidar_step_names_the_tools_it_still_needs(self, cal, tools):
+        (tools / 'calibrate_odom.py').unlink()
+        (tools / 'calibrate_dynamics.py').unlink()
+        lidar = cal.STEPS[0]
+        assert lidar.missing == ['calibrate_odom.py', 'calibrate_dynamics.py']
+        assert lidar.missing_text == (
+            'calibrate_odom.py and calibrate_dynamics.py are not in this driver yet'
+        )
+        (tools / 'calibrate_lidar.py').unlink()
+        assert lidar.missing_text == 'calibrate_lidar.py is not in this driver yet'
 
     def test_four_steps_lidar_first(self, cal):
         assert cal.STEP_KEYS == ['lidar', 'odom', 'steering', 'dynamics']

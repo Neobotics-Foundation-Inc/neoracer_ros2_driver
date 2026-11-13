@@ -210,7 +210,7 @@ racecar help                    # full usage
 
 `racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
 
-`racecar calibrate` keeps its results in the car profile under `~/.config/racecar`. The steering trim is set in the ESP32 firmware with `trim set`, which also trims manual driving, and the profile keeps a copy. Where a step drives the car by itself, it drives only while the handset's mode switch is down (autonomy); flip the switch up to stop. The step tools arrive one at a time, and a step whose tool is not in the driver yet shows as not installed.
+`racecar calibrate` keeps its results in the car profile under `~/.config/racecar`. The steering trim is set in the ESP32 firmware with `trim set`, which also trims manual driving, and the profile keeps a copy. Where a step drives the car by itself, it drives only while the handset's mode switch is down (autonomy); flip the switch up to stop. The step tools arrive one at a time, and a step whose tool is not in the driver yet shows as not installed. The lidar step drives the car forward and back at 0.5 m/s and measures the lidar yaw from the direction of travel; it needs the odometry and dynamics tools as well. Until they are in, `python3 scripts/calibration/calibrate_lidar.py --wall` measures it with the car still and squared to a flat wall (`--wall --check` reports without writing). Calibration speeds are given in m/s and converted with the car's `max_speed_mps` and throttle caps.
 
 ## Networking (optional)
 

@@ -114,11 +114,27 @@ class Step:
     check: str = ''  # how to place the car for the tool's --check; empty: no check
     optional: bool = False  # runs only when named
     note: str = ''  # where the result is applied, when not only in the profile
+    requires: tuple[str, ...] = ()  # other tools in this folder the tool imports
+
+    @property
+    def missing(self) -> list[str]:
+        """Return the step's tool when absent, else the absent tools it imports."""
+        if not (HERE / self.tool).is_file():
+            return [self.tool]
+        return [name for name in self.requires if not (HERE / name).is_file()]
 
     @property
     def installed(self) -> bool:
-        """Whether the step's tool is in this driver."""
-        return (HERE / self.tool).is_file()
+        """Whether the step's tool, and every tool it imports, is in this driver."""
+        return not self.missing
+
+    @property
+    def missing_text(self) -> str:
+        """Say which tools are not in this driver yet."""
+        names = self.missing
+        if len(names) == 1:
+            return f'{names[0]} is not in this driver yet'
+        return f'{", ".join(names[:-1])} and {names[-1]} are not in this driver yet'
 
 
 # Order: the lidar yaw first, since the other steps measure against the lidar.
@@ -131,6 +147,8 @@ STEPS = (
         'frames',
         ('laser_yaw_deg',),
         check=LIDAR_SETUP,
+        # The driving method reuses their bag reader, driver and scan match.
+        requires=('calibrate_odom.py', 'calibrate_dynamics.py'),
     ),
     Step(
         'odom',
@@ -240,7 +258,7 @@ def status_rows(config_dir: Path) -> list[tuple[str, str, str]]:
             stamp = datetime.fromtimestamp(local.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
             rows.append((step.key, 'calibrated', stamp))
         elif not step.installed:
-            rows.append((step.key, 'not installed', f'{step.tool} is not in this driver yet'))
+            rows.append((step.key, 'not installed', step.missing_text))
         elif (config_dir / f'{step.local_name}.yaml').exists():
             rows.append((step.key, 'default', 'committed defaults; not calibrated on this car'))
         else:
@@ -311,7 +329,7 @@ def run_steps(steps: list[Step]) -> int:
         step = steps[i]
         before = first_before.setdefault(i, step_values(step))
         if not step.installed:
-            print(f'{step.tool} is not in this driver yet; nothing to run.')
+            print(f'{step.missing_text}; nothing to run.')
             return step, 'not installed', before, before
         rc = subprocess.run(
             [sys.executable, str(HERE / step.tool)],
@@ -390,7 +408,7 @@ def run_checks(steps: list[Step]) -> int:
         def run(i: int) -> tuple[Step, str, list[Criterion]]:
             step = steps[i]
             if not step.installed:
-                print(f'{step.tool} is not in this driver yet; nothing to check.')
+                print(f'{step.missing_text}; nothing to check.')
                 return step, 'not installed', []
             report = Path(tmp) / f'{step.key}.json'
             report.unlink(missing_ok=True)
