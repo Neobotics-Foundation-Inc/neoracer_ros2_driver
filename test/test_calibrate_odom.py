@@ -218,8 +218,8 @@ class TestNeoRacer:
 
     def test_the_drive_length_fits_the_setup_text(self, odom):
         cal = load_script('calibrate')
-        assert odom.MIN_DRIVE_M == 1.5
-        assert '2.5 to 4 meters' in odom.DRIVE_PLACE and '2.5 to 4 meters' in cal.ODOM_SETUP
+        assert odom.MIN_DRIVE_M == 2.0
+        assert '3 to 5 meters' in odom.DRIVE_PLACE and '3 to 5 meters' in cal.ODOM_SETUP
 
     @pytest.mark.parametrize(
         'source,scale,base', [('integrated', 1.04, 1.04), ('firmware', 1.04, 1.0)]

@@ -88,9 +88,7 @@ SPIN_TURNS = 3
 CHECK_TURNS = 2
 # The gyro picks the whole-turn count; beyond this from the lidar it cannot.
 UNWRAP_LIMIT_DEG = 90.0
-# The NeoRacer is a 1:12 car and a room rarely has more than 2 m clear in a
-# line; at 1.5 m a 1.5 cm scan-match error is 1%, inside the 2% pass limit.
-MIN_DRIVE_M = 1.5
+MIN_DRIVE_M = 2.0
 # Scan match quality: a moved scene or a featureless corridor fails these.
 MATCH_MAX_RMS_M = 0.03
 # A 2.3 m drive or an 80 deg turn changes what the lidar sees: 40 to 45% of the
@@ -106,7 +104,7 @@ PARAM_TIMEOUT = 3.0
 HANDS_OFF = f'Press Enter, then keep your hands off the car for {REST_SECONDS:.0f} seconds...'
 STOPPED = 'Press Enter when the car has stopped, then keep your hands off it...'
 SPIN_PLACE = 'Place the car on the floor in the middle of the clear space.'
-DRIVE_PLACE = 'Place the car on the floor facing a wall or furniture 2.5 to 4 meters away.'
+DRIVE_PLACE = 'Place the car on the floor facing a wall or furniture 3 to 5 meters away.'
 HOW_TO_DRIVE = [
     'Drive with the handset, mode switch UP (manual).',
     'Keep the speed switch in its slow position.',
