@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 from pathlib import Path
+import shutil
 import sys
 import termios
 import threading
@@ -193,6 +194,9 @@ def paint(text: str, status: str, color: bool, bold: bool = False) -> str:
 # The guided output: a header per step, numbered action blocks, `>>` prompts,
 # status lines and a result block. Colour shows only on a terminal
 # (use_color), so piped output keeps the same layout as plain text.
+# Banners are centred like pytest's (racecar test): the terminal's width up
+# to HEADER_WIDTH, and HEADER_WIDTH when the output is not a terminal.
+HEADER_WIDTH = 80
 HEADER_COLOR = '36'
 PROMPT_COLOR = '33'
 STATUS_INDENT = ' ' * 5
@@ -211,8 +215,12 @@ def _color(color: bool | None) -> bool:
 
 
 def step_header(title: str, color: bool | None = None) -> str:
-    """Return a step's banner, `=== title ===`."""
-    return styled(f'=== {title} ===', HEADER_COLOR, _color(color), bold=True)
+    """Return a step's banner: the title centred in `=`, as pytest prints its sections."""
+    width = min(shutil.get_terminal_size((HEADER_WIDTH, 24)).columns, HEADER_WIDTH)
+    text = f' {title} '
+    fill = max(width - len(text), 6)
+    left = fill // 2
+    return styled('=' * left + text + '=' * (fill - left), HEADER_COLOR, _color(color), bold=True)
 
 
 def action_lines(number: int, lines: list[str], color: bool | None = None) -> list[str]:
