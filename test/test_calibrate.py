@@ -141,7 +141,9 @@ class TestStatus:
         j = next(n for n, line in enumerate(lines) if line.startswith('dynamics:'))
         assert lines[j + 2] == '  servo_lock_to_lock_s  0.12'
         k = next(n for n, line in enumerate(lines) if line.startswith('odom:'))
-        assert lines[k + 1].startswith('  default') and lines[k + 2] == ''
+        odom = next(s for s in cal.STEPS if s.key == 'odom')
+        assert lines[k + 1].startswith('  default') and lines[k + 2] == f'  {odom.note}'
+        assert lines[k + 3] == ''
 
     def test_status_colors(self, cal, config, params, tools):
         (params / 'frames.yaml').write_text('laser_yaw_deg: 179.16\n')
@@ -531,6 +533,31 @@ class TestNeoRacer:
         i = lines.index('steering: Steering trim, set in the ESP32 firmware')
         assert lines[i + 2] == f'  {step.note}'
         assert lines[i + 3] == '  trim_deg  0.8'
+
+    def test_the_odometry_note_names_the_integrated_source(self, cal):
+        step = next(s for s in cal.STEPS if s.key == 'odom')
+        assert 'odometry.source: integrated' in step.note
+
+    def test_the_summary_skips_a_key_the_tool_does_not_write(
+        self, cal, params, tools, monkeypatch, capsys
+    ):
+        def fake_run(cmd, check=False, **_kw):
+            _ros_yaml(
+                params / 'odom.yaml',
+                'controller_node',
+                {'odometry.yaw_rate_scale': 0.98, 'odometry.speed_scale': 0.99},
+            )
+            return type('R', (), {'returncode': 0})()
+
+        answers = ['', 'n']
+        monkeypatch.setattr(cal.subprocess, 'run', fake_run)
+        monkeypatch.setattr(cal, 'ask', lambda _p='': answers.pop(0))
+        monkeypatch.setenv('RACECAR_SUDO', '')
+        odom = [s for s in cal.STEPS if s.key == 'odom']
+        assert cal.run_steps(odom) == 0
+        out = capsys.readouterr().out
+        assert 'odometry.speed_scale: default -> 0.99' in out
+        assert 'turn_gain' not in out
 
     def test_teleop_is_the_neoracer_unit(self, cal):
         assert cal.TELEOP_UNIT == 'neoracer-teleop'

@@ -158,6 +158,7 @@ STEPS = (
         'odom',
         ('odometry.yaw_rate_scale', 'odometry.speed_scale', 'odometry.turn_gain'),
         check=ODOM_SETUP,
+        note='the scales act on the integrated source only (odometry.source: integrated)',
     ),
     # The trim is set in the ESP32 firmware with `trim set`; params/steering.yaml
     # keeps a copy, so a new board or a full flash can be set back.
@@ -344,6 +345,8 @@ def run_steps(steps: list[Step]) -> int:
     for step, outcome, before, after in results:
         print(f'{step.key:10s} {outcome}')
         for key in step.keys if outcome == 'done' else ():
+            if key not in before and key not in after:
+                continue  # not written by this tool, such as odometry.turn_gain
             old = fmt(before[key]) if key in before else 'default'
             print(f'    {key}: {old} -> {fmt(after.get(key, "?"))}')
 
