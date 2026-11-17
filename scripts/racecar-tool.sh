@@ -482,8 +482,9 @@ core units:      teleop, watchdog, dashboard, jupyter
 lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083),
                  eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
 
-neoracer-autonomy (SLAM on top of teleop) is not installed by setup yet.
-Run the same launch in a terminal:
+neoracer-autonomy (SLAM on top of teleop) is started and stopped by
+`racecar map`, not at boot. Setup does not install it yet; until then run
+the same launch in a terminal:
   racecar launch autonomy map:=<name>
 
 Dashboards install disabled and are started for a session:
@@ -1064,8 +1065,9 @@ Commands:
                         Lab dashboards, off until started, one at a time:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
                           eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
-                        neoracer-autonomy: SLAM on top of teleop; setup does
-                        not install it yet (racecar launch autonomy instead).
+                        neoracer-autonomy: SLAM on top of teleop, started and
+                        stopped by `racecar map`; setup does not install it
+                        yet (racecar launch autonomy runs the same launch).
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
                           --list              show valid folders in ~/jupyter_ws

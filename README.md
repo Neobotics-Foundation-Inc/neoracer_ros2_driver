@@ -183,7 +183,12 @@ racecar service restart     # every enabled unit; never starts a disabled one
 racecar service start camlabel   # a lab dashboard, for this session
 racecar service logs teleop # journalctl -u neoracer-teleop -f
 
-racecar launch autonomy map:=<name>   # SLAM: build a map under that name
+racecar map start <name>    # build a map; the handset's speed switch UP
+racecar map save            # save the map being built
+racecar map load <name>     # localize on a saved map
+racecar map stop            # stop mapping or localization
+racecar map list            # saved maps; unsaved ones marked
+racecar launch autonomy map:=<name>   # the same SLAM launch in a terminal
 
 racecar calibrate           # guided calibration: lidar, odom, steering (dynamics by name)
 racecar calibrate status    # what is calibrated on this car, when, and the values
@@ -255,6 +260,10 @@ ros2 service call /autonomy/save_map std_srvs/srv/Trigger        # save it (anot
 racecar launch autonomy mode:=localization map:=room             # AMCL on the saved map
 racecar launch autonomy mode:=localization map:=room pose:=global   # AMCL searches the whole map
 ```
+
+`racecar map` (`scripts/neoracer_map.py`, logic in `scripts/map_control.py`) runs the same launch through `neoracer-autonomy.service`. `start <name>` maps, `save` writes the map, `load <name>` localizes on it, and `stop` ends the run, autosaving a mapping run. `resume`, `recover`, `status`, `list` and `info` cover the rest; `racecar map --help` lists them. Teleop must be running. Starting or loading a map stops the lab apps that publish `/drive`. The unit is started and stopped with `sudo -n systemctl`, which `/etc/sudoers.d/neoracer` allows with no password; setup installs neither the unit nor that file yet.
+
+`racecar map start` reads the handset's speed switch (radio Ch8) and starts mapping only with it UP (slow). With the mode switch UP the sticks drive through the firmware, where the driver's caps do not apply and the speed switch's 15 percent cap is the only limit.
 
 While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/throttle.yaml`). `neoracer-autonomy.service` runs the same launch from the mode file `~/.config/racecar/autonomy.conf` and resumes a mapping run from its autosave after a crash; setup does not install it yet. Per-car values go in the car profile, `params/slam_mapping.yaml`, `params/amcl.yaml` and so on. Navigation comes with a later upstream release. The vendor SLAM and Nav2 stack stays in `~/osracer_ws` for OSRBOT's own tools (`racecar ws osracer`).
 

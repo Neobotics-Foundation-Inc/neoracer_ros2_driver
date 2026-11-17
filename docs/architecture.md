@@ -21,6 +21,7 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 | `autonomy_node` (neoracer_ros2_driver/autonomy_node.py) | the one SLAM interface. It reads `/scan`, the localizer's pose (`/pose` from slam_toolbox, `/amcl_pose` from AMCL) and, in localization, `/map`. It publishes `/autonomy/status` (latched, carries the mode the throttle node reads), `/autonomy/pose` and, for AMCL, `/initialpose`, and serves `/autonomy/save_map`, `/autonomy/autosave` and `/autonomy/global_localization`. Maps go under the data root's `maps/` folder (`~/neoracer_data/maps`; `RACECAR_MAP_ROOT` overrides it). It reads TF and publishes none. The autonomy launch starts it | autonomy, maps, slam_toolbox, nav2_map_server |
 | `autonomy` (neoracer_ros2_driver/autonomy.py) | pure localized test, scan fit and map files (unit-tested) | numpy, scipy |
 | autonomy launch (launch/autonomy.launch.py) | SLAM on top of teleop: slam_toolbox while mapping; map_server and AMCL under the Nav2 lifecycle manager, or the slam_toolbox localizer, in localization; `autonomy_node` in every mode. Configs `slam_mapping.yaml`, `slam_localization.yaml`, `amcl.yaml` and `autonomy.yaml`, each followed by its car profile override. Run by `racecar launch autonomy` or `neoracer-autonomy.service` (scripts/launch_autonomy.sh, autonomy_args.py, autonomy_stop.py) | slam_toolbox, nav2_amcl, nav2_map_server, nav2_lifecycle_manager |
+| `racecar map` (scripts/neoracer_map.py, scripts/map_control.py) | the operator front end for mapping and localization: checks the request, writes the mode file `~/.config/racecar/autonomy.conf`, stops and starts `neoracer-autonomy.service` through `sudo -n systemctl`, and waits for `/autonomy/status`. A mapping start reads the speed switch on `/rc/channels` and goes ahead only with it UP. A start or load stops the lab apps that publish `/drive` | autonomy, maps, rclpy |
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera/color` (JPEG-in-Image) | opencv, numpy |
 | `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
@@ -134,7 +135,10 @@ its own web UI: camlabel (8082) on `/camera/color`, wallfollow (8081) on
 or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow,
 linefollow, and webteleop all publish `/drive`, where a second publisher
 fights the mux. One at a time, started per session through
-`racecar service start <name>`.
+`racecar service start <name>`. Autonomy and those six also run one at a
+time, because a driving app beside the localizer or slam_toolbox leaves too
+little CPU. A `racecar map` start, load or resume stops them first
+(`DRIVING_APPS` in `scripts/map_control.py`).
 
 The unit is a template rather than a fixed file so the service follows the
 checkout; that is what lets the driver own the install path without vendoring
