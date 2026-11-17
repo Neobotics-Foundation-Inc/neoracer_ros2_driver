@@ -18,7 +18,7 @@ odometry as separate lines. The driver parses both.
 | `b` | `b volts` | battery voltage @ ~0.5 Hz (V1.1) | `/battery/state` (sensor_msgs/BatteryState: voltage, 3S charge fraction, current NaN), `/battery` (the same message, kept one more release) + `/battery/voltage` |
 | `i` | `i qx qy qz qw ax ay az gx gy gz` | IMU: quaternion, accel (m/s^2), gyro (rad/s) (legacy, pre-V1.1) | `/imu/fused` (sensor_msgs/Imu) |
 | `o` | `o px py pz vx vy vz yaw` | odometry: position (m), velocity (m/s), yaw (rad) (legacy, pre-V1.1) | `/odom` (nav_msgs/Odometry) + `/encoder/speed` |
-| `r` | `r c1 c2 ... c10` | FlySky RC channels @ ~10 Hz, raw SBUS counts 0 to 2047 (`-1` on every channel = receiver failsafe) | `/joy` (sensor_msgs/Joy) + `/rc/channels` + `/rc/link` (std_msgs/Bool, true while every channel is an SBUS count, false while the firmware sends `-1`) |
+| `r` | `r c1 c2 ... c10` | FlySky RC channels @ ~10 Hz, raw SBUS counts 0 to 2047 (`-1` on every channel = firmware failsafe) | `/joy` (sensor_msgs/Joy) + `/rc/channels` + `/rc/link` (std_msgs/Bool, true while every channel is an SBUS count, false while the firmware sends `-1`) |
 | `m` | `m x y z` | magnetometer (Gauss) | `/mag` (sensor_msgs/MagneticField) |
 
 The firmware also emits admin chatter (`FW...`, `DIAG...`, `LINK...`, `link`
@@ -31,7 +31,7 @@ Example lines (captured live):
 s 0.0000 0.0000 0.0000 0.0000 0.0000 0.0000 0.0095 -0.0033 0.0020 0.0048 1.0000 -0.0418 -0.0636 9.9448 -0.0007 -0.0008 -0.0047
 b 10.83
 m 0.9402 0.0672 -1.2045
-r -1 -1 -1 -1 -1 -1 -1 -1 -1 -1        # receiver failsafe -> all channels -1
+r -1 -1 -1 -1 -1 -1 -1 -1 -1 -1        # firmware failsafe -> all channels -1
 ```
 
 ## Outbound (host -> ESP32)
@@ -129,8 +129,8 @@ consumers at once - `gamepad_node` (reads `axes[1]`/`axes[3]`), `mux_node`
 student controller API (Xbox-style layout). Everything is parameterized in
 `config/controller.yaml`:
 
-- `rc_min/center/max` (240/1023/1807, raw SBUS counts measured on the stock
-  handset) + `rc_deadband` calibrate each channel to `[-1, 1]`; a reading below
+- `rc_min/center/max` (240/1023/1807, raw SBUS counts measured on the dev car's
+  handset, the FlySky model every NeoRacer ships with) + `rc_deadband` calibrate each channel to `[-1, 1]`; a reading below
   `rc_failsafe_below` (0, so only the firmware's `-1`) -> neutral. Switches read
   240, 1023 or 1807, so `-1.0`, `0.0` or `1.0` on `/rc/channels`.
 - `throttle_channel` (2) -> `axes[1]`, `steering_channel` (0) -> `axes[3]`.
@@ -139,7 +139,8 @@ student controller API (Xbox-style layout). Everything is parameterized in
   The mux runs with `autonomy_passthrough` on, so these buttons do not gate
   driving; the firmware does.
 
-**The channel indices are transmitter-mixer dependent and must be confirmed on
-the car**: start the controller, `ros2 topic echo /joy` while moving each
-stick/switch, and adjust the `*_channel` parameters until throttle, steering, and
-the mode switch land on the right axes/buttons.
+The channel indices above are the NeoRacer handset's, checked on the dev car. A
+car with a different handset sets its own `*_channel` values in the car profile,
+`params/controller.yaml`: start the controller, run `ros2 topic echo /joy` while
+moving each stick and switch, and adjust until throttle, steering and the mode
+switch land on the right axes and buttons.
