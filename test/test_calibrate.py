@@ -404,6 +404,7 @@ class TestColor:
     def test_no_color_opt_out(self, cal, monkeypatch):
         common = load_script('calibrate_common')
         monkeypatch.setattr(common.sys.stdout, 'isatty', lambda: True)
+        monkeypatch.setattr(common.sys.stderr, 'isatty', lambda: True)
         monkeypatch.setenv('TERM', 'xterm')
         monkeypatch.delenv('NO_COLOR', raising=False)
         assert common.use_color() is True
@@ -413,6 +414,15 @@ class TestColor:
     def test_not_a_terminal(self, cal, monkeypatch):
         common = load_script('calibrate_common')
         monkeypatch.setattr(common.sys.stdout, 'isatty', lambda: False)
+        assert common.use_color() is False
+
+    def test_log_redirected_alone(self, cal, monkeypatch):
+        # The blocks go out on the ROS log (stderr): a log file gets no codes.
+        common = load_script('calibrate_common')
+        monkeypatch.setattr(common.sys.stdout, 'isatty', lambda: True)
+        monkeypatch.setattr(common.sys.stderr, 'isatty', lambda: False)
+        monkeypatch.setenv('TERM', 'xterm')
+        monkeypatch.delenv('NO_COLOR', raising=False)
         assert common.use_color() is False
 
 
@@ -459,6 +469,14 @@ class TestLayout:
         monkeypatch.setattr(common, 'read_line', lambda p='': seen.append(p) or 's')
         assert common.read_prompt('Press Enter: ') == 's'
         assert seen == ['  >> Press Enter: ']
+
+    def test_a_status_text_keeps_every_line_indented(self):
+        common = load_script('calibrate_common')
+        text = common.status_line('Wrote /tmp/a.yaml\nApply it: racecar service restart teleop.')
+        assert text.split('\n') == [
+            '     Wrote /tmp/a.yaml',
+            '     Apply it: racecar service restart teleop.',
+        ]
 
     def test_a_block_starts_with_a_blank_line(self):
         common = load_script('calibrate_common')

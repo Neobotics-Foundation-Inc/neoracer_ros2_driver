@@ -156,7 +156,7 @@ class Log:
 
     @property
     def texts(self):
-        """The logged lines without the layout: indent and `[n]` labels removed."""
+        """Return the logged lines without the layout: indent and `[n]` labels removed."""
         return [re.sub(r'^\[\d+\] ', '', m.strip()) for m in self.lines]
 
 

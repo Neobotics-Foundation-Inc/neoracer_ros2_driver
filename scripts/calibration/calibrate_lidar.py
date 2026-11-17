@@ -590,12 +590,13 @@ def write_yaw(estimates: list[float], configured: float, log: Any) -> int:
         f'{se:.2f} deg, spread {min(estimates):.2f} to {max(estimates):.2f}); '
         f'configured {configured:.3f} deg.'
     )
+    rows = result_lines([summary, f'laser_yaw_deg: {configured:.3f} -> {mean:.3f}'])
+    log_block(log, rows[:1])
     if se > MAX_YAW_SE_DEG:
-        log_block(log, result_lines([summary]))
         log.error(f'The standard error is above {MAX_YAW_SE_DEG} deg. Nothing written.')
         return 1
     written = update_local_values('frames', {'laser_yaw_deg': round(mean, 3)}, TOOL)
-    log_block(log, result_lines([summary, f'laser_yaw_deg: {configured:.3f} -> {mean:.3f}']))
+    log.info(rows[1])
     log.info(status_line(backup_reminder(written)))
     return 0
 
