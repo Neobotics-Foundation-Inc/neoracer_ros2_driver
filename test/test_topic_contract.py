@@ -423,7 +423,11 @@ TABLE = (
         '/odom',
         'nav_msgs/msg/Odometry',
         publishers=(End('controller_node', f'{CONTROLLER}:206', REL),),
-        subscribers=ODOM_READERS,
+        subscribers=(
+            *ODOM_READERS,
+            # The firmware pose beside the integrated estimate, on either source.
+            End('calibrate_odom (F37)', 'scripts/calibration/calibrate_odom.py:479', BE),
+        ),
         evidence=((CONTROLLER, "create_publisher(Odometry, '/odom', 10)"),),
     ),
     # -- the drive path and the other driver topics in the feature map --
@@ -517,7 +521,7 @@ TABLE = (
         subscribers=(
             End(
                 'calibrate_odom (F37)',
-                'scripts/calibration/calibrate_odom.py:367',
+                'scripts/calibration/calibrate_odom.py:440',
                 BE,
             ),
         ),
