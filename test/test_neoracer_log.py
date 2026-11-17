@@ -340,6 +340,29 @@ class TestCli:
         assert rl.main(['start', '--topics', '/scan', '--exclude', '/sc.*']) == 1
         assert 'nothing to record' in capsys.readouterr().err
 
+    def test_start_keeps_the_recorder_off_the_terminal(self, tmp_path, monkeypatch, capsys):
+        # On a terminal, the recorder's keyboard controls turn off echo and
+        # read keystrokes, so it starts in its own session with no terminal
+        # input.
+        started = {}
+
+        class Recorder:
+            pid = 4321
+
+            def __init__(self, argv, **kwargs):
+                started.update(kwargs, argv=argv)
+
+        monkeypatch.setattr(rl, 'STATE_FILE', tmp_path / 'log.state')
+        monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {})
+        monkeypatch.setattr(rl, 'choose_storage', lambda *a: ('mcap', ''))
+        monkeypatch.setattr(rl, 'bandwidth_warning', lambda *a: None)
+        monkeypatch.setattr(rl.subprocess, 'Popen', Recorder)
+        assert rl.main(['start', 'lap1', '--topics', '/odom', '--dir', str(tmp_path)]) == 0
+        assert started['stdin'] is rl.subprocess.DEVNULL
+        assert started['start_new_session'] is True
+        assert started['argv'][:3] == ['ros2', 'bag', 'record']
+        assert 'pid 4321' in capsys.readouterr().out
+
     def test_stop_has_a_finalize_timeout(self):
         args = rl.build_parser().parse_args(['stop'])
         assert args.timeout == 15.0

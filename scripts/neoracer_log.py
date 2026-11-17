@@ -406,9 +406,14 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     argv = build_record_argv(bag, topics, exclude, storage)
     stdout_path = root / f'{name}.record.log'
+    # stdin from /dev/null: on a terminal, the recorder's keyboard controls
+    # (space pauses) turn off echo and line mode there and read its
+    # keystrokes, even from its own session, and Humble has no flag to stop
+    # them.
     with open(stdout_path, 'wb') as out:
         proc = subprocess.Popen(
             argv,
+            stdin=subprocess.DEVNULL,
             stdout=out,
             stderr=subprocess.STDOUT,
             start_new_session=True,
