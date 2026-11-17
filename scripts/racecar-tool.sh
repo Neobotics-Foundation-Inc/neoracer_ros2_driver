@@ -1102,8 +1102,9 @@ Commands:
     map <action>        Build, save, and load maps (SLAM on top of teleop).
                         Teleop must be running; drive with the handset as
                         usual. Maps are in maps/ under the data root.
-                          start NAME          start mapping; /drive is held to
-                                              the mapping cap while mapping
+                          start NAME          start mapping; needs the handset's
+                                              speed switch UP (slow), and /drive
+                                              is held to the mapping cap
                                                 --from SAVED    extend SAVED
                                                 --pose x,y,yaw  with --from: the
                                                                 car's pose on SAVED

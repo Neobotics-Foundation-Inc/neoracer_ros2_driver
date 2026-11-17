@@ -49,7 +49,7 @@ def parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest='action', required=True, metavar='ACTION')
 
-    s = sub.add_parser('start', help='start mapping NAME')
+    s = sub.add_parser('start', help="start mapping NAME; needs the handset's speed switch UP")
     s.add_argument('name')
     s.add_argument('--from', dest='source', metavar='SAVED', help='extend the saved map SAVED')
     s.add_argument('--pose', help=f'with --from: where the car is on SAVED, {POSE_HELP}')

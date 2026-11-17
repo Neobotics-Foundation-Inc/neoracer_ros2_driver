@@ -422,6 +422,65 @@ def require_teleop() -> None:
         raise MapError('teleop is not running. Start it with `racecar service start teleop`.')
 
 
+# -- speed switch (NeoRacer only, plan D12) --
+
+# The FlySky sticks drive the car through the ESP32 firmware while the mode
+# switch is UP, so the driver's mapping cap does not apply to them. The only
+# limit there is the firmware's own: with the speed switch UP, the firmware
+# scales the stick speed to 15 percent, 0.9 m/s of its 6 m/s. Mapping
+# therefore starts only with the speed switch UP.
+#
+# The speed switch is radio Ch8, index 7 on /rc/channels. With the shipped
+# calibration (rc_min 240, rc_center 1023, rc_max 1807 in config/controller.yaml)
+# it reads -1.0 UP (SBUS count 240) and +1.0 DOWN (1807). A frame with no
+# signal reads 0.0 on every channel, and so does the frame of 1023 counts the
+# receiver sends while the handset reconnects. A reading at or below -0.5 is
+# the switch UP; 0.0 and +1.0 are not.
+SPEED_SWITCH_INDEX = 7
+SPEED_SWITCH_UP_AT_MOST = -0.5
+# A new process on the car can take a few seconds to discover the controller.
+RC_WAIT_SEC = 5.0
+
+
+def speed_switch_problem(channels: list[float] | None, link: bool | None) -> str:
+    """
+    Return why mapping cannot start with this handset reading, or '' when it can.
+
+    `channels` is the latest /rc/channels, or None when none arrived. `link`
+    is the latest /rc/link, or None when none arrived. With no /rc/link the
+    channel alone counts: a frame with no signal reads 0.0, which is not UP.
+    """
+    if channels is None:
+        return (
+            f'no /rc/channels from the controller within {RC_WAIT_SEC:.0f} s, so the speed '
+            'switch cannot be read. Check that teleop runs and the ESP32 is connected '
+            '(`racecar status`).'
+        )
+    if link is False:
+        return (
+            'the handset is not linked (/rc/link is false). Switch the handset on, '
+            'set the speed switch UP (slow), and start again.'
+        )
+    if len(channels) <= SPEED_SWITCH_INDEX:
+        return (
+            f'/rc/channels has {len(channels)} channels, so the speed switch (index 7) is missing.'
+        )
+    value = channels[SPEED_SWITCH_INDEX]
+    if value > SPEED_SWITCH_UP_AT_MOST:
+        return (
+            f'the speed switch (Ch8) reads {value:.2f}, not UP. Mapping starts only with '
+            'it UP (slow), because the firmware caps the sticks at 15 percent only then. '
+            'Set it UP and start again.'
+        )
+    return ''
+
+
+def require_speed_switch_up() -> None:
+    problem = speed_switch_problem(*read_rc())
+    if problem:
+        raise MapError(problem)
+
+
 # -- ROS --
 
 
@@ -510,6 +569,43 @@ def latest_pose(node: Any, timeout: float = 1.0) -> tuple[float, float, float] |
     return got[-1] if got else None
 
 
+def read_rc(timeout: float = RC_WAIT_SEC) -> tuple[list[float] | None, bool | None]:
+    """
+    Return the latest /rc/channels and /rc/link, each None if none arrived in time.
+
+    The controller publishes both on every frame from the ESP32 (10 Hz) with
+    the sensor-data QoS, so the subscriptions use it too. The wait ends as
+    soon as both have arrived.
+    """
+    import rclpy
+    from rclpy.qos import qos_profile_sensor_data
+    from std_msgs.msg import Bool, Float32MultiArray
+
+    got: dict[str, Any] = {'channels': None, 'link': None}
+
+    def on_channels(msg: Any) -> None:
+        got['channels'] = [float(v) for v in msg.data]
+
+    def on_link(msg: Any) -> None:
+        got['link'] = bool(msg.data)
+
+    with ros_node() as node:
+        subs = [
+            node.create_subscription(
+                Float32MultiArray, '/rc/channels', on_channels, qos_profile_sensor_data
+            ),
+            node.create_subscription(Bool, '/rc/link', on_link, qos_profile_sensor_data),
+        ]
+        end = time.monotonic() + timeout
+        try:
+            while None in got.values() and time.monotonic() < end:
+                rclpy.spin_once(node, timeout_sec=0.1)
+        finally:
+            for sub in subs:
+                node.destroy_subscription(sub)
+    return got['channels'], got['link']
+
+
 def not_ready_reason(status: dict[str, str] | None) -> str:
     if status is None:
         return f'autonomy_node never reported; see {LOG_HINT}'
@@ -563,8 +659,10 @@ def _change_mode(
     now: datetime,
     timeout: float,
 ) -> int:
-    make_plan()  # usage and map errors before anything stops
+    first = make_plan()  # usage and map errors before anything stops
     require_teleop()
+    if first.values['AUTONOMY_MODE'] == 'mapping':
+        require_speed_switch_up()  # NeoRacer only (plan D12)
     if not os.environ.get(ROOT_ENV):
         problem = data_root.session_problem()
         if problem:

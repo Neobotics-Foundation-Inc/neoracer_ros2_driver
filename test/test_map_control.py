@@ -1,12 +1,15 @@
 """`racecar map`: scripts/map_control.py and scripts/neoracer_map.py, without ROS or systemd."""
 
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 from conftest import load_script
+from neoracer_ros2_driver import autonomy as au, controller_lib as cl
 import pytest
-from neoracer_ros2_driver import autonomy as au
+import yaml
 
 NOW = datetime(2026, 10, 9, 14, 0, 0)
 
@@ -29,6 +32,36 @@ def root(tmp_path, monkeypatch, mc):
     monkeypatch.setenv(mc.MODE_FILE_ENV, str(tmp_path / 'autonomy.conf'))
     monkeypatch.setattr(mc, 'current_frames', lambda: None)
     return maps
+
+
+# /rc/channels as the dev car read it (N01, 2026-11-17): at rest with the mode
+# switch and the speed switch UP, then the speed switch DOWN. A frame with no
+# signal, and the frames while the handset reconnects, read 0.0 everywhere.
+SWITCH_UP = [0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0]
+SWITCH_DOWN = [0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, 1.0, 0.0, 0.0]
+ALL_ZERO = [0.0] * 10
+
+
+class Handset:
+    """Stands in for /rc/channels and /rc/link: the speed switch UP and linked by default."""
+
+    def __init__(self, real) -> None:
+        self.real = real
+        self.channels: list[float] | None = list(SWITCH_UP)
+        self.link: bool | None = True
+        self.reads = 0
+
+    def __call__(self, timeout: float = 0.0) -> tuple[list[float] | None, bool | None]:
+        self.reads += 1
+        return self.channels, self.link
+
+
+@pytest.fixture(autouse=True)
+def handset(mc, monkeypatch):
+    """Keep every test off the car's real handset; read_rc returns this reading."""
+    fake = Handset(mc.read_rc)
+    monkeypatch.setattr(mc, 'read_rc', fake)
+    return fake
 
 
 def files(folder: Path, name: str, text: str = 'm') -> None:
@@ -634,6 +667,7 @@ def test_tool_dispatch_and_completion():
     assert '"${RACECAR_MAP_SCRIPT:-$pkg_dir/scripts/neoracer_map.py}"' in tool
     assert 'start save stop resume load recover status list info foxglove' in tool
     assert '    map <action>' in tool
+    assert 'speed switch UP' in tool
 
 
 def test_setup_links_the_maps_into_jupyter():
@@ -692,3 +726,137 @@ class TestNeoracerUnits:
         monkeypatch.setattr(mc.subprocess, 'run', run)
         mc.systemctl(*args)
         assert sent == [argv]
+
+
+class TestSpeedSwitch:
+    """Mapping starts only with the speed switch UP (NeoRacer, plan D12)."""
+
+    def test_up_and_linked(self, mc):
+        assert mc.speed_switch_problem(SWITCH_UP, True) == ''
+
+    @pytest.mark.parametrize(
+        'channels,link,says',
+        [
+            (SWITCH_DOWN, True, 'reads 1.00, not UP'),
+            (ALL_ZERO, True, 'reads 0.00, not UP'),
+            (ALL_ZERO, False, 'not linked'),
+            (SWITCH_UP, False, 'not linked'),
+            (None, None, 'no /rc/channels'),
+            (SWITCH_UP[:7], True, 'index 7) is missing'),
+        ],
+    )
+    def test_refused(self, mc, channels, link, says):
+        assert says in mc.speed_switch_problem(channels, link)
+
+    def test_without_rc_link_the_channel_counts(self, mc):
+        assert mc.speed_switch_problem(SWITCH_UP, None) == ''
+        assert 'not UP' in mc.speed_switch_problem(ALL_ZERO, None)
+
+    @pytest.mark.parametrize(
+        'value,ok', [(-1.0, True), (-0.5, True), (-0.49, False), (0.6, False)]
+    )
+    def test_the_up_band(self, mc, value, ok):
+        channels = list(SWITCH_UP)
+        channels[mc.SPEED_SWITCH_INDEX] = value
+        assert (mc.speed_switch_problem(channels, True) == '') is ok
+
+    def test_the_band_fits_the_shipped_calibration(self, mc):
+        root = Path(__file__).resolve().parent.parent
+        params = yaml.safe_load((root / 'config' / 'controller.yaml').read_text())[
+            'controller_node'
+        ]['ros__parameters']
+
+        def reads(count: int) -> float:
+            return cl.normalize_channel(
+                count,
+                params['rc_min'],
+                params['rc_center'],
+                params['rc_max'],
+                params['rc_deadband'],
+                params['rc_failsafe_below'],
+            )
+
+        # UP 240, DOWN 1807, the reconnect frame 1023, no signal -1 (N01, F08).
+        assert reads(240) <= mc.SPEED_SWITCH_UP_AT_MOST
+        assert all(reads(c) > mc.SPEED_SWITCH_UP_AT_MOST for c in (1807, 1023, -1))
+
+    def test_start_with_the_switch_down_changes_nothing(self, mc, root, systemd, handset):
+        handset.channels = list(SWITCH_DOWN)
+        systemd.states['neoracer-autonomy.service'] = 'active'
+        systemd.states['neoracer-wallfollow.service'] = 'active'
+        with pytest.raises(mc.MapError) as err:
+            mc.start('room', out=lambda _: None)
+        assert err.value.code == 1 and 'not UP' in str(err.value)
+        assert systemd.actions() == [] and not mc.mode_file().exists()
+
+    def test_start_with_the_switch_up(self, mc, root, systemd, handset):
+        assert mc.start('room', out=lambda _: None) == 0
+        assert handset.reads == 1 and systemd.actions() == ['start']
+
+    def test_extending_a_map_reads_the_switch(self, mc, root, systemd, handset):
+        saved_map(root, 'room')
+        handset.channels = list(SWITCH_DOWN)
+        with pytest.raises(mc.MapError):
+            mc.start('hall', source='room', out=lambda _: None)
+        assert systemd.actions() == []
+
+    def test_load_does_not_read_the_switch(self, mc, root, systemd, handset):
+        saved_map(root, 'room')
+        handset.channels = list(SWITCH_DOWN)
+        assert mc.load('room', out=lambda _: None) == 0
+        assert handset.reads == 0
+
+    def test_usage_and_teleop_come_first(self, mc, root, systemd, handset):
+        with pytest.raises(mc.MapError) as err:
+            mc.start('a b')
+        assert err.value.code == 2
+        systemd.states['neoracer-teleop.service'] = 'inactive'
+        with pytest.raises(mc.MapError, match='teleop'):
+            mc.start('room')
+        assert handset.reads == 0
+
+    def test_cli_prints_the_reason(self, cli, mc, root, systemd, handset, capsys):
+        handset.link = False
+        assert cli.main(['start', 'room']) == 1
+        assert 'racecar map: the handset is not linked' in capsys.readouterr().err
+
+
+class FakeRosNode:
+    """Records subscriptions; spin_once delivers the frames given to it."""
+
+    def __init__(self) -> None:
+        self.callbacks: dict[str, object] = {}
+        self.destroyed: list[str] = []
+
+    def create_subscription(self, msg_type, topic, callback, qos):
+        self.callbacks[topic] = callback
+        return topic
+
+    def destroy_subscription(self, sub):
+        self.destroyed.append(sub)
+
+
+class TestReadRc:
+    def test_returns_the_channels_and_the_link(self, mc, handset, monkeypatch):
+        import rclpy
+
+        node = FakeRosNode()
+        spins: list[float] = []
+
+        def spin_once(n, timeout_sec=None):
+            spins.append(timeout_sec)
+            n.callbacks['/rc/channels'](SimpleNamespace(data=SWITCH_UP))
+            n.callbacks['/rc/link'](SimpleNamespace(data=True))
+
+        monkeypatch.setattr(mc, 'ros_node', lambda: nullcontext(node))
+        monkeypatch.setattr(rclpy, 'spin_once', spin_once)
+        assert handset.real(timeout=5.0) == (SWITCH_UP, True)
+        assert len(spins) == 1 and sorted(node.destroyed) == ['/rc/channels', '/rc/link']
+
+    def test_nothing_arrives(self, mc, handset, monkeypatch):
+        import rclpy
+
+        node = FakeRosNode()
+        monkeypatch.setattr(mc, 'ros_node', lambda: nullcontext(node))
+        monkeypatch.setattr(rclpy, 'spin_once', lambda n, timeout_sec=None: None)
+        assert handset.real(timeout=0.2) == (None, None)
