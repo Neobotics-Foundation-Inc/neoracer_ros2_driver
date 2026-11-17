@@ -1022,6 +1022,17 @@ class TestAutonomy:
         assert diag.read_autonomy_pose(pose) == ('OK', 'x +1.00 m, y -2.00 m, heading +90 deg')
 
 
+def test_inference_row_reads_paused_while_mapping(diag):
+    row = diag.Check('sensors', 'YOLO inference', 'FAIL', 'not published')
+    other = diag.Check('sensors', 'LakiBeam lidar', 'OK', '30.0/30 Hz')
+    mapping = diag.RosResult(available=True, values={'/autonomy/status': _status(mode='mapping')})
+    out = diag.note_mapping_pause([row, other], mapping)
+    assert (out[0].status, out[0].detail) == ('OK', 'paused while mapping') and out[1] is other
+    localizing = diag.RosResult(available=True, values={'/autonomy/status': _status(mode='off')})
+    assert diag.note_mapping_pause([row], localizing)[0] is row
+    assert diag.note_mapping_pause([row], diag.RosResult())[0] is row
+
+
 class TestTurnedOff:
     def test_turned_off_subsystems_are_skipped(self, diag):
         checks = [
