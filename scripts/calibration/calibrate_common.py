@@ -169,9 +169,15 @@ ANSI = {'PASS': '32', 'WARN': '33', 'FAIL': '31'}
 
 
 def use_color() -> bool:
-    """Color only an interactive terminal; NO_COLOR (no-color.org) opts out."""
+    """
+    Color only an interactive terminal; NO_COLOR (no-color.org) opts out.
+
+    The prompts go to stdout and the ROS log lines, which carry the headers,
+    blocks and verdicts, to stderr, so both must be the terminal.
+    """
     return (
         sys.stdout.isatty()
+        and sys.stderr.isatty()
         and 'NO_COLOR' not in os.environ
         and os.environ.get('TERM', '') != 'dumb'
     )
@@ -226,8 +232,8 @@ def prompt_text(text: str, color: bool | None = None) -> str:
 
 
 def status_line(text: str) -> str:
-    """Return a progress or status line, indented under the action it follows."""
-    return f'{STATUS_INDENT}{text}'
+    """Return a progress or status text with every line indented under the action it follows."""
+    return '\n'.join(f'{STATUS_INDENT}{line}' for line in text.split('\n'))
 
 
 def result_lines(rows: list[str]) -> list[str]:
