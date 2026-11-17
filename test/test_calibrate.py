@@ -423,10 +423,23 @@ class TestColor:
 class TestLayout:
     """The guided output: headers, numbered actions, `>>` prompts, status and result blocks."""
 
-    def test_plain_layout_off_a_terminal(self):
+    def test_a_header_fits_a_narrow_terminal_and_a_long_title(self, monkeypatch):
         common = load_script('calibrate_common')
+        monkeypatch.setenv('COLUMNS', '60')
+        assert len(common.step_header('Check 1/3: Lidar yaw', color=False)) == 60
+        long_title = 'x' * 90
+        header = common.step_header(long_title, color=False)
+        assert header.startswith('=== ') and header.endswith(' ===')
+
+    def test_plain_layout_off_a_terminal(self, monkeypatch):
+        common = load_script('calibrate_common')
+        monkeypatch.setenv('COLUMNS', '200')
         header = common.step_header('Step 1 of 2: gyro scale', color=False)
-        assert header == '=== Step 1 of 2: gyro scale ==='
+        # Centred in = like pytest's banners, at most HEADER_WIDTH wide.
+        assert len(header) == common.HEADER_WIDTH
+        assert header.strip('=') == ' Step 1 of 2: gyro scale '
+        left, right = header.split(' Step 1 of 2: gyro scale ')
+        assert set(left) == set(right) == {'='} and abs(len(left) - len(right)) <= 1
         assert common.action_lines(1, ['Place the car.', 'Step back.'], color=False) == [
             '  [1] Place the car.',
             '      Step back.',
