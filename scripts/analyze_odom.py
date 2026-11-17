@@ -62,8 +62,12 @@ CPU_ADDED_LIMIT = 10.0  # percent of one core added to controller_node
 # /odom/integrated is required; /motor gives the steering, and /odom with
 # /imu/fused give the other source's account.
 TOPICS = ('/odom/integrated', '/motor', '/odom', '/imu/fused')
-# /odom/integrated matching /odom this closely means it carries the firmware pose.
-SAME_POSE_M = 1e-3
+# On the firmware source each /odom/integrated sample repeats the position of
+# one /odom sample, the one from the same `s` frame.
+SAME_POSE_M = 1e-6
+# Share of the moving samples that must repeat an /odom position. A few /odom
+# messages the recorder dropped leave some samples without their twin.
+SAME_POSE_SHARE = 0.9
 
 
 @dataclass
@@ -211,20 +215,28 @@ def firmware_run(rows: list[list[float]]) -> Run:
 
 def source_in_use(run: Run, firmware: Run) -> str:
     """
-    Name the source /odom/integrated carried: 'firmware' when it matches /odom.
+    Name the source /odom/integrated carried: 'firmware' when it repeats /odom's positions.
 
-    The firmware source republishes the ESP32's pose, so its positions equal
-    /odom's at the same stamps; the integrated source's drift apart.
+    The firmware source republishes each `s` frame's pose, stamped with that
+    frame's /imu/fused stamp, and /odom carries the same pose stamped a moment
+    later (controller.py publishes the IMU first). So each moving sample
+    equals one of the two /odom samples around its stamp. Comparing at one
+    interpolated time does not work: the two stamps differ by 0.25 to 6 ms on
+    the car, a few mm while driving. The integrated source's positions are
+    its own and match none.
     """
-    if run.t.size < 2 or firmware.t.size < 2:
+    moving = run.v != 0.0
+    if not moving.any() or firmware.t.size < 2:
         return 'integrated'
-    inside = (run.t >= firmware.t[0]) & (run.t <= firmware.t[-1])
-    if not inside.any():
-        return 'integrated'
-    fx = np.interp(run.t[inside], firmware.t, firmware.x)
-    fy = np.interp(run.t[inside], firmware.t, firmware.y)
-    gap = np.hypot(run.x[inside] - fx, run.y[inside] - fy)
-    return 'firmware' if float(np.max(gap)) <= SAME_POSE_M else 'integrated'
+    t, x, y = run.t[moving], run.x[moving], run.y[moving]
+    after = np.clip(np.searchsorted(firmware.t, t), 0, firmware.t.size - 1)
+    before = np.clip(after - 1, 0, firmware.t.size - 1)
+    gap = np.minimum(
+        np.hypot(x - firmware.x[after], y - firmware.y[after]),
+        np.hypot(x - firmware.x[before], y - firmware.y[before]),
+    )
+    share = float(np.mean(gap <= SAME_POSE_M))
+    return 'firmware' if share >= SAME_POSE_SHARE else 'integrated'
 
 
 def rest_bias(firmware: list[list[float]], rates: list[tuple[float, float]]) -> float:

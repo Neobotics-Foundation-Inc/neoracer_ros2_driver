@@ -264,6 +264,49 @@ class TestOtherSource:
         integrated = odom.firmware_run(_rows(2.0, dx=0.97))
         assert odom.source_in_use(integrated, firmware) == 'integrated'
 
+    @staticmethod
+    def _skewed(length=3.0, v=1.0, period=0.00415, skew=0.00044, late=0.003, drop=()):
+        """
+        Return (/odom/integrated, /odom) rows as controller.py makes them on the firmware source.
+
+        Each `s` frame's pose goes on /odom/integrated at 50 Hz with the
+        /imu/fused stamp, and on /odom stamped `skew` later (`late` on every
+        40th frame, a GIL stall); /odom rows in `drop` were lost by the recorder.
+        """
+        integrated, firmware, due, x = [], [], None, 0.0
+        n = round((length / v + 2.0) / period)
+        for k in range(n):
+            a = k * period
+            moving = 1.0 <= a < 1.0 + length / v
+            if moving:
+                x += v * period
+            speed = v if moving else 0.0
+            if due is None or a >= due:
+                due = a + 0.02
+                integrated.append([a, x, 0.0, 0.0, speed, 0.0])
+            if k not in drop:
+                b = a + (late if k % 40 == 0 else skew)
+                firmware.append([b, x, 0.0, 0.0, speed, 0.0])
+        return integrated, firmware
+
+    def test_the_firmware_source_is_found_although_odom_is_stamped_later(self, odom):
+        # On the car /odom is stamped 0.25 to 6 ms after /imu/fused (a 0.6.1 bag).
+        integrated, firmware = self._skewed()
+        run, fw = odom.firmware_run(integrated), odom.firmware_run(firmware)
+        assert odom.source_in_use(run, fw) == 'firmware'
+
+    def test_a_few_dropped_odom_messages_keep_the_firmware_source(self, odom):
+        integrated, firmware = self._skewed(drop=set(range(300, 900, 23)))
+        run, fw = odom.firmware_run(integrated), odom.firmware_run(firmware)
+        assert odom.source_in_use(run, fw) == 'firmware'
+
+    def test_an_estimate_from_the_same_origin_is_the_integrated_source(self, odom):
+        # Speed scaled 2 percent from the same start: close to /odom, never equal.
+        integrated, firmware = self._skewed()
+        scaled = [[t, 0.98 * x, y, yaw, v, w] for t, x, y, yaw, v, w in integrated]
+        run, fw = odom.firmware_run(scaled), odom.firmware_run(firmware)
+        assert odom.source_in_use(run, fw) == 'integrated'
+
     def test_the_bias_comes_from_the_rest_before_the_wheels_turn(self, odom):
         rows = _rows(1.0)
         rates = [(row[0], 0.01 if row[0] < 1.0 else 0.5) for row in rows]
@@ -309,7 +352,7 @@ class TestReport:
     ):
         # The integrated source in use, 2 percent long; the firmware pose 6 percent long.
         firmware_rows = _rows(3.18)
-        integrated = odom.firmware_run(_rows(3.06))
+        integrated = odom.firmware_run(_rows(3.18, dx=3.06 / 3.18))
         data = odom.BagData(integrated, firmware_rows, [])
         monkeypatch.setattr(odom, 'resolve_bag', lambda arg: tmp_path)
         monkeypatch.setattr(odom, 'read_topics', lambda bag: data)
