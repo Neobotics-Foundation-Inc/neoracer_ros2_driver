@@ -235,6 +235,7 @@ class ControllerNode(Node):
             else None
         )
         self._setup_odometry()
+        self._setup_board_trim()
 
         # ===== STATE + SERIAL READ THREAD =====
         self.last_cmd_time = self.get_clock().now()
@@ -393,7 +394,9 @@ class ControllerNode(Node):
             if self.serial.in_waiting > 0:
                 try:
                     line = self.serial.readline().decode('utf-8').strip()
-                    if line:
+                    if line and controller_lib.is_board_reply(line):
+                        self._board_reply(line)
+                    elif line:
                         try:
                             data, tag = controller_lib.parse_serial_data(line)
                             if tag is None:
@@ -674,6 +677,144 @@ class ControllerNode(Node):
                 self.get_logger().error(f'[ERROR] Could not send [{command.strip()}]: {e}')
 
         self.last_cmd_time = self.get_clock().now()
+
+    # ===== BOARD STEERING TRIM =====
+    # board.steering_trim_deg mirrors the ESP32's own trim (`trim get`), read
+    # once the serial link is up. Setting it sends `trim set` and is accepted
+    # only when the board reads the new value back; a value that is not a
+    # finite number of degrees inside the board's range is never sent, because
+    # the firmware saves NaN as it is. See docs/esp32_protocol.md.
+    _BOARD_PARAM = 'board.steering_trim_deg'
+    # Seconds to wait for one reply; the board answers within a few ms.
+    _BOARD_REPLY_TIMEOUT = 0.3
+    # `trim get` attempts at start, _BOARD_READ_PERIOD apart.
+    _BOARD_READ_TRIES = 5
+    _BOARD_READ_PERIOD = 2.0
+
+    def _setup_board_trim(self):
+        """Declare board.steering_trim_deg, unknown until the board answers `trim get`."""
+        self.declare_parameter(
+            self._BOARD_PARAM,
+            math.nan,
+            ParameterDescriptor(
+                dynamic_typing=True,
+                description=(
+                    "The ESP32's steering trim in degrees (positive steers left), read "
+                    'from the board at start. Setting it writes the board.'
+                ),
+            ),
+        )
+        self._board_trim = math.nan
+        self._board_range = controller_lib.TRIM_RANGE_DEFAULT
+        self._board_known = False
+        self._board_syncing = False
+        self._board_cmd_lock = threading.Lock()
+        self._board_waiting = None
+        self._board_tries = 0
+        self.add_on_set_parameters_callback(self._on_set_parameters)
+        self._board_timer = self.create_timer(self._BOARD_READ_PERIOD, self._read_board_trim)
+
+    def _board_command(self, line, prefixes):
+        """Send one board command line; return the first reply with one of `prefixes`, or None."""
+        event = threading.Event()
+        box = []
+        with self._board_cmd_lock:
+            self._board_waiting = (prefixes, event, box)
+            try:
+                with self.serial_lock:
+                    self.serial.write(line.encode('utf-8'))
+                event.wait(self._BOARD_REPLY_TIMEOUT)
+            except serial.SerialException as e:
+                self.get_logger().error(f'[ERROR] Could not send [{line.strip()}]: {e}')
+            finally:
+                self._board_waiting = None
+        return box[0] if box else None
+
+    def _board_reply(self, line):
+        """Hand a reply line from the serial reader to the command waiting for it."""
+        waiting = self._board_waiting
+        if waiting is not None and line.startswith(waiting[0]) and not waiting[1].is_set():
+            waiting[2].append(line)
+            waiting[1].set()
+
+    def _store_board_trim(self, trim_deg, low, high):
+        """Record the board's trim and show it in the parameter without writing the board."""
+        from rclpy.parameter import Parameter
+
+        self._board_trim = trim_deg
+        self._board_range = (low, high)
+        self._board_known = True
+        self._board_syncing = True
+        try:
+            self.set_parameters([Parameter(self._BOARD_PARAM, value=float(trim_deg))])
+        finally:
+            self._board_syncing = False
+
+    def _read_board_trim(self):
+        """Read the board's trim at start; give up after _BOARD_READ_TRIES attempts."""
+        self._board_tries += 1
+        reply = self._board_command('trim get\n', ('TRIM:',))
+        read = controller_lib.parse_trim_reply(reply) if reply else None
+        if read is not None:
+            self._board_timer.cancel()
+            self._store_board_trim(*read)
+            self.get_logger().info(
+                f'Board steering trim {read[0]:+.2f} deg (range {read[1]:g} to {read[2]:g} deg)'
+            )
+        elif self._board_tries >= self._BOARD_READ_TRIES:
+            self._board_timer.cancel()
+            self.get_logger().warn(
+                'The ESP32 did not answer trim get. board.steering_trim_deg stays unknown '
+                'and cannot be set until teleop restarts.'
+            )
+
+    def _on_set_parameters(self, params):
+        """Write board.steering_trim_deg to the board; other parameters pass as before."""
+        from rcl_interfaces.msg import SetParametersResult
+
+        for param in params:
+            if param.name != self._BOARD_PARAM or self._board_syncing:
+                continue
+            ok, reason = self._write_board_trim(param.value)
+            if not ok:
+                self.get_logger().error(f'{self._BOARD_PARAM} not set: {reason}')
+                return SetParametersResult(successful=False, reason=reason)
+        return SetParametersResult(successful=True)
+
+    def _write_board_trim(self, value):
+        """Send `trim set`, confirm with `trim get`; return (accepted, reason)."""
+        if not self._board_known:
+            return False, 'the board trim is unknown: the ESP32 did not answer trim get at start'
+        problem = controller_lib.trim_problem(value, *self._board_range)
+        if problem:
+            return False, problem
+        old = self._board_trim
+        requested = float(value)
+        set_reply = self._board_command(
+            controller_lib.trim_set_command(requested), ('OK:', 'ERROR:')
+        )
+        get_reply = self._board_command('trim get\n', ('TRIM:',))
+        ok, reason = controller_lib.trim_write_outcome(requested, set_reply, get_reply)
+        read = controller_lib.parse_trim_reply(get_reply) if get_reply else None
+        if ok and read is not None:
+            self._board_trim = read[0]
+            self.get_logger().info(
+                f'Board steering trim {old:+.2f} -> {read[0]:+.2f} deg, saved on the board'
+            )
+            return True, ''
+        # The change is refused, so the board must keep the old trim: put it back.
+        tol = controller_lib.TRIM_CONFIRM_TOL_DEG
+        if read is None or abs(read[0] - old) > tol:
+            self._board_command(controller_lib.trim_set_command(old), ('OK:', 'ERROR:'))
+            back = self._board_command('trim get\n', ('TRIM:',))
+            back_read = controller_lib.parse_trim_reply(back) if back else None
+            if back_read is None or abs(back_read[0] - old) > tol:
+                self._board_known = False
+                reason += (
+                    f'; the board may not hold {old:+.2f} deg now. Restart teleop to read it '
+                    'again before setting it'
+                )
+        return False, reason
 
 
 # ===== INITIALIZE SYSTEM - DO NOT MODIFY ======
