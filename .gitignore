@@ -48,11 +48,15 @@ COLCON_IGNORE
 # Local-only configuration overrides
 config/*.local.yaml
 
-# Lab dashboards. Each is a repository of its own, cloned here by
-# setup_services.sh and tracking its default branch, so the driver ships the
-# wiring rather than a vendored copy. The checkouts carry a car's tuned
-# dashboard yaml, which is why setup fast-forwards them instead of resetting.
-scripts/dashboards/
+# Lab dashboards ship in scripts/dashboards/<id>/ and are tracked here. A car
+# set up before they moved in-tree has a checkout of each one's old repository
+# at scripts/dashboards/<repo>_dashboard/. setup_dashboards.sh copies a
+# checkout's tuning, logs and data out, then moves it to .migrated/.
+scripts/dashboards/*_dashboard/
+scripts/dashboards/.migrated/
+# Per-car dashboard tuning saved beside a dashboard (racecar profile migrate
+# moves it into the car profile)
+scripts/dashboards/*/*.local.yaml
 
 # Model artifacts. .pt weights and the .engine are committed so a fresh clone
 # runs inference at full speed without a what is close to eight-minute build.

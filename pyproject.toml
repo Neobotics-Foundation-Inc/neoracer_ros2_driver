@@ -2,6 +2,11 @@
 # (ament_python). Tool versions are pinned in scripts/setup_dev_tools.sh.
 # Settings track ament_flake8: 99 columns, single quotes.
 #
+# The lab dashboards in scripts/dashboards/<id>/ are linted with the rest. A car
+# set up before they moved in-tree may still hold the old checkouts there
+# (<repo>_dashboard/, or .migrated/ once setup_dashboards.sh has moved them);
+# those are other repositories' code and are excluded.
+#
 # scripts/dashboard.py sits outside black and mypy for now. The 8080 page is
 # replaced wholesale by the apps page port, and an open PR rewrites it in the
 # meantime; formatting it here would only make that PR conflict. The exclusion
@@ -12,12 +17,18 @@
 line-length = 99
 skip-string-normalization = true
 target-version = ['py310']
-extend-exclude = '^/(scripts/dashboards|build|install|log)/|^/scripts/dashboard\.py$'
+extend-exclude = '^/(scripts/dashboards/([^/]+_dashboard|\.migrated)|build|install|log)/|^/scripts/dashboard\.py$'
 
 [tool.ruff]
 line-length = 99
 target-version = 'py310'
-extend-exclude = ['scripts/dashboards', 'build', 'install', 'log']
+extend-exclude = [
+    'scripts/dashboards/*_dashboard',
+    'scripts/dashboards/.migrated',
+    'build',
+    'install',
+    'log',
+]
 
 [tool.ruff.lint]
 # Import order is left to ament_flake8 (google style).
@@ -29,7 +40,7 @@ inline-quotes = 'single'
 [tool.mypy]
 python_version = '3.10'
 files = ['neoracer_ros2_driver', 'launch', 'scripts']
-exclude = ['^scripts/dashboards/', '^scripts/dashboard\.py$']
+exclude = ['^scripts/dashboards/([^/]+_dashboard|\.migrated)/', '^scripts/dashboard\.py$']
 # rclpy, message packages and the GPU stack ship no type stubs.
 ignore_missing_imports = true
 # launch/ has no __init__.py; as a namespace package it would shadow ROS launch.
