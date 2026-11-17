@@ -1,0 +1,24 @@
+# NeoRacer Pure Pursuit Dashboard parameters: the shipped defaults. Save on the
+# dashboard writes this car's values to the car profile, in
+# ~/.config/racecar/dashboards/pursuit.yaml, which loads on top of this file;
+# a driver update leaves that file alone. Reset or Load re-reads both.
+
+speed: 0.0            # top throttle 0..1. Ships at 0.0: the NeoRacer mux has
+                      # no ROS deadman (the handset's mode switch is the
+                      # gate), so nothing drives until you raise it.
+speed_kp: 0.2         # throttle ramp toward the target speed. This is the
+                      # stopping gain: higher brakes and accelerates harder.
+safety_area: 0.15     # bbox area as a fraction of the image (0..1) where the
+                      # car fully stops. Braking starts as the box grows
+                      # toward this size.
+angle_kp: 1.0         # steering strength on the target's horizontal offset
+angle_kd: 0.1         # steering damper. Raise this if the car wobbles.
+score_threshold: 0.5  # ignore detections scored below this (0..1)
+max_detections: 5     # keep only this many best-scoring detections
+
+# Which topics to read. Latest driver: /camera/color. Older cars: /camera.
+camera_topic: /camera/color
+detections_topic: /edgetpu/inference
+
+preview_width: 320    # live view width sent to the browser, pixels
+preview_quality: 45   # live view jpeg quality 1..100
