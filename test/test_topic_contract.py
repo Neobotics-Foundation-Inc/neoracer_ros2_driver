@@ -535,10 +535,13 @@ TABLE = (
         'TF base_link -> laser',
         'tf2_msgs/msg/TFMessage',
         publishers=(End('robot_state_publisher (frames, /tf_static)', FRAMES_URDF, REL, TL),),
-        subscribers=(End('SLAM and the lidar calibration', 'upstream F24 and F36', REL, TL),),
+        subscribers=(End('SLAM', 'upstream F24', REL, TL),),
         evidence=((FRAMES_URDF, '<child link="laser" />'), (TELEOP, "'frames': 'true'")),
         kind='frame',
-        note='added by F05; library v0.9.2-bot reads its yaw in the 0.9.2 port',
+        note=(
+            'added by F05; its yaw is laser_yaw_deg, which the lidar calibration (F36) '
+            'writes to the car profile; library v0.9.2-bot reads its yaw in the 0.9.2 port'
+        ),
     ),
     # -- read by the deployed library fork through the vendor autonomy stack --
     Row(

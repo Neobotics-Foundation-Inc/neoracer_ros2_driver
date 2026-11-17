@@ -50,6 +50,7 @@ sys.path.insert(0, str(HERE))
 from calibrate_common import (  # noqa: E402, I100
     criteria_lines,
     Criterion,
+    DEADMAN,
     paint,
     read_line,
     SESSION_ENV,
@@ -60,14 +61,6 @@ from calibrate_common import (  # noqa: E402, I100
 TELEOP_UNIT = 'neoracer-teleop'
 RUN_PROMPT = 'Press Enter to run, s to skip, and q to stop: '
 RUN_PROMPT_BACK = 'Press Enter to run, s to skip, b to go back a step, and q to stop: '
-# The handset's mode switch is the deadman of every step that drives the car.
-DEADMAN = (
-    'Turn the handset on and keep it in your hand.\n'
-    'Start with the mode switch UP (manual).\n'
-    'The car drives itself only while the mode switch is DOWN (autonomy).\n'
-    'Flip it DOWN only when the step asks.\n'
-    'Flip the mode switch UP to stop. Turning the handset off does not stop the car.'
-)
 LIDAR_SETUP = (
     'Use a clear straight path of about 2 meters with walls or furniture nearby.\n' + DEADMAN
 )

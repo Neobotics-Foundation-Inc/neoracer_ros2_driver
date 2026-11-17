@@ -1,11 +1,14 @@
 """Unit tests for drive_speed.py: calibration speeds in m/s as /drive commands."""
 
 from pathlib import Path
+import sys
+import types
 
 from conftest import load_script as _load
 import pytest
 
 CONFIG = Path(__file__).resolve().parent.parent / 'config'
+NAN = float('nan')
 
 
 @pytest.fixture(scope='module')
@@ -32,8 +35,27 @@ class TestSpeedCommand:
             ds.speed_command(2.0, ds.DriveLimits(6.0, 0.17, 0.24))
 
     def test_a_zero_cap_raises(self, ds):
-        with pytest.raises(ValueError, match='throttle cap is 0'):
+        with pytest.raises(ValueError, match='not a number above 0'):
             ds.speed_command(0.5, ds.DriveLimits(6.0, 0.0, 1.0))
+
+    def test_a_negative_cap_or_top_speed_raises(self, ds):
+        with pytest.raises(ValueError, match='is -0.5, not a number above 0'):
+            ds.speed_command(-0.5, ds.DriveLimits(6.0, 1.0, -1.0 / 12))
+        with pytest.raises(ValueError, match='not a number above 0'):
+            ds.speed_command(0.5, ds.DriveLimits(-6.0, 1.0, 1.0))
+
+    @pytest.mark.parametrize(
+        'limits,mps',
+        [((NAN, 1.0, 1.0), 0.5), ((6.0, NAN, 1.0), 0.5), ((6.0, 1.0, NAN), -0.5)],
+    )
+    def test_a_limit_that_is_not_a_number_raises(self, ds, limits, mps):
+        # The throttle node turns a NaN /drive speed into full speed.
+        with pytest.raises(ValueError, match='not a number above 0'):
+            ds.speed_command(mps, ds.DriveLimits(*limits))
+
+    def test_a_speed_that_is_not_a_number_raises(self, ds):
+        with pytest.raises(ValueError, match='not a finite number'):
+            ds.speed_command(float('nan'), ds.DriveLimits(6.0, 1.0, 1.0))
 
     def test_segments_keep_steering_and_time(self, ds):
         limits = ds.DriveLimits(6.0, 1.0, 1.0)
@@ -60,3 +82,11 @@ class TestDriveLimits:
 
     def test_missing_values_fall_back_to_the_nodes_defaults(self, ds, car_profile_dir, tmp_path):
         assert ds.drive_limits(tmp_path) == ds.DriveLimits(6.0, 0.17, 0.24)
+
+    def test_no_config_directory_raises(self, ds, car_profile_dir, monkeypatch):
+        # The nodes' fallbacks would stand in for the YAML the running nodes loaded.
+        common = types.ModuleType('calibrate_common')
+        common.install_config_dir = common.source_config_dir = lambda: None
+        monkeypatch.setitem(sys.modules, 'calibrate_common', common)
+        with pytest.raises(ValueError, match='no config directory found'):
+            ds.drive_limits()

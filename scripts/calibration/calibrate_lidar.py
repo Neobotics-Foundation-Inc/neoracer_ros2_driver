@@ -52,6 +52,7 @@ from calibrate_common import (  # noqa: E402, I100
     backup_reminder,
     CalibratorNode,
     Criterion,
+    DEADMAN,
     finish_check,
     install_config_dir,
     read_line,
@@ -78,9 +79,10 @@ MAX_TILT_DEG = 5.0
 # --check limits: yaw to 0.5 deg; RMS residual above 10 mm means a cluttered
 # or curved wall.
 PASS_ANGLE_DEG = 0.5
-# Hand squaring at the wheel centers is good to about 1 deg (0.32 deg per mm),
-# so up to WARN_ANGLE_DEG warns; beyond it the mount moved or the car is badly
-# placed.
+# Hand squaring at the wheel centers is good to about 1 deg (0.26 deg per mm
+# on the NeoRacer's 224 mm track, the spec value measured off the production
+# CAD; upstream's 178 mm track gives 0.32), so up to WARN_ANGLE_DEG warns;
+# beyond it the mount moved or the car is badly placed.
 WARN_ANGLE_DEG = 2.0
 PASS_RMS_MM = 10.0
 
@@ -144,7 +146,7 @@ def check_criteria(fit: WallFit, yaw_deg: float) -> list[Criterion]:
         status, advice = 'PASS', ''
     elif angle <= WARN_ANGLE_DEG:
         status = 'WARN'
-        advice = 'within hand-squaring precision (1 mm at the wheel centers is 0.32 deg)'
+        advice = 'within hand-squaring precision (1 mm at the wheel centers is 0.26 deg)'
     else:
         status = 'FAIL'
         advice = 'beyond hand-squaring error: check the lidar mount, re-square, recalibrate'
@@ -275,10 +277,6 @@ SEARCH_DEG = 15.0
 PLACE = 'Place the car on the floor pointing along the clear area.'
 PLACE_AGAIN = 'Use a different spot or direction from the previous placements.'
 MOTION = 'The car drives forward about 1.3 meters at 0.5 m/s, stops, then drives back.'
-STOP = (
-    'The car drives itself only with the mode switch DOWN (autonomy). '
-    'Flip the mode switch UP to stop.'
-)
 
 
 def missing_drive_tools(folder: Path = HERE) -> list[str]:
@@ -417,6 +415,8 @@ class DriveYawCalibrator:
     def __init__(self, check: bool, report: str | None) -> None:
         from calibrate_dynamics import Driver, laser_pose
 
+        # Before the node starts: limits that cannot give the speed raise here.
+        self.segments = drive_segments(SEGMENTS_MPS, drive_limits())
         self.check = check
         self.report = report
         self.driver = Driver()
@@ -427,8 +427,7 @@ class DriveYawCalibrator:
         """Drive one placement; return its good legs, or None to offer it again."""
         from calibrate_dynamics import read_bag
 
-        segments = drive_segments(SEGMENTS_MPS, drive_limits())
-        bag = self.driver.drive('yaw', segments, prefix='lidar')
+        bag = self.driver.drive('yaw', self.segments, prefix='lidar')
         if bag is None:
             return None
         self.log.info('Analyzing the run...')
@@ -468,7 +467,7 @@ class DriveYawCalibrator:
         if i:
             self.log.info(PLACE_AGAIN)
         self.log.info(MOTION)
-        self.log.info(STOP)
+        self.log.info(DEADMAN)
 
     def _calibrate(self) -> int:
         from calibrate_common import run_sequence
@@ -574,7 +573,8 @@ def main() -> int:
     parser.add_argument(
         '--wall-distance-mm',
         type=float,
-        help='with --wall: taped distance from base_link to the wall',
+        help='with --wall: taped distance from the wall to base_link, the floor under the '
+        'rear axle (the front wheel centers plus the wheelbase)',
     )
     parser.add_argument('--report', help='with --check: write the result as JSON to this file')
     args = parser.parse_args(remove_ros_args(sys.argv)[1:])
@@ -589,7 +589,12 @@ def main() -> int:
     if args.analyze:
         return analyze_bags(args.analyze)
     if not args.wall:
-        return DriveYawCalibrator(args.check, args.report).run()
+        try:
+            calibrator = DriveYawCalibrator(args.check, args.report)
+        except ValueError as exc:
+            print(f'The driving method cannot run: {exc}.', file=sys.stderr)
+            return 1
+        return calibrator.run()
     rclpy.init()
     return spin_until_done(LidarYawCalibrator(args.check, args.wall_distance_mm, args.report))
 

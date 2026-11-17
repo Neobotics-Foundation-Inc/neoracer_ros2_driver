@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import math
 from pathlib import Path
 
 from neoracer_ros2_driver import car_profile
@@ -49,6 +50,8 @@ def drive_limits(config_dir: Path | None = None) -> DriveLimits:
         from calibrate_common import install_config_dir, source_config_dir
 
         config_dir = install_config_dir() or source_config_dir()
+        if config_dir is None:
+            raise ValueError('no config directory found, so the throttle caps are unknown')
     controller = car_profile.node_params('controller', 'controller_node', config_dir)
     throttle = car_profile.node_params('throttle', 'throttle_node', config_dir)
     return DriveLimits(
@@ -62,13 +65,20 @@ def speed_command(mps: float, limits: DriveLimits) -> float:
     """
     Return the /drive speed that makes the controller send `mps` to the ESP32.
 
-    Raises ValueError when the car's limits cannot reach `mps`.
+    Raises ValueError when the car's limits cannot reach `mps`, or when `mps`
+    or a limit is not a finite number: the throttle node turns a NaN /drive
+    speed into full speed.
     """
+    if not math.isfinite(mps):
+        raise ValueError(f'the speed {mps} m/s is not a finite number')
     if mps == 0.0:
         return 0.0
     scale = limits.mps_per_command(mps > 0.0)
-    if scale <= 0.0:
-        raise ValueError(f'this car cannot drive {mps:+g} m/s: the throttle cap is 0')
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise ValueError(
+            f'this car cannot drive {mps:+g} m/s: max_speed_mps times the throttle cap '
+            f'is {scale:g}, not a number above 0'
+        )
     command = mps / scale
     if abs(command) > 1.0:
         raise ValueError(
