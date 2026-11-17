@@ -42,11 +42,11 @@ mux_node:
     # picks the source: above rc_mode_deadband the gamepad (/gamepad_drive),
     # below -rc_mode_deadband /drive, and in between it publishes zero.
     # That is upstream's rule, and this handset reads the other way. Switch
-    # down, where the ESP32 follows the Jetson, reads positive, so the mux
-    # forwards /gamepad_drive. With today's RC calibration in controller.yaml
-    # the centred sticks read about -0.95 there, so the car would reverse at
-    # about 5.7 m/s near full lock. The NeoRacer RC calibration fix on main
-    # and a fix for the switch direction come first.
+    # down, where the ESP32 follows the Jetson, reads +1.0, so the mux would
+    # forward /gamepad_drive and the sticks would drive the car through the
+    # Jetson. Switch up reads -1.0 and selects /drive, which the ESP32 ignores
+    # in manual. The middle reads 0.0: idle here, manual in the firmware.
+    # A fix for the switch direction comes first.
     rc_authority_enable: false
     rc_mode_channel: 6        # 0-indexed; radio Ch7, the mode switch
     rc_mode_deadband: 0.35    # |value| below this reads as the middle position

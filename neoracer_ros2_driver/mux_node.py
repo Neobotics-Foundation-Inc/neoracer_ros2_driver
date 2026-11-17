@@ -14,8 +14,8 @@ whole model.
 
 A FlySky transmitter can take the gate instead of the bumpers. That is off by
 default (rc_authority_enable): the link predicate is the least-verified part of
-the path, and the driver's /rc/channels scaling does not yet match the board's
-SBUS counts. Where it is enabled and a live transmitter is present, the mode
+the path, and with the mode switch down a lost handset is not reported on
+/rc/link. Where it is enabled and a live transmitter is present, the mode
 channel selects idle, manual or autonomous and the bumpers are ignored;
 otherwise the bumpers govern. On the NeoRacer handset the mode switch reads the
 other way round, so it stays off; config/mux.yaml says what enabling it would
