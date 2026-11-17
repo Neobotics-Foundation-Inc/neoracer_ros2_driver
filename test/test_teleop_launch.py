@@ -67,5 +67,20 @@ class TestWrapper:
         assert 'mv -Tf "$HOME/logs/latest.tmp" "$HOME/logs/latest"' in text
         assert 'ln -sfn "$LOG_DIR" "$HOME/logs/latest"\n' not in text
 
+    def test_a_real_latest_folder_is_moved_aside_before_the_rename(self):
+        # mv -T cannot rename a link over a folder; under set -e teleop would not start.
+        text = WRAPPER.read_text()
+        guard = text.index('if [ -d "$HOME/logs/latest" ] && [ ! -L "$HOME/logs/latest" ]; then')
+        assert guard < text.index('mv -Tf "$HOME/logs/latest.tmp" "$HOME/logs/latest"')
+        assert 'mv "$HOME/logs/latest" "$HOME/logs/latest.$TIMESTAMP"' in text
+
     def test_the_feature_arguments_still_go_first(self):
         assert 'set -- "${FEATURE_ARGS[@]}" "$@"' in WRAPPER.read_text()
+
+    def test_shm_orphans_are_swept(self):
+        assert 'for f in /dev/shm/fastrtps_port*; do' in WRAPPER.read_text()
+
+    def test_ros2_launch_replaces_the_shell(self):
+        # systemd then tracks the ros2 launch PID, not this shell.
+        last = WRAPPER.read_text().rstrip().splitlines()[-1]
+        assert last == 'exec ros2 launch neoracer_ros2_driver teleop.launch.py "$@"'

@@ -21,6 +21,13 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_DIR="$HOME/logs/$TIMESTAMP"
 mkdir -p "$LOG_DIR"
 
+# A real folder at ~/logs/latest cannot be renamed over, and set -e would then
+# stop teleop on every start. The Jupyter unit makes one when it starts on a
+# car before teleop has ever made the link. Move it aside.
+if [ -d "$HOME/logs/latest" ] && [ ! -L "$HOME/logs/latest" ]; then
+    mv "$HOME/logs/latest" "$HOME/logs/latest.$TIMESTAMP"
+fi
+
 # Build the link beside the target, then rename it over; readers never see
 # ~/logs/latest missing.
 ln -sfn "$LOG_DIR" "$HOME/logs/latest.tmp"
