@@ -133,7 +133,10 @@ student controller API (Xbox-style layout). Everything is parameterized in
   handset, the FlySky model every NeoRacer ships with) + `rc_deadband` calibrate each channel to `[-1, 1]`; a reading below
   `rc_failsafe_below` (0, so only the firmware's `-1`) -> neutral. Switches read
   240, 1023 or 1807, so `-1.0`, `0.0` or `1.0` on `/rc/channels`.
-- `throttle_channel` (2) -> `axes[1]`, `steering_channel` (0) -> `axes[3]`.
+- `throttle_channel` (2) -> `axes[1]`, forward +1. `steering_channel` (0) ->
+  `axes[3]` with `steering_sign` -1, so stick left reads +1 as on a ROS gamepad.
+  The student library negates `axes[3]` for its x, so right reads +1 there.
+  `/rc/channels` keeps the handset's own direction: stick right reads +1.
 - `mode_channel` (6, the mode switch) follows the firmware's two states: switch
   up or middle -> manual (`buttons[4]`), switch down -> autonomy (`buttons[5]`).
   The mux runs with `autonomy_passthrough` on, so these buttons do not gate

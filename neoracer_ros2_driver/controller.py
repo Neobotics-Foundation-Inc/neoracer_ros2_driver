@@ -365,7 +365,7 @@ class ControllerNode(Node):
             'throttle_sign': p('throttle_sign', 1).value,
             'steering_axis': p('steering_axis', 3).value,
             'steering_channel': p('steering_channel', 0).value,
-            'steering_sign': p('steering_sign', 1).value,
+            'steering_sign': p('steering_sign', -1).value,
             'mode_channel': p('mode_channel', 6).value,
             'mode_mid_thresh': p('mode_mid_thresh', -1.0).value,
             'mode_high_thresh': p('mode_high_thresh', 0.608).value,
