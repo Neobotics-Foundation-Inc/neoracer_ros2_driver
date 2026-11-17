@@ -50,7 +50,6 @@ FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/
 
 LakiBeam1 ──(UDP)──> lakibeam1_scan_node ──/scan
 USB webcam ────────> camera ──/camera/color  (JPEG-in-Image) ──> inference_node ──/edgetpu/inference
-Nav2 ──/cmd_vel──> twist_bridge ──/drive
 student library ──/dotmatrix/text──> led_matrix ──(USB-UART)──> 8×8 display
 ```
 
@@ -266,8 +265,6 @@ racecar navigation              # Nav2 with the teb planner (also: dwb)
 racecar navigation rviz         # RViz goal-setting view, on the car's desktop
 ```
 
-`twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
-
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
 ## Web dashboard
@@ -472,7 +469,7 @@ ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=false
 
 The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
 
-Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `twist_bridge.yaml`, `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
+Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
 
 ## Troubleshooting
 

@@ -52,21 +52,10 @@ MONITORED = {
     # turned on, a car without `racecar setup ml` shows it as not detected.
     'inference': {'topic': '/edgetpu/inference', 'label': 'YOLO inference',
                   'supervised': False},
-    # Autonomy layer, started from scripts/launch_autonomy.sh while
-    # neoracer-autonomy.service is held. `optional`: absent is a normal state,
-    # shown as OFF rather than DEAD.
+    # The autonomy launch: slam_toolbox while mapping, map_server in
+    # localization. `optional`: absent is a normal state, shown as OFF rather
+    # than DEAD.
     'slam': {'topic': '/map', 'label': 'SLAM', 'supervised': False, 'optional': True},
-    # /drive: the bridge's publisher endpoint exists exactly while the node
-    # lives. /odometry/filtered belongs to the EKF now, not the bridge relay.
-    'bridge': {'topic': '/drive', 'label': 'Twist bridge (Nav2 -> mux)',
-               'supervised': False, 'optional': True},
-    'imu_filter': {'topic': '/imu_filter', 'label': 'IMU filter (complementary)',
-                   'supervised': False, 'optional': True},
-    'ekf': {'topic': '/odometry/filtered', 'label': 'EKF (robot_localization)',
-            'supervised': False, 'optional': True},
-    'model': {'topic': '/joint_states', 'label': 'Robot model (TF)',
-              'supervised': False, 'optional': True},
-    'nav': {'topic': '/plan', 'label': 'Nav2 planner', 'supervised': False, 'optional': True},
 }
 
 RATE_TOPICS = [
@@ -79,9 +68,6 @@ RATE_TOPICS = [
     '/camera/color',
     '/edgetpu/inference',
     '/drive',
-    '/cmd_vel',
-    '/imu_filter',
-    '/odometry/filtered',
     '/map',
 ]
 

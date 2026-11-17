@@ -487,7 +487,7 @@ TABLE = (
         '/battery',
         'sensor_msgs/msg/BatteryState',
         publishers=(End('controller_node', f'{CONTROLLER}:208', BE),),
-        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:154', BE),),
+        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:140', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(BatteryState, '/battery', qos_profile_sensor_data)"),
         ),
