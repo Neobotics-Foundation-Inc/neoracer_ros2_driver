@@ -782,11 +782,13 @@ class Driver:
             self._hold(0.1, 0.0, 0.0, need_rb=False)
         return True
 
-    def _count_down(self, seconds: float, until_move: float) -> bool:
+    def _count_down(self, seconds: float, until_move: float, steer: float = 0.0) -> bool:
         """
         Hold still with the switch guarded, printing the whole seconds left until the car moves.
 
         `until_move` is the time left until the first move when this hold starts.
+        `steer` is held with the car still, so a plan that sets its steering
+        before the move turns the wheels before the car rolls, as upstream does.
         Return False when the switch goes UP or /joy stops arriving.
         """
         # Whole-second holds, one per number shown; each hold still checks
@@ -797,7 +799,7 @@ class Driver:
             if left > 0:
                 self.log.info(f'Starting in {left}...')
             chunk = min(1.0, seconds - done)
-            if not self._hold(chunk, 0.0, 0.0, need_rb=True):
+            if not self._hold(chunk, 0.0, steer, need_rb=True):
                 return False
             done += chunk
         return True
@@ -849,7 +851,7 @@ class Driver:
                     self.log.info(f'Keep your hands off the car for {seconds:.0f} seconds.')
                 if k < first_move:
                     until_move = sum(seg[2] for seg in plan[k:first_move])
-                    held = self._count_down(seconds, until_move)
+                    held = self._count_down(seconds, until_move, steer)
                 else:
                     held = self._hold(seconds, speed, steer, need_rb=k <= last_move)
                 if not held:

@@ -265,6 +265,19 @@ class TestDriveGate:
         shown = [m for m in d.log.lines if m.startswith('Starting in') or m == 'Driving.']
         assert shown == [f'Starting in {n}...' for n in (5, 4, 3, 2, 1)] + ['Driving.']
 
+    def test_the_still_segments_before_the_move_hold_their_steering(
+        self, md, monkeypatch, tmp_path
+    ):
+        # A plan that turns the wheels before rolling (F38's curved runs)
+        # keeps that steering through its still segment, with the switch guarded.
+        d, held, _ = self._driver(md, monkeypatch, tmp_path)
+        plan = [(0.0, 0.25, 2.0), (0.1, 0.25, 1.0), (0.0, 0.0, 1.0)]
+        assert d.drive('straight025', segments=plan) is not None
+        still = [(speed, steer, need_rb) for speed, steer, need_rb in held if need_rb]
+        assert (0.0, 0.25, True) in still
+        first_move = next(i for i, (speed, _, _) in enumerate(held) if speed != 0.0)
+        assert held[first_move - 1][1] == 0.25
+
     def test_runs_go_out_as_drive_values_for_their_mps(self, md, monkeypatch, tmp_path):
         d, held, _ = self._driver(md, monkeypatch, tmp_path)
         assert d.drive('straight10') is not None
