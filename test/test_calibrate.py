@@ -61,6 +61,13 @@ class TestSteps:
 
     def test_four_steps_lidar_first(self, cal):
         assert cal.STEP_KEYS == ['lidar', 'odom', 'steering', 'dynamics']
+        # Upstream's tool names: a typo here would read "not installed" for good.
+        assert [s.tool for s in cal.STEPS] == [
+            'calibrate_lidar.py',
+            'calibrate_odom.py',
+            'calibrate_steering.py',
+            'calibrate_dynamics.py',
+        ]
         assert not {'imu', 'mag', 'realsense'} & set(cal.STEP_KEYS)
 
 
@@ -494,8 +501,12 @@ class TestNeoRacer:
             step = next(s for s in cal.STEPS if s.key == key)
             for text in (step.position, step.check):
                 if text:
-                    assert 'Flip the mode switch UP to stop.' in text, key
-                    assert 'mode switch DOWN (autonomy)' in text, key
+                    assert text.endswith(cal.DEADMAN), key
+        # The switch latches: start up, and the handset going off is no stop.
+        assert 'Start with the mode switch UP (manual).' in cal.DEADMAN
+        assert 'Flip the mode switch UP to stop.' in cal.DEADMAN
+        assert 'mode switch is DOWN (autonomy)' in cal.DEADMAN
+        assert 'Turning the handset off does not stop the car.' in cal.DEADMAN
         source = (cal.HERE / 'calibrate.py').read_text()
         assert 'Hold RB' not in source
 
@@ -522,6 +533,10 @@ class TestNeoRacer:
         out = capsys.readouterr().out
         assert 'calibrate_lidar.py is not in this driver yet; nothing to check.' in out
         assert '2 not installed' in out and ran == []
+        # Nothing was checked, so the result is a warning; the exit code stays 0.
+        assert 'RESULT WARN  0 pass  0 warn  0 fail  0 skipped  2 not installed' in out
+        # A step that cannot run asks for no setup.
+        assert cal.NOTHING_TO_SET_UP in out and 'mode switch' not in out
         answers += ['', 'n']
         assert cal.run_steps([s for s in cal.STEPS if s.key == 'steering']) == 0
         assert 'steering   not installed' in capsys.readouterr().out

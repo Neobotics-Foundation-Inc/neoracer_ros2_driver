@@ -1084,15 +1084,20 @@ Commands:
                                       the car drives itself
                           odom        gyro yaw scale (circles) and encoder
                                       speed scale (straight drive), both
-                                      against the lidar
+                                      against the lidar; you drive the car
+                                      with the handset, mode switch UP
+                                      (manual)
                           steering    steering trim, set in the ESP32
                                       firmware (trim set), with a copy in the
                                       car profile; the car drives itself
                           dynamics    steering angles, servo time, speeds
                                       and stop distances for the simulator;
                                       the car drives itself; no check
-                        The car drives itself only with the handset's mode
-                        switch DOWN (autonomy). Flip it UP to stop.
+                        A step that drives the car by itself drives only
+                        while the handset's mode switch is DOWN (autonomy).
+                        Start with the switch UP and flip it DOWN when the
+                        step asks. Flip it UP to stop. Turning the handset
+                        off does not stop the car.
                         No arguments: all but dynamics.
                         `racecar calibrate status` lists what is calibrated
                         on this car, when, and the stored values.

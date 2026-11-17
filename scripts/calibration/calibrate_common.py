@@ -9,9 +9,9 @@ them at launch, so a teleop restart applies them. The steering trim is the
 exception: it lives in the ESP32 firmware (`trim set`), and the profile keeps
 a copy.
 
-The NeoRacer has no IMU, magnetometer or RealSense calibration step: the ESP32
-fuses and bias-corrects the IMU on board, so upstream's IMU bias tools and
-their shared code are not here.
+The NeoRacer has no IMU, magnetometer or RealSense calibration step.
+Upstream's steps calibrate the LSM9DS1 and the RealSense, which the NeoRacer
+does not have, so their shared IMU code is not here.
 """
 
 from __future__ import annotations
