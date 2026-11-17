@@ -410,6 +410,7 @@ Settings live in `config/inference.yaml`:
 | `max_detections` | 10 | Cap per frame |
 | `class_filter` | all | Class indices to keep, e.g. `[0, 2]`; omit the key for every class |
 | `max_rate_hz` | 15.0 | Ceiling on inference rate |
+| `pause_while_mapping` | true | Drops the camera subscription while `/autonomy/status` reports mapping; the model stays loaded |
 | `publish_annotated` | false | Overlay on `/edgetpu/inference/image`, encoded only while subscribed |
 
 Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo26n.pt` averages 50.1 ms per frame; the TensorRT engine cuts that to 20.9 ms, which clears the `max_rate_hz` ceiling of 15 Hz with headroom to spare.
