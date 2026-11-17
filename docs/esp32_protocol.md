@@ -78,19 +78,27 @@ The controller sends these lines between `v` lines and reads the replies; it
 does not publish them. `board.steering_trim_deg` on `controller_node` shows the
 board's trim:
 
+- The controller sends these commands only when the car is still: the
+  `/motor` speed has been 0 for at least 1 s. While it waits for a reply it
+  sends no `v` lines, and `trim set` moves the steering to the new centre at
+  once.
 - At start the controller sends `trim get` every 2 s, up to five times, and
-  sets the parameter from the reply. Until then, or when the board never
-  answers, the parameter is NaN and cannot be set.
+  sets the parameter from the reply. An attempt while the car drives waits
+  for the next one and is not counted. Until the board answers, or when it
+  never answers, the parameter is NaN and cannot be set.
 - Setting it (`ros2 param set /controller_node board.steering_trim_deg -1.5`,
   or `racecar calibrate steering`) sends `trim set`, then `trim get`, and the
   change is accepted only when the board answers OK and reads the new value
-  back to two decimals. Each reply is awaited for 0.3 s.
+  back to two decimals. Each reply is awaited for 0.3 s. A change while the
+  car drives is rejected before anything is sent.
 - A value that is not a finite number of degrees inside the board's range is
-  refused before anything is sent: the firmware clamps the range but saves
+  rejected before anything is sent: the firmware clamps the range but saves
   NaN as it is.
-- When a write is refused after the board changed, the controller sets the
-  old trim back. If that fails too, the parameter turns unknown until teleop
-  restarts.
+- When a write is rejected after the board changed, the controller sets the
+  old trim back. If that fails too, the controller reads the board's trim
+  again, as at start, and the trim cannot be set until it has.
+- A board that holds NaN (full lock) shows NaN, and the controller log says
+  so. Setting a finite trim replaces it; NaN is never sent back.
 
 The driver's own `steering_trim_deg` stays 0; a car that had one gets it folded
 into the board's trim by `racecar calibrate steering`.

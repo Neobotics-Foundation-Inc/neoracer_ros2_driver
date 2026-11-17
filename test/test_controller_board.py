@@ -1,8 +1,11 @@
 """The controller's board.steering_trim_deg against a scripted board (no serial port)."""
 
+import inspect
 import math
 import re
 import sys
+import threading
+import time
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -62,10 +65,21 @@ class Log:
     def __init__(self):
         self.lines = []
 
-    def info(self, msg):
+    def info(self, msg, **kwargs):
         self.lines.append(msg)
 
     warn = error = info
+
+
+class Timer:
+    def __init__(self):
+        self.cancels = self.resets = 0
+
+    def cancel(self):
+        self.cancels += 1
+
+    def reset(self):
+        self.resets += 1
 
 
 def _node(board, known=True):
@@ -74,7 +88,12 @@ def _node(board, known=True):
     node._board_range = (-5.0, 5.0)
     node._board_known = known
     node._board_syncing = False
+    node._board_tries = 0
+    node._board_timer = Timer()
+    node._last_motion = -math.inf
     node._board_command = board.command
+    node.shown = []
+    node._show_board_trim = node.shown.append
     log = Log()
     node.get_logger = lambda: log
     return node
@@ -111,21 +130,22 @@ def test_a_write_the_board_did_not_save_is_put_back():
     assert board.sent == ['trim set -1.50', 'trim get', 'trim set -1.00', 'trim get']
 
 
-def test_a_write_the_board_does_not_read_back_is_refused():
+def test_a_write_the_board_does_not_read_back_is_rejected():
     board = Board(mode='stuck')
     accepted, reason = _node(board)._write_board_trim(-1.5)
     assert not accepted and '-1.00' in reason and board.trim == -1.0
 
 
-def test_a_silent_board_leaves_the_trim_unknown():
+def test_a_silent_board_leaves_the_trim_unknown_and_read_again():
     board = Board(mode='silent')
     node = _node(board)
     accepted, reason = node._write_board_trim(-1.5)
     assert not accepted and 'did not answer' in reason
-    assert not node._board_known
+    assert not node._board_known and math.isnan(node._board_trim)
+    assert node._board_tries == 0 and node._board_timer.resets == 1
 
 
-def test_the_parameter_callback_refuses_a_bad_value_and_passes_other_parameters():
+def test_the_parameter_callback_rejects_a_bad_value_and_passes_other_parameters():
     board = Board()
     node = _node(board)
     bad = node._on_set_parameters([SimpleNamespace(name=node._BOARD_PARAM, value=9.0)])
@@ -142,3 +162,135 @@ def test_the_read_at_start_does_not_write_the_board():
     node._board_syncing = True
     result = node._on_set_parameters([SimpleNamespace(name=node._BOARD_PARAM, value=-1.0)])
     assert result.successful and board.sent == []
+
+
+# ---- Review fixes: no board command while the car drives; NaN is never sent ----
+
+
+def test_no_board_command_while_the_car_drives():
+    # A silent board would pause the v lines past the board's 500 ms timeout.
+    board = Board()
+    node = _node(board)
+    node._last_motion = time.monotonic()
+    accepted, reason = node._write_board_trim(-1.5)
+    assert not accepted and 'the car is driving' in reason
+    assert board.sent == [] and board.trim == -1.0
+
+
+def test_a_write_goes_through_once_the_car_has_been_still_for_a_second():
+    board = Board()
+    node = _node(board)
+    node._last_motion = time.monotonic() - node._BOARD_STILL_SEC - 0.1
+    assert node._write_board_trim(-1.5) == (True, '')
+
+
+@pytest.mark.parametrize(
+    'speed,moving', [(0.0, False), (0.0005, False), (0.05, True), (-0.05, True), (math.nan, True)]
+)
+def test_the_motor_command_marks_the_car_moving(speed, moving):
+    node = _node(Board())
+    node.serial = SimpleNamespace(write=lambda data: None)
+    node.serial_lock = threading.Lock()
+    node.max_speed_mps, node.max_steering_angle_deg, node.steering_trim_deg = 6.0, 30.0, 0.0
+    node.get_clock = lambda: SimpleNamespace(now=lambda: 0)
+    msg = SimpleNamespace(drive=SimpleNamespace(speed=speed, steering_angle=0.3))
+    node.motor_callback(msg)
+    assert node._car_moving() is moving
+
+
+def test_the_start_read_waits_while_the_car_drives():
+    board = Board()
+    node = _node(board, known=False)
+    node._last_motion = time.monotonic()
+    node._read_board_trim()
+    assert board.sent == [] and node._board_tries == 0 and not node._board_known
+
+
+def test_the_start_read_shows_the_boards_trim():
+    board = Board()
+    node = _node(board, known=False)
+    node._read_board_trim()
+    assert node._board_known and node._board_trim == -1.0 and node.shown == [-1.0]
+    assert node._board_timer.cancels == 1
+
+
+def test_a_board_that_never_answers_shows_unknown():
+    board = Board(mode='silent')
+    node = _node(board, known=False)
+    for _ in range(node._BOARD_READ_TRIES):
+        node._read_board_trim()
+    assert board.sent == ['trim get'] * node._BOARD_READ_TRIES
+    assert math.isnan(node.shown[-1]) and node._board_timer.cancels == 1
+
+
+def test_a_board_that_holds_nan_is_reported_and_never_sent_nan():
+    # The July audit: `trim set nan` turns the steering to full lock and is saved.
+    board = Board(trim=math.nan)
+    node = _node(board, known=False)
+    node._read_board_trim()
+    assert node._board_known and math.isnan(node.shown[-1])
+    assert any('not a number' in line for line in node.get_logger().lines)
+    board.mode = 'silent'
+    accepted, _ = node._write_board_trim(0.0)
+    assert not accepted
+    assert board.sent == ['trim get', 'trim set 0.00', 'trim get']
+    assert node._board_timer.resets == 1
+
+
+def test_a_board_that_holds_nan_takes_a_finite_trim():
+    board = Board(trim=math.nan)
+    node = _node(board)
+    assert node._write_board_trim(0.0) == (True, '')
+    assert board.trim == 0.0
+
+
+class Serial:
+    """Answers each written line from another thread, as the serial reader would."""
+
+    def __init__(self, node, replies):
+        self.node = node
+        self.replies = replies
+        self.written = []
+
+    def write(self, data):
+        self.written.append(data.decode())
+        lines = self.replies.pop(0) if self.replies else []
+        threading.Thread(target=lambda: [self.node._board_reply(r) for r in lines]).start()
+
+
+def _wired(replies):
+    node = controller.ControllerNode.__new__(controller.ControllerNode)
+    node._board_cmd_lock = threading.Lock()
+    node._board_waiting = None
+    node.serial_lock = threading.Lock()
+    node.serial = Serial(node, replies)
+    node._BOARD_REPLY_TIMEOUT = 0.2
+    log = Log()
+    node.get_logger = lambda: log
+    return node
+
+
+def test_the_reader_hands_the_awaited_reply_to_the_command():
+    reply = 'TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg'
+    node = _wired([['OK: steering trim=-1.00deg save queued', reply]])
+    assert node._board_command('trim get\n', ('TRIM:',)) == reply
+    assert node.serial.written == ['trim get\n'] and node._board_waiting is None
+
+
+def test_a_command_without_a_reply_returns_none_after_the_wait():
+    node = _wired([[]])
+    started = time.monotonic()
+    assert node._board_command('trim get\n', ('TRIM:',)) is None
+    assert 0.15 < time.monotonic() - started < 1.0
+
+
+def test_an_error_line_nobody_waits_for_is_logged():
+    node = _wired([])
+    node._board_reply('ERROR: firmware update active')
+    node._board_reply('TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg')
+    assert node.get_logger().lines == ['ESP32: ERROR: firmware update active']
+
+
+def test_a_parameter_file_never_sets_the_shown_trim():
+    source = inspect.getsource(controller.ControllerNode._setup_board_trim)
+    assert 'ignore_override=True' in source

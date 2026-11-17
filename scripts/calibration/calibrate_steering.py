@@ -590,6 +590,9 @@ class SteeringCalibrator:
             rows.append(turn)
         log_block(log, result_lines(rows))
         new = new_board_trim(board, driver_trim, correction)
+        if not math.isfinite(new):
+            log.error(f'The trim came out as {new}, not a number of degrees. Nothing written.')
+            return 1
         if abs(new - board) < MIN_TRIM_STEP_DEG and abs(driver_trim) < 1e-9:
             log.info(
                 status_line(
@@ -610,6 +613,18 @@ class SteeringCalibrator:
 
     def _write(self, board: float, driver_trim: float, new: float) -> int:
         log = self.log
+        # The runs measured with the trims read before them; a change since
+        # then makes the correction wrong.
+        now = self._board_now()
+        if now is None:
+            return 1
+        if abs(now[0] - board) > TRIM_TOL_DEG or abs(now[1] - driver_trim) > 1e-9:
+            log.error(
+                f'The trims changed during the runs: board {board:+.2f} -> {now[0]:+.2f} deg, '
+                f'driver {driver_trim:+.2f} -> {now[1]:+.2f} deg. Nothing written. Run the '
+                'step again.'
+            )
+            return 1
         written = self._keep_copy(board)
         accepted, reason = self.write_board(new)
         if not accepted:
@@ -617,10 +632,15 @@ class SteeringCalibrator:
                 f'The board did not take the trim: {reason}. The board keeps {board:+.2f} deg.'
             )
             return 1
+        # The controller accepts the write only after the board reads it back,
+        # so a parameter read that does not answer still records the new trim.
         back = self.live_values()
         read = back.get(BOARD_PARAM) if back else None
-        if read is None or abs(read - new) > TRIM_TOL_DEG:
-            log.error(f'The controller reads {read} deg after the write, not {new:+.2f} deg.')
+        if read is not None and abs(read - new) > TRIM_TOL_DEG:
+            log.error(
+                f'The controller reads {read:+.2f} deg after writing {new:+.2f} deg. The '
+                f'profile copy keeps {board:+.2f} deg. Check: racecar calibrate status'
+            )
             return 1
         written += update_local_values(
             CAL_NAME, {'trim_deg': new, 'previous_trim_deg': round(board, 2)}, TOOL
@@ -635,7 +655,8 @@ class SteeringCalibrator:
                 f'The driver trim {driver_trim:+.2f} deg is now on the board. Restart teleop so '
                 f'{DRIVER_TRIM_PARAM} loads 0: racecar service restart teleop'
             )
-        lines += [f'Wrote {path}' for path in written]
+        # The copy kept before the write and the one after it are one file.
+        lines += [f'Wrote {path}' for path in dict.fromkeys(written)]
         log_block(log, result_lines(lines))
         return 0
 

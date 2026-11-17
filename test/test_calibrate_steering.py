@@ -268,3 +268,84 @@ class TestNeoRacer:
         arc = st.measure_arc(bag, laser, -0.5)
         assert arc.curvature == pytest.approx(kappa, rel=0.01)
         assert arc.heading_deg == pytest.approx(22.0, abs=0.2)
+
+
+class Log:
+    def __init__(self):
+        self.lines = []
+
+    def info(self, msg):
+        self.lines.append(msg)
+
+    error = warn = info
+
+
+class TestWrite:
+    """The write after the runs, against a scripted controller (review fixes)."""
+
+    @staticmethod
+    def _calibrator(st, board=-1.0, driver=0.0, accept=True):
+        cal = st.SteeringCalibrator.__new__(st.SteeringCalibrator)
+        cal.log = Log()
+        state = {'board': board, 'driver': driver, 'writes': [], 'answer': True}
+
+        def live_values():
+            if not state['answer']:
+                return None
+            return {st.BOARD_PARAM: state['board'], st.DRIVER_TRIM_PARAM: state['driver']}
+
+        def write_board(value):
+            # The profile copy as it stands when the board is written.
+            state['writes'].append((value, st.profile_copy()))
+            if not accept:
+                return False, 'the board answered: ERROR: NVS save queue full'
+            state['board'] = value
+            if state.get('silent_after'):
+                state['answer'] = False
+            return True, ''
+
+        cal.live_values = live_values
+        cal.write_board = write_board
+        return cal, state
+
+    @staticmethod
+    def _steering(car_profile_dir):
+        import yaml
+
+        path = car_profile_dir / 'params' / 'steering.yaml'
+        return yaml.safe_load(path.read_text()) if path.exists() else None
+
+    def test_the_board_trim_is_saved_before_the_write(self, st, car_profile_dir):
+        cal, state = self._calibrator(st)
+        assert cal._write(-1.0, 0.0, -1.75) == 0
+        assert state['writes'] == [(-1.75, -1.0)]
+        assert self._steering(car_profile_dir) == {'trim_deg': -1.75, 'previous_trim_deg': -1.0}
+        assert sum('Wrote' in line and 'steering.yaml' in line for line in cal.log.lines) == 1
+
+    def test_a_rejected_write_keeps_the_baseline_copy(self, st, car_profile_dir):
+        cal, state = self._calibrator(st, accept=False)
+        assert cal._write(-1.0, 0.0, -1.75) == 1
+        assert self._steering(car_profile_dir) == {'trim_deg': -1.0}
+        assert any('The board keeps -1.00 deg' in line for line in cal.log.lines)
+
+    def test_a_trim_changed_during_the_runs_writes_nothing(self, st, car_profile_dir):
+        cal, state = self._calibrator(st, board=-1.5)
+        assert cal._write(-1.0, 0.0, -1.75) == 1
+        assert state['writes'] == [] and self._steering(car_profile_dir) is None
+
+    def test_the_driver_trim_is_folded_and_set_to_zero_in_the_profile(self, st, car_profile_dir):
+        from neoracer_ros2_driver import car_profile
+
+        cal, state = self._calibrator(st, driver=0.5)
+        assert cal._write(-1.0, 0.5, -1.25) == 0
+        params = car_profile.node_params('controller', st.NODE, None)
+        assert params[st.DRIVER_TRIM_PARAM] == 0.0
+        assert any('racecar service restart teleop' in line for line in cal.log.lines)
+
+    def test_a_read_back_that_does_not_answer_still_records_the_confirmed_trim(
+        self, st, car_profile_dir
+    ):
+        cal, state = self._calibrator(st)
+        state['silent_after'] = True
+        assert cal._write(-1.0, 0.0, -1.75) == 0
+        assert self._steering(car_profile_dir)['trim_deg'] == -1.75

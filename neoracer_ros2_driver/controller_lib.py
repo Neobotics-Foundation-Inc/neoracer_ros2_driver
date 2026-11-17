@@ -362,8 +362,25 @@ def is_board_reply(line: str) -> bool:
     return line.startswith(BOARD_REPLY_PREFIXES)
 
 
+# A /motor speed within this of 0 leaves the car still.
+STILL_SPEED = 1e-3
+
+
+def motor_moving(speed: float) -> bool:
+    """
+    Return whether a /motor speed drives the car.
+
+    NaN counts as driving: clamp() turns it into full speed.
+    """
+    return not abs(speed) <= STILL_SPEED
+
+
 def parse_trim_reply(line: str) -> tuple[float, float, float] | None:
-    """Return (trim_deg, low_deg, high_deg) from a `trim get` reply, or None."""
+    """
+    Return (trim_deg, low_deg, high_deg) from a `trim get` reply, or None.
+
+    trim_deg is NaN when the board holds NaN; the range is always finite.
+    """
     match = _TRIM_REPLY.match(line.strip())
     if match is None:
         return None

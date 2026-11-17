@@ -1,5 +1,6 @@
 """Unit tests for the ESP32 bridge helpers in controller_lib (no ROS required)."""
 
+import math
 from pathlib import Path
 import re
 
@@ -366,7 +367,7 @@ def test_a_write_is_accepted_only_when_the_board_reads_it_back():
     assert cl.trim_write_outcome(-1.504, ok_reply, read_back)[0]
 
 
-def test_a_write_is_refused_without_ok_or_without_the_read_back():
+def test_a_write_is_rejected_without_ok_or_without_the_read_back():
     read_back = 'TRIM: -1.50deg center_pwm=1475us range=-5.0..5.0deg'
     full = 'ERROR: steering trim=-1.50deg active, NVS save queue full'
     assert cl.trim_write_outcome(-1.5, full, read_back) == (False, f'the board answered: {full}')
@@ -375,3 +376,15 @@ def test_a_write_is_refused_without_ok_or_without_the_read_back():
     stale = 'TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg'
     accepted, reason = cl.trim_write_outcome(-1.5, 'OK: steering trim=-1.50deg', stale)
     assert not accepted and '-1.00' in reason
+
+
+def test_a_board_holding_nan_reads_as_nan_with_its_range():
+    trim, low, high = cl.parse_trim_reply('TRIM: nandeg center_pwm=1000us range=-5.0..5.0deg')
+    assert math.isnan(trim) and (low, high) == (-5.0, 5.0)
+
+
+def test_only_a_motor_speed_of_zero_leaves_the_car_still():
+    assert not cl.motor_moving(0.0) and not cl.motor_moving(-0.0005)
+    assert cl.motor_moving(0.01) and cl.motor_moving(-1.0)
+    # clamp() turns NaN into full speed, so NaN drives.
+    assert cl.motor_moving(float('nan'))
