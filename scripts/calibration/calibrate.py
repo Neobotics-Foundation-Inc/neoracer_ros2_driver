@@ -13,15 +13,18 @@ neoracer_ros2_driver.car_profile), outside the driver folder; launch reads
 it, so no rebuild is needed. The steering trim is set in the ESP32 firmware
 (`trim set`), which also trims manual driving; the profile keeps a copy.
 
-The NeoRacer runs four steps: lidar, odom, steering and dynamics. Its IMU is
-fused and bias-corrected on the ESP32, so upstream's imu, mag and realsense
-steps are not here. A step whose tool is not installed reports so instead of
-failing.
+The NeoRacer runs four steps: lidar, odom, steering and dynamics. Upstream's
+imu, mag and realsense steps calibrate the LSM9DS1 and the RealSense, which
+the NeoRacer does not have. Its IMU is fused on the ESP32, which also tracks
+the gyro bias at rest. A step whose tool is not installed reports so instead
+of failing.
 
 Where a step drives the car by itself, upstream holds RB on the gamepad. On
 the NeoRacer that is the handset's mode switch: down (autonomy) lets the car
 drive, up (manual) stops it. A switch stays where it is put, so the setup text
-of every such step says how to stop.
+of every such step says to start with the switch up and how to stop. With the
+switch down, the firmware keeps following the Jetson when the handset goes
+off, so the text also says that turning the handset off does not stop the car.
 """
 
 from __future__ import annotations
@@ -57,22 +60,25 @@ from calibrate_common import (  # noqa: E402, I100
 TELEOP_UNIT = 'neoracer-teleop'
 RUN_PROMPT = 'Press Enter to run, s to skip, and q to stop: '
 RUN_PROMPT_BACK = 'Press Enter to run, s to skip, b to go back a step, and q to stop: '
+# The handset's mode switch is the deadman of every step that drives the car.
+DEADMAN = (
+    'Turn the handset on and keep it in your hand.\n'
+    'Start with the mode switch UP (manual).\n'
+    'The car drives itself only while the mode switch is DOWN (autonomy).\n'
+    'Flip it DOWN only when the step asks.\n'
+    'Flip the mode switch UP to stop. Turning the handset off does not stop the car.'
+)
 LIDAR_SETUP = (
-    'Use a clear straight path of about 2 meters with walls or furniture nearby.\n'
-    'Turn the handset on. The car drives itself only with the mode switch DOWN (autonomy).\n'
-    'Flip the mode switch UP to stop.'
+    'Use a clear straight path of about 2 meters with walls or furniture nearby.\n' + DEADMAN
 )
 STEERING_SETUP = (
-    'Use a clear area of about 3 by 3 meters surrounded by walls or furniture.\n'
-    'Turn the handset on. The car drives itself only with the mode switch DOWN (autonomy).\n'
-    'Flip the mode switch UP to stop.'
+    'Use a clear area of about 3 by 3 meters surrounded by walls or furniture.\n' + DEADMAN
 )
 DYNAMICS_SETUP = (
     'Use a clear straight path of about 4 meters with walls or furniture nearby.\n'
-    'Use a clear area of about 2.3 by 1.6 meters for driving circles.\n'
-    'Turn the handset on. The car drives itself only with the mode switch DOWN (autonomy).\n'
-    'Flip the mode switch UP to stop.'
+    'Use a clear area of about 2.3 by 1.6 meters for driving circles.\n' + DEADMAN
 )
+NOTHING_TO_SET_UP = 'Setup: none. This step is not installed.'
 # calibrate_dynamics.py writes these; per speed (0.25, 0.5, 1.0) and per side.
 DYNAMICS_KEYS = tuple(
     [
@@ -323,7 +329,7 @@ def run_steps(steps: list[Step]) -> int:
 
     def header(i: int) -> None:
         print(f'\n=== {i + 1}/{len(steps)} {steps[i].label} ===')
-        print(setup_text(steps[i].position))
+        print(setup_text(steps[i].position) if steps[i].installed else NOTHING_TO_SET_UP)
 
     def run(i: int) -> tuple[Step, str, dict[str, Any], dict[str, Any]]:
         step = steps[i]
@@ -388,7 +394,8 @@ def summary_lines(
         paint(f'{counts[v]} {v.lower()}', v, color and counts[v] > 0)
         for v in ('PASS', 'WARN', 'FAIL')
     )
-    worst = 'FAIL' if counts['FAIL'] else 'WARN' if counts['WARN'] else 'PASS'
+    # A step with no tool installed checked nothing, so it cannot count as a pass.
+    worst = 'FAIL' if counts['FAIL'] else 'WARN' if counts['WARN'] or missing else 'PASS'
     lines.append(
         f'RESULT {paint(worst, worst, color, bold=True)}  {tallies}  {skipped} skipped'
         + (f'  {not_run} not run' if not_run else '')
@@ -403,7 +410,7 @@ def run_checks(steps: list[Step]) -> int:
 
         def header(i: int) -> None:
             print(f'\n=== Check {i + 1}/{len(steps)}: {steps[i].label} ===')
-            print(setup_text(steps[i].check))
+            print(setup_text(steps[i].check) if steps[i].installed else NOTHING_TO_SET_UP)
 
         def run(i: int) -> tuple[Step, str, list[Criterion]]:
             step = steps[i]

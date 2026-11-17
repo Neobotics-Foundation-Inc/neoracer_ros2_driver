@@ -45,17 +45,22 @@ controller_node:
     publish_joy: true           # synthesize /joy from the FlySky "r" channels
 
     # ================= FlySky RC -> /joy mapping =================
-    # The ESP32 "r" line carries 10 RC channels (ints; -1 == transmitter off).
-    # Channel ORDER depends on the FlySky transmitter mixer, so the indices below
-    # are a starting point - confirm them on-car with `ros2 topic echo /joy` while
-    # moving each stick/switch, then adjust. Indices are 0-based into "r".
+    # The ESP32 "r" line carries 10 RC channels as raw SBUS counts, 0 to 2047,
+    # and -1 on every channel on receiver failsafe. With the mode switch down
+    # (autonomy) a lost handset is not reported: the line repeats the last values.
+    # Indices are 0-based into "r": steering 0, throttle 2, mode switch 6
+    # (radio Ch7), speed switch 7 (radio Ch8), confirmed on the dev car's handset.
     #
-    # Pulse-width calibration (microseconds):
-    rc_min: 1000
-    rc_center: 1500
-    rc_max: 2000
+    # SBUS count calibration, measured on the dev car's handset (2026-11-11):
+    # sticks 240 to 1807, centre 1023. A handset with other end points gets
+    # its own values in the car profile, params/controller.yaml. When the
+    # calibration changes, recompute mode_high_thresh below as
+    # (1500 - rc_center) / (rc_max - rc_center).
+    rc_min: 240
+    rc_center: 1023
+    rc_max: 1807
     rc_deadband: 0.05           # normalized; |value| below this snaps to 0
-    rc_failsafe_below: 500      # any channel below this is treated as no-signal -> neutral
+    rc_failsafe_below: 0        # only the firmware's -1 is no-signal -> neutral
 
     # Joy frame shape. Triggers (axes 2 & 5) rest at +1.0 to match the Xbox
     # convention the student library and the mux arming check assume.
@@ -66,19 +71,23 @@ controller_node:
     # Driving sticks. axes[1]=throttle and axes[3]=steering match gamepad_node
     # defaults and the student library's left-stick-Y / right-stick-X reads.
     throttle_axis: 1
-    throttle_channel: 2         # FlySky ch3 (e.g. left stick Y) - VERIFY on-car
+    throttle_channel: 2         # radio Ch3, the throttle stick
     throttle_sign: 1
     steering_axis: 3
-    steering_channel: 0         # FlySky ch1 (e.g. right stick X) - VERIFY on-car
+    steering_channel: 0         # radio Ch1, the right stick
     steering_sign: 1
 
-    # 3-position mode switch -> manual / autonomy enable buttons (mux reads 4 & 5).
-    # below mid_thresh => idle, between => manual (button 4 / LB),
-    # at/above high_thresh => autonomy (button 5 / RB).
-    mode_channel: 4             # FlySky ch5 (an aux switch) - VERIFY on-car
-    mode_mid_thresh: -0.5
-    mode_high_thresh: 0.5
-    mode_idle_button: -1        # -1 = set no button when switch is low
+    # Mode switch -> manual / autonomy enable buttons (button 4 / LB, button 5 / RB).
+    # The ESP32 firmware selects who drives from the mode switch: a count below 1500
+    # (switch up, or the middle position) is manual, 1500 or more (switch down)
+    # is autonomy. The thresholds below give the same two states on /joy:
+    # (1500 - 1023) / (1807 - 1023) = 0.608, and nothing reads as idle.
+    # The mux runs with autonomy_passthrough on, so these buttons do not gate
+    # driving; they let the student controller API see the switch.
+    mode_channel: 6             # radio Ch7, the mode switch
+    mode_mid_thresh: -1.0
+    mode_high_thresh: 0.608
+    mode_idle_button: -1        # -1 = no button; only a failsafe frame sets no button
     mode_manual_button: 4
     mode_autonomy_button: 5
 
