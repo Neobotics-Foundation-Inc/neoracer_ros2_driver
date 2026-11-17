@@ -427,8 +427,13 @@ class DriveYawCalibrator:
         """Drive one placement; return its good legs, or None to offer it again."""
         from calibrate_dynamics import read_bag
 
+        from calibrate_dynamics import ArmTimeout
+
         bag = self.driver.drive('yaw', self.segments, prefix='lidar')
         if bag is None:
+            # No flip within the wait ends the step; a stop offers the placement again.
+            if self.driver.timed_out:
+                raise ArmTimeout
             return None
         self.log.info('Analyzing the run...')
         legs = measure_legs(read_bag(bag), self.laser)
@@ -456,8 +461,25 @@ class DriveYawCalibrator:
         return good
 
     def run(self) -> int:
+        from calibrate_dynamics import (
+            ArmTimeout,
+            file_limits,
+            limit_problems,
+            LIMITS_ADVICE,
+            TIMEOUT_ADVICE,
+        )
+
         try:
+            problems = limit_problems(self.driver.live_limits(), file_limits())
+            if problems:
+                for problem in problems:
+                    self.log.error(problem)
+                self.log.error(LIMITS_ADVICE)
+                return 1
             return self._check() if self.check else self._calibrate()
+        except ArmTimeout:
+            self.log.error(TIMEOUT_ADVICE)
+            return 1
         finally:
             self.driver.close()
 

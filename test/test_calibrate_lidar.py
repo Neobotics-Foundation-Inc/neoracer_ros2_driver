@@ -257,6 +257,58 @@ class TestDrivePlan:
         assert cal.missing_drive_tools(tmp_path) == []
 
 
+class _Log:
+    def __init__(self):
+        self.lines = []
+
+    def info(self, m):
+        self.lines.append(m)
+
+    error = info
+
+
+@NEEDS_DRIVE_TOOLS
+class TestDriveGuards:
+    def _calibrator(self, cal, monkeypatch, live_problem=None):
+        md = _load('calibrate_dynamics')
+        common = _load('calibrate_common')
+
+        class Driver:
+            timed_out = True
+            closed = False
+
+            def drive(self, *a, **k):
+                return None
+
+            def live_limits(self):
+                return {}
+
+            def close(self):
+                Driver.closed = True
+
+        c = cal.DriveYawCalibrator.__new__(cal.DriveYawCalibrator)
+        c.driver, c.log, c.check, c.report, c.segments = Driver(), _Log(), False, None, []
+        problems = [] if live_problem is None else [live_problem]
+        monkeypatch.setattr(md, 'limit_problems', lambda live, files: problems)
+        monkeypatch.setattr(md, 'file_limits', lambda: {})
+        monkeypatch.setattr(common, 'run_sequence', lambda n, show, run, *a, **k: {0: run(0)})
+        return c, md, Driver
+
+    def test_a_timeout_ends_the_step_with_nothing_written(self, cal, monkeypatch):
+        c, md, driver = self._calibrator(cal, monkeypatch)
+        monkeypatch.setattr(cal, 'write_yaw', lambda *a: pytest.fail('a yaw was written'))
+        assert c.run() == 1
+        assert md.TIMEOUT_ADVICE in c.log.lines
+        assert driver.closed
+
+    def test_live_limits_that_differ_stop_before_any_placement(self, cal, monkeypatch):
+        c, md, driver = self._calibrator(cal, monkeypatch, live_problem='throttle_node differs')
+        c.placement = lambda: pytest.fail('a placement was driven')
+        assert c.run() == 1
+        assert c.log.lines == ['throttle_node differs', md.LIMITS_ADVICE]
+        assert driver.closed
+
+
 @NEEDS_DRIVE_TOOLS
 class TestMeasureLegs:
     def test_forward_and_reverse_from_a_simulated_run(self, cal):

@@ -36,8 +36,13 @@ both sides. The side is the way the gyro says the car turned.
 
 A run starts only after the mode switch has been seen UP and then DOWN since
 the run began, so a switch left DOWN from an earlier run does not start the
-car. Without that flip within ARM_TIMEOUT_SEC the car does not drive, nothing
-is written, and the tool exits with 1.
+car. The car starts about 5 seconds after that flip: a 3 second countdown,
+then the run's 2 seconds at rest. From the flip to the last move the switch
+must stay DOWN and /joy must keep arriving, or the run stops. Without the
+flip within ARM_TIMEOUT_SEC the car does not drive, nothing is written, and
+the tool exits with 1. Before the first run the tool reads the throttle and
+controller limits from the running nodes. When they differ from the files
+the speeds are converted with, nothing drives and the tool exits with 1.
 
 --analyze BAG re-analyzes recorded runs without driving.
 """
@@ -64,6 +69,7 @@ sys.path.insert(0, str(HERE.parent))
 
 from calibrate_common import (  # noqa: E402, I100
     backup_reminder,
+    DEADMAN,
     install_config_dir,
     node_params,
     run_sequence,
@@ -91,6 +97,29 @@ RB_BUTTON = 5  # /joy button 5: set while the mode switch is DOWN (autonomy)
 COUNTDOWN_SEC = 3.0
 # How long a run waits for the mode switch to go UP and then DOWN.
 ARM_TIMEOUT_SEC = 60.0
+# /joy older than this reads as the switch UP. The controller publishes /joy
+# at about 10 Hz; the mux uses the same 0.5 s (joystick_timeout_sec).
+JOY_TIMEOUT_SEC = 0.5
+# How long to wait for a running node's parameters.
+PARAM_TIMEOUT_SEC = 3.0
+# The limits that turn a run's m/s and full lock into the ESP32's command,
+# read from the running nodes and compared with the files.
+LIMIT_PARAMS = {
+    'throttle_node': ('max_speed_forward', 'max_speed_backward', 'max_steering'),
+    'controller_node': ('max_speed_mps', 'max_steering_angle_deg'),
+}
+LIMITS_ADVICE = (
+    'The car did not drive. Restart teleop so the nodes load the files: '
+    'racecar service restart teleop'
+)
+TIMEOUT_ADVICE = 'Nothing was written. Run the step again with the handset on.'
+# A circle run whose gyro curvature is below this did not turn: full lock
+# gives about 1.0 to 1.5 per meter.
+MIN_TURN_CURVATURE = 0.3
+# The straight run's lidar check needs a scan match this good, as
+# calibrate_odom.py's MATCH_MAX_RMS_M and MATCH_MIN_INLIERS.
+LIDAR_MAX_RMS_M = 0.03
+LIDAR_MIN_INLIERS = 0.3
 # The straight runs' speeds (m/s) by the suffix their result keys carry, and
 # the circles' speed: upstream's car at /drive 0.25, 0.5 and 1.0.
 STRAIGHT_MPS = {'025': 0.62, '05': 0.75, '10': 1.0}
@@ -124,16 +153,21 @@ TITLES = {
     'circle_left': 'left-turn circles at full lock, at 0.62 m/s',
 }
 STRAIGHT_PLACE = 'Place the car at the start of the straight path, pointing along it.'
-# At full lock the car sweeps a circle about 2.3 m across. It reaches up to
-# 0.9 m behind its start, 1.7 m ahead and 2.1 m to the inside of the turn.
+# At full lock the car sweeps a circle 1.8 to 2.3 m across: 1.8 to 2.0 m at
+# the hand-driven full-lock radii (0.69 m left, 0.77 m right), 2.3 m if the
+# 18.75 deg command is the inner wheel's angle. In the widest case the body
+# reaches 0.7 m behind the rear axle's start, 1.6 m ahead of it, 2.1 m to the
+# inside of the turn and 0.2 m to the outside, with the 0.8 s lead-in.
 CIRCLE_PLACE = {
     'circle_right': (
-        'Place the car about 1 meter in from one end of the clear area and 0.5 meters '
-        'in from the side on its left, pointing along that side. The car turns right.'
+        'Place the car with its back about 1 meter from one end of the clear area, '
+        'pointing away from that end. Its left side is about 0.5 meters from the left '
+        'edge of the area. The car turns right.'
     ),
     'circle_left': (
-        'Place the car about 1 meter in from one end of the clear area and 0.5 meters '
-        'in from the side on its right, pointing along that side. The car turns left.'
+        'Place the car with its back about 1 meter from one end of the clear area, '
+        'pointing away from that end. Its right side is about 0.5 meters from the right '
+        'edge of the area. The car turns left.'
     ),
 }
 # Wheelbase and track of the NeoRacer (neoracer-mujoco spec, CAD), m.
@@ -452,11 +486,17 @@ def analyze_straight(bag: Bag) -> tuple[dict[str, float], list[str]]:
         match = match_scans(start, end, laser_motion(compose(invert(a), b), laser))
         lidar_m = math.hypot(*base_motion(match.pose, laser)[:2])
         odom_m = float(bag.path_m[-1] - bag.path_m[0])
-        lines.append(
-            f'Run distance: odometry {odom_m:.3f} m, lidar {lidar_m:.3f} m '
-            f'({odom_m / lidar_m - 1:+.2%}; scan match {match.rms_m * 1e3:.1f} mm, '
-            f'{match.inliers:.0%}).'
-        )
+        if match.rms_m > LIDAR_MAX_RMS_M or match.inliers < LIDAR_MIN_INLIERS or lidar_m <= 0:
+            lines.append(
+                f'Run distance: odometry {odom_m:.3f} m. The scans at rest did not match '
+                f'({match.rms_m * 1e3:.1f} mm, {match.inliers:.0%}), so there is no lidar check.'
+            )
+        else:
+            lines.append(
+                f'Run distance: odometry {odom_m:.3f} m, lidar {lidar_m:.3f} m '
+                f'({odom_m / lidar_m - 1:+.2%}; scan match {match.rms_m * 1e3:.1f} mm, '
+                f'{match.inliers:.0%}).'
+            )
     return values, lines
 
 
@@ -493,6 +533,11 @@ def analyze_circle(bag: Bag) -> tuple[dict[str, float], list[str]]:
 
     straight = float(np.nanmedian(curvature(lock[0] - 0.4, lock[0])[1]))
     turning = float(np.nanmedian(curvature(lock[0] + SETTLE_SEC, t_end)[1]))
+    if math.isfinite(turning) and abs(turning) < MIN_TURN_CURVATURE:
+        raise ValueError(
+            f'the gyro shows no turn at full lock ({turning:+.2f} per meter), so nothing '
+            'is stored for this run'
+        )
     side, warning = turn_side(lock[2], turning)
     laser = laser_pose()
     scans = [s for s in bag.scans if lock[0] - 0.5 <= s[0] <= t_end]
@@ -551,6 +596,64 @@ def analyze(bag_path: Path) -> tuple[dict[str, float], list[str]]:
     return analyze_circle(bag) if '_dyn_circle_' in bag_path.name else analyze_straight(bag)
 
 
+def analysis_error(exc: Exception) -> str:
+    """Return why a run could not be analyzed; a missing /motor edge gives an empty message."""
+    return str(exc) or 'the bag has no complete command on /motor'
+
+
+# ---------------------------------------------------------------------------
+# Limits in use
+# ---------------------------------------------------------------------------
+
+
+def file_limits() -> dict[str, dict[str, float]]:
+    """Return the LIMIT_PARAMS values the files give: the config YAMLs plus the car profile."""
+    limits = drive_limits()
+    throttle = node_params('throttle', 'throttle_node')
+    controller = node_params('controller', 'controller_node')
+    return {
+        'throttle_node': {
+            'max_speed_forward': limits.max_forward,
+            'max_speed_backward': limits.max_backward,
+            # The nodes' own defaults when a file does not set the value.
+            'max_steering': float(throttle.get('max_steering', 0.625)),
+        },
+        'controller_node': {
+            'max_speed_mps': limits.max_speed_mps,
+            'max_steering_angle_deg': float(controller.get('max_steering_angle_deg', 30.0)),
+        },
+    }
+
+
+def limit_problems(
+    live: dict[str, dict[str, float | None] | None], files: dict[str, dict[str, float]]
+) -> list[str]:
+    """Return a line for each node that did not answer or runs a limit the files do not give."""
+    problems = []
+    for node, expected in files.items():
+        running = live.get(node)
+        if running is None:
+            problems.append(f'{node} did not answer with its parameters. Is teleop running?')
+            continue
+        for name, value in expected.items():
+            now = running.get(name)
+            if now is None or not math.isclose(now, value, rel_tol=1e-6, abs_tol=1e-9):
+                shown = 'no number' if now is None else f'{now:g}'
+                problems.append(f'{node} runs {name} {shown}; the files give {value:g}.')
+    return problems
+
+
+def parameter_float(value: Any) -> float | None:
+    """Return a double or integer ROS parameter value as a float, else None."""
+    from rcl_interfaces.msg import ParameterType
+
+    if value.type == ParameterType.PARAMETER_DOUBLE:
+        return float(value.double_value)
+    if value.type == ParameterType.PARAMETER_INTEGER:
+        return float(value.integer_value)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Driving
 # ---------------------------------------------------------------------------
@@ -595,6 +698,7 @@ class Driver:
         self.log = self.node.get_logger()
         self.pub = self.node.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.rb = False
+        self.joy_time = -math.inf
         self.arming = Arming()
         self.timed_out = False
         self.node.create_subscription(Joy, '/joy', self._joy, 10)
@@ -604,7 +708,35 @@ class Driver:
 
     def _button(self, down: bool) -> None:
         self.rb = down
+        self.joy_time = time.monotonic()
         self.arming.update(down)
+
+    def switch_down(self) -> bool:
+        """Whether the last /joy had the mode switch DOWN and is at most JOY_TIMEOUT_SEC old."""
+        return self.rb and time.monotonic() - self.joy_time <= JOY_TIMEOUT_SEC
+
+    def live_limits(self) -> dict[str, dict[str, float | None] | None]:
+        """Return the running nodes' LIMIT_PARAMS; None for a node that does not answer."""
+        from rcl_interfaces.srv import GetParameters
+
+        live: dict[str, dict[str, float | None] | None] = {}
+        for node, names in LIMIT_PARAMS.items():
+            client = self.node.create_client(GetParameters, f'/{node}/get_parameters')
+            values: list[Any] = []
+            if client.wait_for_service(timeout_sec=PARAM_TIMEOUT_SEC):
+                future = client.call_async(GetParameters.Request(names=list(names)))
+                self.rclpy.spin_until_future_complete(
+                    self.node, future, timeout_sec=PARAM_TIMEOUT_SEC
+                )
+                result = future.result() if future.done() else None
+                values = list(result.values) if result is not None else []
+            self.node.destroy_client(client)
+            live[node] = (
+                {n: parameter_float(v) for n, v in zip(names, values, strict=True)}
+                if len(values) == len(names)
+                else None
+            )
+        return live
 
     def _send(self, speed: float, steer: float) -> None:
         msg = self.msg_type()
@@ -618,18 +750,23 @@ class Driver:
         while time.monotonic() < end:
             self._send(speed, steer)
             self.rclpy.spin_once(self.node, timeout_sec=1.0 / RATE_HZ)
-            if need_rb and not self.rb:
+            if need_rb and not self.switch_down():
                 return False
         return True
 
-    def _wait_for_flip(self) -> bool:
-        """Hold still until the mode switch goes UP then DOWN; False after ARM_TIMEOUT_SEC."""
+    def _wait_for_flip(self, lead: float) -> bool:
+        """
+        Hold still until the mode switch goes UP then DOWN; False after ARM_TIMEOUT_SEC.
+
+        `lead` is the plan's time at rest before its first move, which follows
+        the countdown.
+        """
         self.arming.reset()
         if self.rb:
             self.log.info('The mode switch is DOWN. Flip it UP first.')
         self.log.info(
-            'Flip the mode switch DOWN (autonomy). The car starts driving 3 seconds after you '
-            'flip it.'
+            'Flip the mode switch DOWN (autonomy). The car starts driving '
+            f'{COUNTDOWN_SEC + lead:.0f} seconds after you flip it.'
         )
         self.log.info('Flip the mode switch UP at any time to stop the car.')
         end = time.monotonic() + ARM_TIMEOUT_SEC
@@ -665,21 +802,23 @@ class Driver:
         )
         ok = False
         self.timed_out = False
+        moving = [k for k, seg in enumerate(plan) if seg[0] != 0.0]
+        last_move = moving[-1] if moving else -1
+        lead = sum(seg[2] for seg in plan[: moving[0]]) if moving else 0.0
         try:
             self._hold(2.0, 0.0, 0.0, need_rb=False)
-            if not self._wait_for_flip():
+            if not self._wait_for_flip(lead):
                 self.timed_out = True
             else:
                 ok = self._hold(COUNTDOWN_SEC, 0.0, 0.0, need_rb=True)
-            moving = [k for k, seg in enumerate(plan) if seg[0] != 0.0]
-            last_move = moving[-1] if moving else -1
             for k, (speed, steer, seconds) in enumerate(plan if ok else []):
-                # The switch stays DOWN from the first move to the last, through
-                # the pauses between moves; the rests at the start and end are still.
+                # The switch stays DOWN from the flip to the last move: through
+                # the rest before the first move and the pauses between moves.
+                # The rest at the end is still.
                 if k == last_move + 1:
                     self.log.info('You can flip the mode switch UP now.')
                     self.log.info(f'Keep your hands off the car for {seconds:.0f} seconds.')
-                need_rb = bool(moving) and moving[0] <= k <= last_move
+                need_rb = k <= last_move
                 if not self._hold(seconds, speed, steer, need_rb=need_rb):
                     ok = False
                     break
@@ -698,7 +837,10 @@ class Driver:
                 'switch: ros2 topic echo /joy'
             )
         else:
-            self.log.error('Stopped: the mode switch was flipped UP. This run is not measured.')
+            self.log.error(
+                'Stopped: the mode switch was flipped UP, or /joy stopped arriving. '
+                'This run is not measured.'
+            )
         return None
 
     def close(self) -> None:
@@ -722,7 +864,17 @@ class ArmTimeout(Exception):
     """A run waited ARM_TIMEOUT_SEC for the mode switch and the car did not drive."""
 
 
-def run_session() -> int:
+def session_plans() -> dict[str, list[tuple[float, float, float]]]:
+    """
+    Return every run's segments as /drive values, converted with this car's limits.
+
+    Raises ValueError, before any node starts, when the limits cannot give a run's speed.
+    """
+    limits = drive_limits()
+    return {run: drive_segments(segments, limits) for run, segments in RUNS.items()}
+
+
+def run_session(plans: dict[str, list[tuple[float, float, float]]]) -> int:
     driver = Driver()
     log = driver.log
     values: dict[str, float] = {}
@@ -731,20 +883,31 @@ def run_session() -> int:
     def show(i: int) -> None:
         log.info(f'Run {i + 1} of {len(runs)}: {TITLES[runs[i]]}')
         log.info(CIRCLE_PLACE.get(runs[i], STRAIGHT_PLACE))
+        log.info(DEADMAN)
 
     def run_one(i: int) -> dict[str, float] | None:
-        bag = driver.drive(runs[i])
+        bag = driver.drive(runs[i], plans[runs[i]])
         if bag is None:
             if driver.timed_out:
                 raise ArmTimeout
             return None
         log.info('Analyzing the run...')
-        got, lines = analyze(bag)
+        try:
+            got, lines = analyze(bag)
+        except (ValueError, StopIteration) as exc:
+            log.error(f'The run could not be analyzed: {analysis_error(exc)}. Its bag is {bag}.')
+            return None
         for line in lines:
             log.info(line)
         return got
 
     try:
+        problems = limit_problems(driver.live_limits(), file_limits())
+        if problems:
+            for problem in problems:
+                log.error(problem)
+            log.error(LIMITS_ADVICE)
+            return 1
         for _, got in sorted(run_sequence(len(runs), show, run_one).items()):
             values.update(got)
         if not values:
@@ -752,7 +915,7 @@ def run_session() -> int:
             return 0
         return write_values(values, log)
     except ArmTimeout:
-        log.error('Nothing was written. Run the step again with the handset on.')
+        log.error(TIMEOUT_ADVICE)
         return 1
     finally:
         driver.close()
@@ -765,7 +928,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if not args.analyze:
-        return run_session()
+        try:
+            plans = session_plans()
+        except ValueError as exc:
+            print(f'The dynamics step cannot run: {exc}.', file=sys.stderr)
+            return 1
+        return run_session(plans)
     import logging
 
     logging.basicConfig(format='%(message)s', level=logging.INFO)
@@ -776,10 +944,17 @@ def main(argv: list[str] | None = None) -> int:
         if not bag.exists():
             bag = Path(resolve_log_root(load_config().get('DIR'))) / name
         log.info(bag.name)
-        got, lines = analyze(bag)
+        try:
+            got, lines = analyze(bag)
+        except (ValueError, StopIteration) as exc:
+            log.error(f'Not analyzed: {analysis_error(exc)}.')
+            continue
         for line in lines:
             log.info(line)
         values.update(got)
+    if not values:
+        log.info('Nothing measured.')
+        return 1
     return write_values(values, log)
 
 
