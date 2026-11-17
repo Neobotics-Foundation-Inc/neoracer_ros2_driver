@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-app="Smart follow">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Follow · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/lost.js?v=2" defer></script>
+<style>
+  /* This page only. The shared pieces are in /ui/neoracer.css. */
+  /* The plot surface stays a dark instrument panel in both themes: the
+     script draws these light-on-dark. */
+  canvas { background: #09090B; border: 1px solid #26262D; border-radius: 12px; width: 100%; height: auto; display: block; }
+  #cam { aspect-ratio: 4 / 3; }
+  #lidar { aspect-ratio: 1; }
+  .tuneform { display: grid; gap: 12px; }
+  .tuneform label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+  .tuneform label .unit { font-weight: 500; color: var(--nr-ink-2); }
+  .tuneform label b { font-variant-numeric: tabular-nums; }
+  /* The two parameter groups sit side by side so the tune card stays short. */
+  .tunecols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; }
+  @media (max-width: 700px) { .tunecols { grid-template-columns: 1fr; gap: 16px; } }
+  .subtitle { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--nr-ink-2);
+    padding-bottom: 6px; border-bottom: 1px solid var(--nr-edge); margin-bottom: 10px; }
+  /* The arbiter state, the one thing readable from across the room. */
+  #state { font-family: var(--nr-font-title); font-size: 20px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; text-align: center; }
+  .readout { font-size: 13px; color: var(--nr-ink-2); }
+  select.nr-input { max-width: 220px; }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" id="home" href="/" aria-label="NeoRacer, back to the apps page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">Smart Follow</h1>
+  <div class="nr-meta">
+    <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
+    <button type="button" class="nr-btn danger small" onclick="reset()" title="Re-read the saved settings">Reset</button>
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main" id="main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:14"><b id="mode">?</b><span>State</span></div>
+      <div class="nr-stat" style="--len:6"><b id="err">?</b><span>Error</span></div>
+      <div class="nr-stat" style="--len:6"><b id="steer">?</b><span>Steer</span></div>
+      <div class="nr-stat" style="--len:6"><b id="thr">?</b><span>Throttle</span></div>
+      <div class="nr-stat" style="--len:6"><b id="enc">?</b><span>Odom m/s</span></div>
+      <div class="nr-stat" style="--len:10"><b id="model">?</b><span>Model</span></div>
+      <div class="nr-stat" style="--len:4"><b id="fps">?</b><span>Camera fps</span></div>
+      <div class="nr-stat" style="--len:12"><b id="tgt">none</b><span>Target</span></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-lidar">
+    <h2 class="nr-panel-title" id="t-lidar">Lidar</h2>
+    <canvas id="lidar" width="420" height="420"></canvas>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-camera">
+    <h2 class="nr-panel-title" id="t-camera">Camera</h2>
+    <canvas id="cam" width="640" height="480"></canvas>
+    <div class="readout" id="camdetail"></div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-state">
+    <h2 class="nr-panel-title" id="t-state">State</h2>
+    <div class="nr-status info" id="state">WALL FOLLOWING</div>
+    <div class="readout" id="why"></div>
+    <div class="tuneform">
+      <label>target_hold <span class="unit">s, keep chasing after the last detection</span>
+        <input id="in_target_hold" class="nr-input" type="number" step="0.1" min="0"></label>
+    </div>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn primary small" onclick="applyHold()">Apply</button>
+    </div>
+    <h2 class="nr-panel-title">Error vs setpoint</h2>
+    <canvas id="chart" class="wide" width="420" height="140"></canvas>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-tune">
+    <h2 class="nr-panel-title" id="t-tune">Tune</h2>
+    <div class="tunecols">
+      <div>
+        <div class="subtitle">Wall following</div>
+        <div id="wallform" class="tuneform"></div>
+      </div>
+      <div>
+        <div class="subtitle">Car following</div>
+        <div id="carform" class="tuneform"></div>
+      </div>
+    </div>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn primary small" onclick="apply()">Apply</button>
+      <button type="button" class="nr-btn small" onclick="saveTune()">Save</button>
+      <button type="button" class="nr-btn small" onclick="reset()">Load</button>
+    </div>
+    <p class="nr-note">Press Apply before Save. Save writes the values the car is
+    running now, so anything typed but not applied will not be saved.</p>
+    <div class="readout" id="detail"></div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-logs">
+    <h2 class="nr-panel-title" id="t-logs">Logs</h2>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn primary small" onclick="saveLog()">Save log</button>
+      <select class="nr-input" id="logsel" aria-label="Log file"></select>
+      <button type="button" class="nr-btn small" onclick="loadLog()">Load log</button>
+      <span class="readout" id="loginfo"></span>
+    </div>
+    <canvas id="logchart" class="wide" width="900" height="160"></canvas>
+  </section>
+</main>
+<div id="nr-toast" role="status"></div>
+
+<script>
+const GROUPS = {
+  wall: {
+    form: 'wallform',
+    fields: ['speed', 'kp', 'kd', 'speed_kp', 'speed_kd', 'window', 'lookahead', 'width', 'side_weight'],
+    units: { speed: '0 to 1, times max_mps', kp: 'steer per m of error', kd: 'damper gain',
+             speed_kp: 'throttle per m/s of error', speed_kd: 'speed error damper',
+             window: 'deg', lookahead: 'm', width: 'deg', side_weight: 'm per deg' },
+    // shown instead of the yaml key; the key itself stays speed_kp/speed_kd
+    labels: { speed_kp: 'speed control kp', speed_kd: 'speed control kd' },
+    // spinner arrows step the hundredths
+    steps: { kp: '0.01', kd: '0.01', speed_kp: '0.01', speed_kd: '0.01', side_weight: '0.01' },
+  },
+  car: {
+    form: 'carform',
+    fields: ['speed', 'speed_kp', 'safety_area', 'angle_kp', 'angle_kd', 'score_threshold', 'max_detections'],
+    units: { speed: '0 to 1 throttle cap', speed_kp: 'stopping gain',
+             safety_area: 'stop at this bbox area, 0..1 of image',
+             angle_kp: 'steer per unit offset', angle_kd: 'steering damper',
+             score_threshold: 'ignore detections below, 0..1',
+             max_detections: 'keep this many best scores' },
+    steps: { speed_kp: '0.01', angle_kp: '0.01', angle_kd: '0.01',
+             safety_area: '0.01', score_threshold: '0.05', max_detections: '1' },
+  },
+};
+
+let last = null;
+document.getElementById('home').href = `${location.protocol}//${location.hostname}:8080/`;
+// The canvases are drawn light on the dark instrument surface, in both themes.
+const FONT = '600 11px "Space Grotesk", Arial, sans-serif';
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null });
+}
+
+// Confirms Save and Load, so an unsaved tune is never a guess.
+function toast(msg) {
+  const t = document.getElementById('nr-toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function saveTune() {
+  post('/save').then(() => toast('Saved to the car profile'));
+}
+
+function reset() {
+  // Re-read the saved settings and rebuild both forms.
+  post('/load').then(() => {
+    document.getElementById('wallform').dataset.built = '';
+    toast('Loaded');
+  });
+}
+
+function apply() {
+  const out = {};
+  for (const [g, spec] of Object.entries(GROUPS)) {
+    out[g] = {};
+    for (const f of spec.fields) out[g][f] = parseFloat(document.getElementById(`in_${g}_${f}`).value);
+  }
+  post('/params', out).then(() => toast('Applied'));
+}
+
+function applyHold() {
+  post('/params', { target_hold: parseFloat(document.getElementById('in_target_hold').value) });
+}
+
+// The slider's red fill follows its value.
+function fill(el) { el.style.setProperty('--v', `${(el.value - el.min) / (el.max - el.min) * 100}%`); }
+
+function buildForm(params) {
+  // Rebuild only on Reset/Load so typing is not interrupted.
+  const anchor = document.getElementById('wallform');
+  if (anchor.dataset.built) return;
+  anchor.dataset.built = '1';
+  for (const [g, spec] of Object.entries(GROUPS)) {
+    document.getElementById(spec.form).innerHTML = spec.fields.map(f => f === 'speed'
+      // Speed is a drag tuner: 0 to 1, applies live while dragging.
+      ? `<label>speed <span class="unit">${spec.units.speed}</span> <b id="${g}speedval">${params[g].speed}</b>
+         <input id="in_${g}_speed" type="range" min="0" max="1" step="0.01" value="${params[g].speed}"
+          oninput="fill(this); document.getElementById('${g}speedval').textContent = this.value;
+                   post('/params', {${g}: {speed: parseFloat(this.value)}})"></label>`
+      : `<label>${(spec.labels || {})[f] || f} <span class="unit">${spec.units[f]}</span><input id="in_${g}_${f}" class="nr-input" type="number" step="${spec.steps[f] || 'any'}" value="${params[g][f]}"></label>`
+    ).join('');
+    fill(document.getElementById(`in_${g}_speed`));
+  }
+  document.getElementById('in_target_hold').value = params.target_hold;
+}
+
+let VIEW = 4.0;  // lidar view radius in meters, scroll wheel to zoom
+
+function drawLidar(scan, ov, active) {
+  const c = document.getElementById('lidar'), x = c.getContext('2d');
+  const cx = c.width / 2, cy = c.height / 2, scale = cx / VIEW;
+  const L = ov.la ? Math.min(ov.la, VIEW) : VIEW;  // rays reach the lookahead cap
+  x.clearRect(0, 0, c.width, c.height);
+  // 0 deg is the nose (up). Positive degrees are to the right.
+  x.fillStyle = '#F5F5F7';
+  for (const [deg, r] of scan) {
+    const a = deg * Math.PI / 180;
+    x.fillRect(cx + Math.sin(a) * r * scale - 1, cy - Math.cos(a) * r * scale - 1, 2, 2);
+  }
+  const ray = (deg, r, color, w) => {
+    const a = deg * Math.PI / 180;
+    x.strokeStyle = color; x.lineWidth = w; x.beginPath();
+    x.moveTo(cx, cy); x.lineTo(cx + Math.sin(a) * r * scale, cy - Math.cos(a) * r * scale); x.stroke();
+  };
+  if (ov.width !== undefined) {
+    ray(-ov.width, L, 'rgba(245, 245, 247, 0.48)', 1);
+    ray(ov.width, L, 'rgba(245, 245, 247, 0.48)', 1);
+    // The chosen heading dims while the car follower has the wheel; the gap
+    // follower keeps running so the line it would take is still visible.
+    ray(ov.target_deg, L, active ? '#FF0033' : 'rgba(255, 0, 51, 0.35)', 2);
+  }
+  x.fillStyle = '#FF0033';
+  x.fillRect(cx - 4, cy - 7, 8, 14);  // the car
+  x.fillStyle = 'rgba(245, 245, 247, 0.72)'; x.font = FONT;
+  x.fillText(`view ${VIEW.toFixed(1)} m (scroll to zoom)`, 6, c.height - 6);
+  if (!active) x.fillText('wall follower standing by', 6, 14);
+}
+
+document.getElementById('lidar').addEventListener('wheel', e => {
+  e.preventDefault();
+  VIEW = Math.min(12, Math.max(1, VIEW * (e.deltaY > 0 ? 1.2 : 1 / 1.2)));
+});
+
+const c = document.getElementById('cam'), ctx = c.getContext('2d');
+const img = new Image();
+img.onload = drawCam;
+
+// Pull frames one at a time so a congested link drops frame rate instead
+// of building a lag queue. Pauses when the tab is hidden.
+(function liveLoop() {
+  if (document.hidden) { setTimeout(liveLoop, 250); return; }
+  const t = Date.now();
+  const done = () => {
+    img.removeEventListener('load', done); img.removeEventListener('error', done);
+    setTimeout(liveLoop, Math.max(20, 160 - (Date.now() - t)));
+  };
+  img.addEventListener('load', done); img.addEventListener('error', done);
+  img.src = '/frame?' + t;
+})();
+
+function drawCam() {
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  if (!last) return;
+  const [W, H] = last.res[0] ? last.res : [c.width, c.height];
+  const sx = c.width / W, sy = c.height / H;
+  ctx.font = '600 13px "Space Grotesk", Arial, sans-serif'; ctx.lineWidth = 2;
+  for (const d of last.detections) {
+    const isTgt = last.target && d.cx === last.target.cx && d.cy === last.target.cy;
+    ctx.strokeStyle = isTgt ? '#FF0033' : 'rgba(245, 245, 247, 0.6)';
+    ctx.strokeRect((d.cx - d.w / 2) * sx, (d.cy - d.h / 2) * sy, d.w * sx, d.h * sy);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillText(`${d.label} ${d.score < 1 ? d.score : ''}`,
+                 (d.cx - d.w / 2) * sx + 3, (d.cy - d.h / 2) * sy - 4);
+  }
+  // Safety area reference: a centered box of the stop size. When the red
+  // target box grows past this outline, the car is fully stopped.
+  const p = last.params.car;
+  const aw = Math.sqrt(p.safety_area * 4 / 3) * c.width * 0.866;
+  const ah = aw * 0.75;
+  ctx.strokeStyle = '#FFC847'; ctx.setLineDash([6, 4]);
+  ctx.strokeRect((c.width - aw) / 2, (c.height - ah) / 2, aw, ah);
+  ctx.setLineDash([]);
+  // Center line the steering chases
+  ctx.strokeStyle = 'rgba(245, 245, 247, 0.35)';
+  ctx.beginPath(); ctx.moveTo(c.width / 2, 0); ctx.lineTo(c.width / 2, c.height); ctx.stroke();
+}
+
+function drawSeries(canvasId, series, labels, marks, bands) {
+  // series: list of {pts: [[t, v]], color}. Each scaled to its own max.
+  // marks: [[t, label]] tuning changes, drawn as glowing yellow lines.
+  // bands: [[t, state]] which controller was driving, a strip along the bottom.
+  const cv = document.getElementById(canvasId), x = cv.getContext('2d');
+  x.clearRect(0, 0, cv.width, cv.height);
+  if (bands && bands.length > 1) {
+    const b0 = bands[0][0], b1 = bands[bands.length - 1][0];
+    for (let i = 0; i < bands.length - 1; i++) {
+      const px = (bands[i][0] - b0) / (b1 - b0 || 1) * cv.width;
+      const pw = Math.max(1, (bands[i + 1][0] - bands[i][0]) / (b1 - b0 || 1) * cv.width + 0.5);
+      x.fillStyle = bands[i][1] ? '#FF0033' : 'rgba(245, 245, 247, 0.22)';
+      x.fillRect(px, cv.height - 5, pw, 5);
+    }
+  }
+  x.strokeStyle = 'rgba(245, 245, 247, 0.48)'; x.setLineDash([4, 4]);
+  x.beginPath(); x.moveTo(0, cv.height / 2); x.lineTo(cv.width, cv.height / 2); x.stroke();
+  x.setLineDash([]);
+  for (const s of series) {
+    if (s.pts.length < 2) continue;
+    const t0 = s.pts[0][0], t1 = s.pts[s.pts.length - 1][0];
+    const max = Math.max(0.2, ...s.pts.map(p => Math.abs(p[1])));
+    x.strokeStyle = s.color; x.lineWidth = 1.5; x.beginPath();
+    for (let i = 0; i < s.pts.length; i++) {
+      const px = (s.pts[i][0] - t0) / (t1 - t0 || 1) * cv.width;
+      const py = cv.height / 2 - s.pts[i][1] / max * (cv.height / 2 - 8);
+      i ? x.lineTo(px, py) : x.moveTo(px, py);
+    }
+    x.stroke();
+    s.max = max;
+  }
+  // Tuning-change markers: vertical yellow line + what changed.
+  const m0 = series[0];
+  if (marks && m0 && m0.pts.length > 1) {
+    const t0 = m0.pts[0][0], t1 = m0.pts[m0.pts.length - 1][0];
+    x.save();
+    for (const [t, label] of marks) {
+      if (t < t0 || t > t1) continue;
+      const px = (t - t0) / (t1 - t0 || 1) * cv.width;
+      x.strokeStyle = '#FFC847'; x.lineWidth = 1.5;
+      x.shadowColor = '#FFC847'; x.shadowBlur = 8;
+      x.setLineDash([6, 4]);
+      x.beginPath(); x.moveTo(px, 18); x.lineTo(px, cv.height); x.stroke();
+      x.setLineDash([]);
+      x.fillStyle = '#FFC847'; x.font = FONT;
+      x.fillText(label, Math.min(px + 4, cv.width - x.measureText(label).width - 4), 30);
+    }
+    x.restore();
+  }
+  // Axis values from the first series: y ticks at +max / 0 / -max, x in seconds.
+  const s0 = series[0];
+  if (s0 && s0.pts.length > 1) {
+    const k = s0.scale || 1, u = s0.unit || '';
+    const t0 = s0.pts[0][0], t1 = s0.pts[s0.pts.length - 1][0];
+    x.fillStyle = 'rgba(245, 245, 247, 0.72)'; x.font = FONT;
+    x.fillText(`+${(s0.max * k).toFixed(2)} ${u}`, 4, 28);
+    x.fillText(`0 ${u}`, 4, cv.height / 2 - 4);
+    x.fillText(`-${(s0.max * k).toFixed(2)} ${u}`, 4, cv.height - 22);
+    x.fillText(`${t0.toFixed(1)} s`, 4, cv.height - 8);
+    const end = `${t1.toFixed(1)} s`;
+    x.fillText(end, cv.width - x.measureText(end).width - 4, cv.height - 8);
+  }
+  x.fillStyle = '#F5F5F7'; x.font = '600 12px "Space Grotesk", Arial, sans-serif';
+  x.fillText(labels(series), 8, 14);
+}
+
+let busy = false;
+function update() {
+  if (busy) return;  // do not stack requests if the network lags
+  busy = true;
+  fetch('/state').then(r => r.json()).then(d => {
+    busy = false;
+    beat(true);
+    last = d;
+    const car = d.state === 'car';
+    document.getElementById('mode').textContent = car ? 'car following' : 'wall following';
+    document.getElementById('err').textContent = d.error ?? '?';
+    document.getElementById('steer').textContent = d.steer;
+    document.getElementById('thr').textContent = d.speed_cmd;
+    document.getElementById('enc').textContent = d.enc_speed;
+    document.getElementById('model').textContent = d.model;
+    document.getElementById('fps').textContent = d.cam_fps;
+    document.getElementById('tgt').textContent = d.target
+      ? `${d.target.label} (area ${(d.area * 100).toFixed(1)}%)` : 'none';
+
+    const box = document.getElementById('state');
+    box.textContent = car ? 'CAR FOLLOWING' : 'WALL FOLLOWING';
+    box.className = 'nr-status ' + (car ? 'err' : 'info');
+    document.getElementById('why').textContent = car
+      ? `Chasing ${d.target ? d.target.label : 'the last target'}, seen ${d.since} s ago. `
+        + `Pursuit steer ${d.car_steer}, throttle ${d.car_speed_cmd}.`
+      : `No target for ${d.since === null ? 'the whole run' : d.since + ' s'} `
+        + `(hold ${d.params.target_hold} s). Gap follower steer `
+        + `${d.overlay.steer ?? '?'}, throttle ${d.overlay.speed_cmd ?? '?'}.`;
+
+    buildForm(d.params);
+    document.getElementById('detail').textContent = car
+      ? `target ${d.overlay.target_deg ?? '?'} deg (standby) | pursuit error ${d.car_error ?? '?'}`
+      : `target ${d.overlay.target_deg ?? '?'} deg | ${d.detections.length} detection(s), none held`;
+    document.getElementById('camdetail').textContent = `${d.detections.length} detection(s)`;
+    drawLidar(d.scan, d.overlay, !car);
+    // Both controllers report a normalized -1..1 error, so one axis serves
+    // the whole run and the band shows which one produced each sample.
+    drawSeries('chart', [{ pts: d.hist, color: '#FF0033' }],
+      () => `error ${d.error ?? '?'} (red) | setpoint 0 (dashed) | band: red = car following`,
+      d.marks, d.hist.map(p => [p[0], p[2]]));
+  }).catch(() => { busy = false; beat(false); });
+}
+
+// Live while the car answers; No answer after a second of missed polls.
+let misses = 0, lastBeat = 0;
+function beat(ok) {
+  const el = document.getElementById('live'), word = el.querySelector('span');
+  if (ok) {
+    misses = 0;
+    document.getElementById('main').classList.remove('nr-lost-data');
+    if (Date.now() - lastBeat < 1000) return;
+    lastBeat = Date.now();
+    el.className = 'nr-live beat'; word.textContent = 'Live';
+    setTimeout(() => { el.className = 'nr-live'; }, 120);
+  } else if (++misses >= 8) {
+    el.className = 'nr-live lost'; word.textContent = 'No answer';
+    document.getElementById('main').classList.add('nr-lost-data');
+  }
+}
+
+function loadLog() {
+  const f = document.getElementById('logsel').value;
+  if (!f) return;
+  fetch('/logs/' + f).then(r => r.text()).then(txt => {
+    const lines = txt.trim().split('\n');
+    const marks = lines.filter(l => l.startsWith('# mark'))
+      .map(l => { const p = l.split(','); return [parseFloat(p[1]), p.slice(2).join(',')]; });
+    const rows = lines.filter(l => !l.startsWith('#')).slice(1).map(l => l.split(',').map(Number));
+    const carRows = rows.filter(r => r[5]).length;
+    document.getElementById('loginfo').textContent =
+      `${f}: ${rows.length} rows, ${marks.length} changes, ${carRows} car-following`;
+    drawSeries('logchart', [
+      { pts: rows.map(r => [r[0], r[1]]), color: '#FF0033' },
+      { pts: rows.map(r => [r[0], r[4]]), color: '#FFFFFF' },
+    ], s => `error (red, +/- ${s[0].max?.toFixed(2)}) | odom m/s (white, +/- ${s[1].max?.toFixed(2)})`,
+    marks, rows.map(r => [r[0], r[5]]));
+  });
+}
+
+function saveLog() {
+  // Snapshot what is on the live chart to a csv, then show it right away.
+  post('/logs/save').then(() => { refreshLogs(true); toast('Log saved'); });
+}
+
+function refreshLogs(loadLatest) {
+  fetch('/logs').then(r => r.json()).then(names => {
+    const sel = document.getElementById('logsel');
+    sel.innerHTML = names.map(n => `<option>${n}</option>`).join('');
+    sel.selectedIndex = names.length - 1;  // Load defaults to the latest save
+    if (loadLatest && names.length) loadLog();
+  });
+}
+
+refreshLogs(false);
+
+update();
+setInterval(update, 120);  // lidar publishes ~7 Hz; poll faster than every scan
+</script>
+</body>
+</html>
