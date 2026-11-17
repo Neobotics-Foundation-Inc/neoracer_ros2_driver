@@ -11,6 +11,8 @@ amcl:
     scan_topic: /scan                 # the LakiBeam, frame laser
     map_topic: /map
     tf_broadcast: true
+    # A scan waits up to this long for odom -> base_link (at most 26 ms on the
+    # dev car; see slam_mapping.yaml), and map -> odom is stamped this far ahead.
     transform_tolerance: 1.0
 
     # An Ackermann car has no sideways motion, so the differential model fits.
@@ -19,6 +21,8 @@ amcl:
     # translation from translation, translation from rotation, strafe (omni only).
     # The gyro heading and lidar-calibrated encoder are far better than the
     # Nav2 defaults (0.2) assume; at 0.2 the particle cloud never tightens.
+    # These are upstream's values, not yet measured against the NeoRacer's
+    # odometry.
     alpha1: 0.02
     alpha2: 0.02
     alpha3: 0.02
@@ -27,8 +31,8 @@ amcl:
 
     laser_model_type: likelihood_field
     max_beams: 60
-    laser_min_range: 0.3              # self-returns inside 0.3 m
-    laser_max_range: 12.0
+    laser_min_range: 0.12             # the car's outline; see slam_mapping.yaml
+    laser_max_range: 25.0             # the LakiBeam1's rating
     laser_likelihood_max_dist: 2.0
     sigma_hit: 0.1                    # wall distance spread, m; Nav2 default 0.2
     z_hit: 0.9                        # with z_rand: weight of the wall fit over random returns

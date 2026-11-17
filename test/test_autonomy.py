@@ -21,6 +21,11 @@ SLAM_CONFIGS = ('slam_mapping.yaml', 'slam_localization.yaml')
 # Keys upstream's Jazzy configs set that Humble's slam_toolbox (2.6.10) does not
 # declare; upstream's values match what 2.6.10 does without them.
 JAZZY_ONLY_KEYS = ('use_lifecycle_manager', 'restamp_tf', 'check_min_dist_and_heading_precisely')
+# The LakiBeam1's rated range at 70% reflectivity (Richbeam's specification), m.
+LAKIBEAM_MAX_RANGE = 25.0
+# The dev car, 2026-11-12: the LakiBeam's nearest return with the nose square
+# against a wall, m (test_frames.py).
+CAR_WALL_RANGE = 0.306
 
 
 @pytest.fixture(scope='module')
@@ -312,7 +317,7 @@ class TestConfigs:
         p = _slam_params(name)
         assert (p['base_frame'], p['odom_frame'], p['map_frame']) == ('base_link', 'odom', 'map')
         assert p['scan_topic'] == '/scan'
-        assert p['min_laser_range'] == 0.3 and p['max_laser_range'] == 12.0
+        assert p['max_laser_range'] == LAKIBEAM_MAX_RANGE
         assert p['mode'] == name.split('_')[1].removesuffix('.yaml')
 
     @pytest.mark.parametrize('name', SLAM_CONFIGS)
@@ -333,7 +338,7 @@ class TestConfigs:
     def test_amcl(self):
         data = yaml.safe_load((CONFIG / 'amcl.yaml').read_text())
         p = data['amcl']['ros__parameters']
-        assert p['base_frame_id'] == 'base_link' and p['laser_min_range'] == 0.3
+        assert p['base_frame_id'] == 'base_link' and p['laser_max_range'] == LAKIBEAM_MAX_RANGE
         assert (p['odom_frame_id'], p['global_frame_id'], p['scan_topic']) == (
             'odom',
             'map',
@@ -344,6 +349,31 @@ class TestConfigs:
         assert p['sigma_hit'] <= 0.1 and p['z_hit'] >= 0.9 and p['z_rand'] <= 0.1
         manager = data['lifecycle_manager_localization']['ros__parameters']
         assert manager == {'autostart': True, 'node_names': ['map_server', 'amcl']}
+
+
+class TestLakiBeam:
+    def test_one_minimum_range_that_hides_the_car_and_keeps_a_wall_at_the_nose(self):
+        amcl = yaml.safe_load((CONFIG / 'amcl.yaml').read_text())['amcl']['ros__parameters']
+        node = yaml.safe_load((CONFIG / 'autonomy.yaml').read_text())
+        ranges = {
+            *(_slam_params(name)['min_laser_range'] for name in SLAM_CONFIGS),
+            amcl['laser_min_range'],
+            node['autonomy_node']['ros__parameters']['fit_min_range_m'],
+        }
+        assert len(ranges) == 1
+        (min_range,) = ranges
+        # The rear of the outline lies in the LakiBeam's blind span; its nearest
+        # edge in the live window is a side.
+        f = yaml.safe_load((CONFIG / 'frames.yaml').read_text())
+        side = min(
+            f['footprint_left_y_mm'] - f['laser_y_mm'], f['laser_y_mm'] - f['footprint_right_y_mm']
+        )
+        assert side / 1e3 <= min_range < CAR_WALL_RANGE
+
+    @pytest.mark.parametrize('name', SLAM_CONFIGS)
+    def test_slam_toolbox_takes_every_fourth_scan(self, name):
+        # 29.7 Hz / 4 = 7.4 Hz, near upstream's 7.2 Hz RPLIDAR.
+        assert _slam_params(name)['throttle_scans'] == 4
 
 
 class TestExtend:

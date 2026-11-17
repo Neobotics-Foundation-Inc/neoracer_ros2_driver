@@ -25,15 +25,26 @@ slam_toolbox:
     mode: mapping
 
     debug_logging: false
-    throttle_scans: 1
+    # The LakiBeam scans at 29.7 Hz; every 4th scan is 7.4 Hz, the rate of
+    # upstream's RPLIDAR (7.2 Hz). minimum_time_interval below still limits
+    # scan matching to 2 scans a second.
+    throttle_scans: 4
     transform_publish_period: 0.05    # map -> odom at 20 Hz; it changes with each scan match (about 2 Hz)
     map_update_interval: 5.0
     resolution: 0.05
-    # Upstream's antennas (about 0.27 m) and Ethernet cable header (0.24 m)
-    # return inside 0.3 m; the RPLIDAR A1 is rated to 12 m.
-    min_laser_range: 0.3
-    max_laser_range: 12.0
+    # The dev car shows no self-returns: driving it (2026-11-17), no scan had
+    # a return under 0.33 m. 0.12 m is the nearest edge of the car's
+    # outline from the lidar (config/frames.yaml), so a nearer return is the
+    # car itself. The LakiBeam1 is rated to 25 m at 70% reflectivity (15 m at
+    # 10%); it reports no return as inf, which slam_toolbox skips.
+    min_laser_range: 0.12
+    max_laser_range: 25.0
     minimum_time_interval: 0.5
+    # A scan waits up to transform_timeout for odom -> base_link, which the
+    # controller stamps at each serial frame's arrival, not ahead of it. On the
+    # dev car (2026-11-17) a scan waited at most 26 ms, less than the 34 ms
+    # between scans, so the one-scan queue dropped none. map -> odom is
+    # stamped this far ahead of its scan.
     transform_timeout: 0.2
     tf_buffer_duration: 30.0
     stack_size_to_use: 40000000       # serializing large maps needs the larger stack
