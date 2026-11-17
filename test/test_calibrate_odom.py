@@ -222,13 +222,11 @@ class TestNeoRacer:
         assert odom.MIN_DRIVE_M == 2.0
         assert '3 to 5 meters' in odom.DRIVE_PLACE and '3 to 5 meters' in cal.ODOM_SETUP
 
-    @pytest.mark.parametrize(
-        'source,scale,base', [('integrated', 1.04, 1.04), ('firmware', 1.04, 1.0)]
-    )
-    def test_the_speed_base_follows_the_source(self, odom, source, scale, base):
-        node = odom.OdomCalibrator.__new__(odom.OdomCalibrator)
-        node.source, node.speed_scale = source, scale
-        assert node.speed_base() == base
+    def test_the_speed_scale_moves_by_lidar_over_the_integrated_estimate(self, odom):
+        # The integrated estimate carries the current scale on either source,
+        # so the new scale is the current one times this ratio.
+        assert odom.speed_ratio(3.0, 3.042) == pytest.approx(3.0 / 3.042)
+        assert odom.speed_ratio(3.0, 0.0) == math.inf
 
     def test_the_note_says_where_the_scales_act(self, odom):
         assert 'applies the scales' in odom.source_note('integrated')
@@ -356,7 +354,82 @@ class TestSources:
         node, _ = _node_answering(odom, values, monkeypatch)
         assert node.live_params() is None
 
-    def test_the_firmware_pose_is_reported_against_the_lidar(self, odom):
-        line = odom.firmware_line('distance', 3.042, 3.0, odom.DRIVE_PASS)
-        assert '+1.40%' in line and 'within 2%' in line
+    def test_both_poses_are_reported_against_the_lidar(self, odom):
+        line = odom.pose_line('firmware', 'distance', 3.042, 3.0, odom.DRIVE_PASS)
+        assert line.startswith('Firmware distance: +1.40% against the lidar')
+        assert 'within 2%' in line
+        line = odom.pose_line('integrated', 'heading', 1068.0, 1080.0, odom.SPIN_PASS)
+        assert line.startswith('Integrated heading: -1.11% against the lidar')
+        assert 'within 1%' in line
         assert 'odometry.source: integrated' in odom.UNUSED_ON_FIRMWARE
+
+    @pytest.mark.parametrize('kind', ['spin', 'drive'])
+    def test_the_source_not_in_use_is_listed_without_a_verdict(self, odom, kind):
+        criterion = odom.spin_criterion if kind == 'spin' else odom.drive_criterion
+        judged = criterion(1.05, 1.0, 'firmware', True)
+        listed = criterion(1.05, 1.0, 'integrated', False)
+        assert judged.name == f'{kind} firmware' and judged.status == 'FAIL'
+        assert listed.name == f'{kind} integrated' and listed.status == 'INFO'
+        # The same limits, so the two rows read side by side; no advice without a verdict.
+        assert listed.limit == criterion(1.05, 1.0, 'integrated', True).limit
+        assert listed.advice == ''
+
+    def test_both_accounts_come_firmware_first(self, odom):
+        sm = load_script('scan_match')
+        match = sm.MatchResult((0.0, 0.0, 0.0), 0.01, 0.9, 10)
+        run = odom.Run((1, 0, 0), match, (1, 0, 0), 0.0, (1.01, 0, 0), (1.02, 0, 0))
+        assert run.poses() == (('firmware', (1.01, 0, 0)), ('integrated', (1.02, 0, 0)))
+
+
+def _frames(duration, speed, rate, dt=0.005, t0=100.0):
+    """/odom [t, x, y, yaw, v] and gyro (t, rate) samples at the `s` frame rate."""
+    n = round(duration / dt)
+    odom = [[t0 + i * dt, 0.0, 0.0, 0.0, speed] for i in range(n + 1)]
+    gyro = [(t0 + i * dt, rate) for i in range(n + 1)]
+    return odom, gyro
+
+
+class TestIntegratedReplay:
+    """The integrated estimate on the firmware source: the driver's integrator, replayed."""
+
+    def test_a_straight_drive_carries_the_speed_scale(self, odom):
+        rows, gyro = _frames(2.0, 1.0, 0.0)
+        cfg = odom.Integration(speed_scale=0.98)
+        x, y, heading = odom.integrated_motion(rows, gyro, 0.0, cfg)
+        assert x == pytest.approx(2.0 * 0.98, rel=1e-3)
+        assert y == pytest.approx(0.0) and heading == pytest.approx(0.0)
+
+    def test_three_turns_carry_the_yaw_scale_and_unwrap(self, odom):
+        rate = math.radians(90)
+        rows, gyro = _frames(12.0, 0.5, rate)
+        cfg = odom.Integration(yaw_scale=1.02)
+        heading = odom.integrated_motion(rows, gyro, 0.0, cfg)[2]
+        assert heading == pytest.approx(3 * 2 * math.pi * 1.02, rel=1e-3)
+
+    def test_the_rest_bias_is_removed(self, odom):
+        bias = math.radians(0.5)
+        rows, gyro = _frames(3.0, 1.0, bias)
+        heading = odom.integrated_motion(rows, gyro, bias, odom.Integration())[2]
+        assert heading == pytest.approx(0.0, abs=1e-9)
+
+    def test_it_matches_the_controller_stepping_the_integrator(self, odom):
+        # The controller steps once per `s` frame with vx x speed_scale and the
+        # gyro x sign x yaw_rate_scale; the replay does the same from /odom.
+        from neoracer_ros2_driver.odometry import OdomIntegrator
+
+        rows, gyro = _frames(4.0, 0.8, math.radians(40))
+        cfg = odom.Integration(speed_scale=0.99, yaw_scale=1.01, turn_gain=0.5)
+        controller = OdomIntegrator(
+            turn_gain=0.5, wheelbase=cfg.wheelbase_m, max_steer=math.radians(30.0)
+        )
+        for (t, *_rest, v), (_t, rate) in zip(rows, gyro, strict=True):
+            controller.step(t, v * 0.99, rate * 1.01)
+        x, y, heading = odom.integrated_motion(rows, gyro, 0.0, cfg)
+        assert x == pytest.approx(controller.state.x, abs=1e-9)
+        assert y == pytest.approx(controller.state.y, abs=1e-9)
+        assert math.atan2(math.sin(heading), math.cos(heading)) == pytest.approx(
+            controller.state.theta, abs=1e-9
+        )
+
+    def test_no_samples_give_no_estimate(self, odom):
+        assert odom.integrated_motion([], [], 0.0, odom.Integration()) is None
