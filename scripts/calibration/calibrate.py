@@ -69,11 +69,12 @@ STEERING_SETUP = (
 )
 DYNAMICS_SETUP = (
     'Use a clear straight path of about 4 meters with walls or furniture nearby.\n'
-    'Use a clear area of about 2.3 by 1.6 meters for driving circles.\n'
+    'Use a clear area of about 3 by 3 meters for driving circles.\n'
     'Turn the handset on. The car drives itself only with the mode switch DOWN (autonomy).\n'
     'Flip the mode switch UP to stop.'
 )
-# calibrate_dynamics.py writes these; per speed (0.25, 0.5, 1.0) and per side.
+# calibrate_dynamics.py writes these; per straight run (suffixes 025, 05, 10 for
+# 0.62, 0.75 and 1.0 m/s, upstream's names) and per side.
 DYNAMICS_KEYS = tuple(
     [
         f'{name}_{tag}'
