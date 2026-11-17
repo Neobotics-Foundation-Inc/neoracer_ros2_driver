@@ -175,6 +175,9 @@ STEPS = (
         ('trim_deg',),
         check=STEERING_SETUP,
         note='applied in the ESP32 firmware (trim set); the profile keeps a copy',
+        # It drives with calibrate_dynamics.py's Driver and matches scans as
+        # calibrate_odom.py does.
+        requires=('calibrate_odom.py', 'calibrate_dynamics.py'),
     ),
     # Measured for the simulator; nothing reads it back, so there is no check.
     Step(
@@ -250,7 +253,68 @@ def status_lines(config_dir: Path, color: bool = False) -> list[str]:
         values = step_values(step)
         width = max((len(k) for k in values), default=0)
         lines += [f'  {k:<{width}}  {fmt(values[k], 7)}' for k in step.keys if k in values]
+        if step.key == 'steering' and step.installed:
+            lines.append(board_trim_line(values.get('trim_deg'), board_trim_live(), color))
     return lines
+
+
+# The board prints its trim with two decimals.
+BOARD_TRIM_TOL_DEG = 0.01
+
+
+def board_trim_live(timeout: float = 2.0) -> float | None:
+    """
+    Return controller_node's board.steering_trim_deg, NaN when unknown, None when unreachable.
+
+    The controller reads the trim from the ESP32 at start.
+    """
+    try:
+        import rclpy
+        from rcl_interfaces.msg import ParameterType
+        from rcl_interfaces.srv import GetParameters
+    except ImportError:
+        return None
+    try:
+        rclpy.init()
+        node = rclpy.create_node('calibrate_status')
+    except Exception:  # no ROS graph to join: status still prints the files
+        return None
+    try:
+        client = node.create_client(GetParameters, '/controller_node/get_parameters')
+        if not client.wait_for_service(timeout_sec=timeout):
+            return None
+        future = client.call_async(GetParameters.Request(names=['board.steering_trim_deg']))
+        rclpy.spin_until_future_complete(node, future, timeout_sec=timeout)
+        result = future.result() if future.done() else None
+        if result is None or not result.values:
+            return None
+        value = result.values[0]
+        if value.type == ParameterType.PARAMETER_DOUBLE:
+            return float(value.double_value)
+        if value.type == ParameterType.PARAMETER_INTEGER:
+            return float(value.integer_value)
+        return None
+    except Exception:  # a graph that fails mid-call reads as not reachable
+        return None
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+def board_trim_line(copy: Any, live: float | None, color: bool = False) -> str:
+    """Return the status line for the board's own trim beside the profile copy."""
+    if live is None:
+        return '  board     not read: teleop is not running'
+    if live != live:  # NaN
+        text = "board     unknown: the controller did not read the board's trim"
+        return '  ' + paint(text, 'WARN', color)
+    shown = f'board     {live:+.2f} deg (live)'
+    if not isinstance(copy, (int, float)):
+        return f'  {shown}'
+    if abs(live - float(copy)) > BOARD_TRIM_TOL_DEG:
+        text = f'{shown}, not the profile copy: a new board or a full flash'
+        return '  ' + paint(text, 'WARN', color)
+    return f'  {shown}, as the profile copy'
 
 
 def status_rows(config_dir: Path) -> list[tuple[str, str, str]]:
