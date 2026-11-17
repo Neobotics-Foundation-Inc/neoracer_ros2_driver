@@ -1,0 +1,33 @@
+# foxglove_bridge, started by autonomy.launch.py with foxglove:=true (the
+# autonomy unit's AUTONOMY_FOXGLOVE=1). View-only for Lichtblick or Foxglove:
+# the map, scan, frames, and poses; camera streams are left out because they
+# can saturate the car's 2.4 GHz access point. The one topic a client may
+# publish is /initialpose (a pose estimate tool); /drive is never accepted.
+# Per-car overrides go in the car profile, params/foxglove.yaml.
+#
+# Every key below exists in Humble's foxglove_bridge 3.4.3, the version on the
+# dev car. The bridge listens on every interface (its default address,
+# 0.0.0.0) and has no password, so any device that reaches the car on port
+# 8765 can view the topics below. The car does not limit ROS discovery to
+# itself, so a laptop with ROS 2 on the same network already reaches every
+# topic without the bridge. A per-car `address` limits the bridge to one
+# interface.
+foxglove_bridge:
+  ros__parameters:
+    port: 8765
+    topic_whitelist:
+      - '^/map$'
+      - '^/map_metadata$'
+      - '^/scan$'
+      - '^/tf$'
+      - '^/tf_static$'
+      - '^/robot_description$'
+      - '^/odom$'
+      - '^/odom/integrated$'
+      - '^/amcl_pose$'
+      - '^/particle_cloud$'
+      - '^/autonomy/.*'
+    capabilities: [clientPublish]
+    client_topic_whitelist: ['^/initialpose$']
+    service_whitelist: ['^$']
+    param_whitelist: ['^$']
