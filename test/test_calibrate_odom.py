@@ -213,6 +213,7 @@ class TestNeoRacer:
 
     def test_a_person_drives_in_manual(self, odom):
         assert 'mode switch UP (manual)' in odom.HOW_TO_DRIVE[0]
+        assert odom.HOW_TO_DRIVE[1] == 'Keep the speed switch UP (slow).'
         cal = load_script('calibrate')
         assert 'mode switch UP (manual)' in cal.ODOM_SETUP
 
@@ -248,3 +249,114 @@ class TestNeoRacer:
         params = shipped['controller_node']['ros__parameters']
         keys = {'odometry.yaw_rate_scale', 'odometry.speed_scale', 'odometry.source'}
         assert keys <= set(params)
+
+
+def _value(types, kind, **fields):
+    return SimpleNamespace(type=getattr(types, f'PARAMETER_{kind}'), **fields)
+
+
+class _Future:
+    def __init__(self, values):
+        self._values = values
+
+    def done(self):
+        return True
+
+    def exception(self):
+        return None
+
+    def result(self):
+        return SimpleNamespace(values=self._values)
+
+
+def _node_answering(odom, values, monkeypatch):
+    """Return an OdomCalibrator whose controller_node answers GetParameters with `values`."""
+    node = odom.OdomCalibrator.__new__(odom.OdomCalibrator)
+    asked = []
+
+    class Client:
+        def wait_for_service(self, timeout_sec):
+            return values is not None
+
+        def call_async(self, request):
+            asked.append(list(request.names))
+            return _Future(values)
+
+    monkeypatch.setattr(node, 'create_client', lambda *_a: Client(), raising=False)
+    monkeypatch.setattr(odom.GetParameters, 'Request', SimpleNamespace, raising=False)
+    return node, asked
+
+
+class TestSources:
+    """The default firmware source: what is reported, what is advised, what is read live."""
+
+    def test_check_advice_follows_the_source(self, odom):
+        for criterion in (odom.spin_criterion, odom.drive_criterion):
+            assert 'racecar calibrate odom' in criterion(1.05, 1.0).advice
+            assert 'racecar calibrate odom' in criterion(1.05, 1.0, 'integrated').advice
+            advice = criterion(1.05, 1.0, 'firmware').advice
+            assert advice == odom.FIRMWARE_ADVICE
+            assert 'odometry.source: integrated' in advice
+
+    def test_unused_scales_do_not_fail_the_firmware_check(self, odom):
+        firmware = odom.scales_criterion((0.98, 0.99), (1.0, 1.0), 'firmware')
+        assert firmware.status == 'INFO' and 'firmware' in firmware.limit
+        assert odom.scales_criterion((0.98, 0.99), (1.0, 1.0)).status == 'FAIL'
+
+    @pytest.mark.parametrize(
+        'source,live_source,live_scales,with_scales,stale',
+        [
+            ('firmware', 'firmware', (1.0, 1.0), True, False),
+            ('integrated', 'firmware', (1.0, 1.0), True, True),
+            ('firmware', 'integrated', (0.98, 0.99), False, True),
+            ('integrated', 'integrated', (1.0, 1.0), True, True),
+            ('integrated', 'integrated', (1.0, 1.0), False, False),
+            ('integrated', 'integrated', (0.98, 0.99), True, False),
+            ('firmware', 'firmware', (0.5, 0.5), True, False),
+        ],
+    )
+    def test_the_files_must_match_the_running_controller(
+        self, odom, source, live_source, live_scales, with_scales, stale
+    ):
+        live = {
+            'odometry.source': live_source,
+            'odometry.yaw_rate_scale': live_scales[0],
+            'odometry.speed_scale': live_scales[1],
+        }
+        text = odom.stale_files(live, source, (0.98, 0.99), with_scales)
+        assert bool(text) is stale
+        if live_source != source:
+            assert f'runs odometry.source {live_source}' in text
+
+    def test_the_live_read_takes_the_source_and_integer_scales(self, odom, monkeypatch):
+        types = odom.ParameterType
+        values = [
+            _value(types, 'STRING', string_value='integrated'),
+            _value(types, 'INTEGER', integer_value=1),
+            _value(types, 'DOUBLE', double_value=0.98),
+        ]
+        node, asked = _node_answering(odom, values, monkeypatch)
+        assert node.live_params() == {
+            'odometry.source': 'integrated',
+            'odometry.yaw_rate_scale': 1.0,
+            'odometry.speed_scale': 0.98,
+        }
+        assert node.live_scales() == (1.0, 0.98)
+        assert asked[0] == list(odom.LIVE_KEYS)
+
+    def test_no_answer_or_a_text_scale_reads_as_no_answer(self, odom, monkeypatch):
+        node, _ = _node_answering(odom, None, monkeypatch)
+        assert node.live_params() is None and node.live_scales() is None
+        types = odom.ParameterType
+        values = [
+            _value(types, 'STRING', string_value='firmware'),
+            _value(types, 'STRING', string_value='1.0'),
+            _value(types, 'DOUBLE', double_value=1.0),
+        ]
+        node, _ = _node_answering(odom, values, monkeypatch)
+        assert node.live_params() is None
+
+    def test_the_firmware_pose_is_reported_against_the_lidar(self, odom):
+        line = odom.firmware_line('distance', 3.042, 3.0, odom.DRIVE_PASS)
+        assert '+1.40%' in line and 'within 2%' in line
+        assert 'odometry.source: integrated' in odom.UNUSED_ON_FIRMWARE
