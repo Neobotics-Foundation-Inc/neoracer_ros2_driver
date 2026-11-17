@@ -436,6 +436,16 @@ def test_foxglove_layout_uses_only_bridged_topics():
     assert all(f'"{panel}"' in text for panel in panels)
 
 
+# foxglove_bridge 3.4.3's capability names (common.hpp in foxglove-sdk).
+BRIDGE_CAPABILITIES = {
+    'clientPublish',
+    'parameters',
+    'parametersSubscribe',
+    'services',
+    'connectionGraph',
+    'assets',
+    'time',
+}
 # Topics the Foxglove layout reads that the topic contract has no row for, with
 # the driver sources that start their publishers on the NeoRacer.
 LAYOUT_TOPICS_OUTSIDE_THE_CONTRACT = {
@@ -475,6 +485,14 @@ class TestFoxgloveOnTheNeoRacer:
             for path, text in LAYOUT_TOPICS_OUTSIDE_THE_CONTRACT[topic]:
                 source = contract._squash(contract._code_text(ROOT / path))
                 assert contract._squash(text) in source, f'{topic}: {path} lacks {text!r}'
+
+    def test_no_client_publishes_while_the_bridge_ignores_its_whitelist(self):
+        # foxglove_bridge 3.x reads client_topic_whitelist but does not apply it
+        # (foxglove-sdk PR #1508), so clientPublish would let a client publish
+        # /drive and /motor. Humble cannot load an empty list, so one name stays.
+        bridge = yaml.safe_load((CONFIG / 'foxglove.yaml').read_text())
+        capabilities = bridge['foxglove_bridge']['ros__parameters']['capabilities']
+        assert capabilities and not set(capabilities) & BRIDGE_CAPABILITIES
 
     def test_the_setup_installs_the_layout_beside_the_bridge_config(self):
         setup = (ROOT / 'setup.py').read_text()

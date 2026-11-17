@@ -1,8 +1,8 @@
 # foxglove_bridge, started by autonomy.launch.py with foxglove:=true (the
 # autonomy unit's AUTONOMY_FOXGLOVE=1). View-only for Lichtblick or Foxglove:
 # the map, scan, frames, and poses; camera streams are left out because they
-# can saturate the car's 2.4 GHz access point. The one topic a client may
-# publish is /initialpose (a pose estimate tool); /drive is never accepted.
+# can saturate the car's 2.4 GHz access point. A client publishes nothing;
+# see capabilities below.
 # Per-car overrides go in the car profile, params/foxglove.yaml.
 #
 # Every key below exists in Humble's foxglove_bridge 3.4.3, the version on the
@@ -27,7 +27,17 @@ foxglove_bridge:
       - '^/amcl_pose$'
       - '^/particle_cloud$'
       - '^/autonomy/.*'
-    capabilities: [clientPublish]
+    # Upstream sets clientPublish with /initialpose as the one client topic,
+    # for the 3D panel's pose estimate tool. foxglove_bridge 3.4.3, the dev
+    # car's version, reads client_topic_whitelist but does not apply it, and
+    # 3.6.0 has the same gap (foxglove-sdk PR #1508, open). With clientPublish,
+    # a client can publish any topic, /drive and /motor included. The list
+    # below holds no capability until a bridge release applies the whitelist.
+    # Humble cannot load an empty list from a parameter file, and the bridge
+    # ignores names that are not capabilities, so 'none' stands for the empty
+    # list. A car profile override can set [clientPublish] again for the pose
+    # estimate tool.
+    capabilities: ['none']
     client_topic_whitelist: ['^/initialpose$']
     service_whitelist: ['^$']
     param_whitelist: ['^$']
