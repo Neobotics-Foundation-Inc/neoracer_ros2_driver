@@ -15,19 +15,6 @@ if [ -z "${RACECAR_DATA_DIR:-}" ]; then
     export RACECAR_DATA_DIR
 fi
 
-_rc_autonomy_env() {
-    # Humble and the neoracer overlay, as launch_autonomy.sh sources them. Run
-    # inside a subshell so the caller's interactive shell keeps its own
-    # environment.
-    # shellcheck disable=SC1091
-    source /opt/ros/humble/setup.bash
-    # shellcheck disable=SC1090
-    [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
-    systemctl is-active --quiet neoracer-teleop 2>/dev/null || \
-        echo "warning: teleop service not active; /scan and /odom are missing" >&2
-    return 0
-}
-
 # Core stack, enabled at boot by setup_services.sh. neoracer-autonomy is not
 # here: it rides on teleop and starts on demand, and setup does not install it
 # yet.
@@ -221,101 +208,6 @@ racecar() {
             # SLAM mapping and localization through neoracer-autonomy.service;
             # see scripts/neoracer_map.py and scripts/map_control.py.
             python3 "${RACECAR_MAP_SCRIPT:-$pkg_dir/scripts/neoracer_map.py}" "$@"
-            ;;
-
-        mapping)
-            # On-demand SLAM. Mapping is an activity, not a daemon: run it
-            # while building a map, Ctrl-C when done. Needs teleop (for /scan
-            # and /odom) and the autonomy base service (TF + bridge).
-            local sub="${1:-slam_toolbox}"
-            shift || true
-            local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
-            [[ "$sub" == "run" ]] && sub="slam_toolbox"
-            case "$sub" in
-                slam_toolbox|gmapping|cartographer)
-                    (
-                        _rc_autonomy_env || exit 1
-                        echo "SLAM up ($sub). Drive under RC; Ctrl-C when the map is complete."
-                        echo "Save from another terminal: racecar mapping save <name>"
-                        exec ros2 launch osracer_slam "$sub.launch.py" "$@"
-                    )
-                    ;;
-                save)
-                    local name="${1:-map}"
-                    (
-                        _rc_autonomy_env || exit 1
-                        mkdir -p "$maps_dir"
-                        ros2 run nav2_map_server map_saver_cli -f "$maps_dir/$name" && \
-                            echo "Saved: $maps_dir/$name.yaml  (drive it with: racecar navigation $name)"
-                    )
-                    ;;
-                rviz)
-                    # The vendor's pre-configured mapping RViz. Needs a display:
-                    # run from the car desktop (monitor or RustDesk), not SSH.
-                    # Cartographer has its own debug view: racecar mapping rviz cartographer
-                    local view="debug_mapping"
-                    [[ "${1:-}" == "cartographer" ]] && view="debug_cartographer"
-                    (
-                        _rc_autonomy_env || exit 1
-                        if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-                            echo "racecar mapping rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
-                            exit 1
-                        fi
-                        exec ros2 launch osracer_debug "$view.launch.py"
-                    )
-                    ;;
-                -h|--help|help)
-                    echo "usage: racecar mapping [backend]     start SLAM: slam_toolbox (default), gmapping, cartographer"
-                    echo "       racecar mapping save <name>   save the current map (works with any backend)"
-                    echo "       racecar mapping rviz [cartographer]  watch the map form (car desktop only)"
-                    ;;
-                *)
-                    echo "racecar mapping: unknown action '$sub'" >&2
-                    return 2
-                    ;;
-            esac
-            ;;
-
-        navigation)
-            # On-demand Nav2 against a saved map. Foreground; Ctrl-C stops it.
-            # slam and nav are mutually exclusive (both would publish
-            # map->odom), so don't run this while `racecar mapping` is up.
-            # Optional first arg picks the local planner: teb (default) or dwb.
-            # `racecar navigation rviz` opens the navigation RViz view instead
-            # (set a goal, watch the plan); needs the car desktop.
-            if [[ "${1:-}" == "rviz" ]]; then
-                (
-                    _rc_autonomy_env || exit 1
-                    if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-                        echo "racecar navigation rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
-                        exit 1
-                    fi
-                    exec rviz2 -d "$HOME/osracer_ws/src/osracer/osracer_debug/config/navigation.rviz"
-                )
-                return
-            fi
-            local planner="teb"
-            case "${1:-}" in
-                teb|dwb) planner="$1"; shift ;;
-            esac
-            local map_name="${1:-map}"
-            shift || true
-            local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
-            if [[ ! -f "$maps_dir/$map_name.yaml" ]]; then
-                echo "racecar navigation: no map named '$map_name' in $maps_dir" >&2
-                local avail=""
-                for f in "$maps_dir"/*.yaml; do
-                    [[ -e "$f" ]] && avail+="$(basename "${f%.yaml}") "
-                done
-                echo "  available maps: ${avail:-none (build one with: racecar mapping)}" >&2
-                return 2
-            fi
-            (
-                _rc_autonomy_env || exit 1
-                exec ros2 launch osracer_navigation nav2.launch.py \
-                    use_planner:="$planner" use_map:="$map_name" \
-                    use_rviz:='False' use_namespace:='False' "$@"
-            )
             ;;
 
         update)
@@ -1125,14 +1017,6 @@ Commands:
                           foxglove on|off     foxglove_bridge (port 8765) at the
                                               next start or load
                         Poses are in the map frame: meters, meters, radians.
-    mapping [backend]   Start SLAM to build a map (foreground; Ctrl-C to stop).
-                        Backends: slam_toolbox (default), gmapping, cartographer.
-                        `racecar mapping save <name>` saves from any backend.
-    navigation [teb|dwb] [map]
-                        Start Nav2 on a saved map (foreground; Ctrl-C to stop).
-                        Planner: teb (default) or dwb. Default map name: map.
-                        `racecar navigation rviz` opens the goal-setting RViz
-                        view (car desktop only).
     update              Field update in one command: repo to latest origin/main
                         (discards local repo edits), full `setup all`, restart
                         all services. Needs internet.
@@ -1228,7 +1112,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test profile data log calibrate lint source ws cd teleop map mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile data log calibrate lint source ws cd teleop map launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -1328,11 +1212,6 @@ _racecar_complete() {
                 esac
             fi
             ;;
-        mapping)
-            if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "slam_toolbox gmapping cartographer save rviz" -- "$cur") )
-            fi
-            ;;
         log)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "start stop status list analyze config help" -- "$cur") )
@@ -1354,15 +1233,6 @@ _racecar_complete() {
                         COMPREPLY=( $(compgen -W "--dir --help" -- "$cur") )
                         ;;
                 esac
-            fi
-            ;;
-        navigation)
-            if [[ $COMP_CWORD -ge 2 ]]; then
-                local maps="teb dwb rviz "
-                for f in "$HOME"/osracer_ws/src/osracer/osracer_slam/maps/*.yaml; do
-                    [[ -e "$f" ]] && maps+="$(basename "${f%.yaml}") "
-                done
-                COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
             fi
             ;;
         service)
