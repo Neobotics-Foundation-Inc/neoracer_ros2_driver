@@ -240,11 +240,17 @@ def source_in_use(run: Run, firmware: Run) -> str:
 
 
 def rest_bias(firmware: list[list[float]], rates: list[tuple[float, float]]) -> float:
-    """Return the mean gyro rate before the wheels first turn: the replay's starting bias."""
+    """
+    Return the median gyro rate before the wheels first turn: the replay's starting bias.
+
+    The rest before a recorded run is not controlled. A hand on the car or a
+    steering move turns it for a moment while the wheels stand still, and on
+    a short rest those samples move a mean far more than a median.
+    """
     moving = [row[0] for row in firmware if row[4] != 0.0]
     start = moving[0] if moving else math.inf
     still = [rate for t, rate in rates if t < start]
-    return float(np.mean(still)) if still else 0.0
+    return float(np.median(still)) if still else 0.0
 
 
 def integrated_run(bag: BagData, params: dict | None = None) -> Run | None:

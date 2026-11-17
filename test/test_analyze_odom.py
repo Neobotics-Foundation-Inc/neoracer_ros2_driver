@@ -312,6 +312,17 @@ class TestOtherSource:
         rates = [(row[0], 0.01 if row[0] < 1.0 else 0.5) for row in rows]
         assert odom.rest_bias(rows, rates) == pytest.approx(0.01)
 
+    def test_a_turn_during_the_rest_does_not_set_the_bias(self, odom):
+        # Dev car, 2026-11-17: 0.69 s of rest with 0.17 s turning at up to
+        # 6 deg/s. The mean read -1.25 deg/s and the replayed circle came out
+        # 7 deg short; the median read -0.05 deg/s.
+        rows = _rows(1.0)
+        rates = [
+            (row[0], -0.1 if 0.2 <= row[0] < 0.4 else 0.001 if row[0] < 1.0 else 0.5)
+            for row in rows
+        ]
+        assert odom.rest_bias(rows, rates) == pytest.approx(0.001)
+
     def test_without_odom_the_source_is_unknown(self, odom):
         data = odom.BagData(odom.firmware_run(_rows(1.0)), [], [])
         assert odom.other_source(data)[:2] == ('unknown', '')
