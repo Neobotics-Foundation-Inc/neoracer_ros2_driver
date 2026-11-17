@@ -94,6 +94,10 @@ SETTLE_TIMEOUT = 20.0
 SCALE_LIMITS = (0.8, 1.25)
 SPIN_TURNS = 3
 CHECK_TURNS = 2
+# A spin short of this share of the circles asked for, or a drive short of
+# MIN_DRIVE_M, was not driven as asked (often Enter pressed before driving);
+# it is offered again rather than measured.
+MIN_TURN_SHARE = 0.75
 # The gyro picks the whole-turn count; beyond this from the lidar it cannot.
 UNWRAP_LIMIT_DEG = 90.0
 MIN_DRIVE_M = 2.0
@@ -168,6 +172,11 @@ def resolve_turns(lidar_rad: float, gyro_rad: float) -> float | None:
     turn = 2 * math.pi
     true = lidar_rad + turn * round((gyro_rad - lidar_rad) / turn)
     return true if abs(true - gyro_rad) <= math.radians(UNWRAP_LIMIT_DEG) else None
+
+
+def turned_enough(gyro_rad: float, turns: int) -> bool:
+    """Return whether a spin turned at least MIN_TURN_SHARE of the circles asked for."""
+    return abs(gyro_rad) >= MIN_TURN_SHARE * turns * 2 * math.pi
 
 
 def scale_ok(scale: float) -> bool:
@@ -610,6 +619,12 @@ class OdomCalibrator(CalibratorNode):
         run = self.measure(SPIN_PLACE, spin_lines(turns))
         if run is None:
             return None
+        if not turned_enough(run.gyro_rad, turns):
+            self.get_logger().error(
+                f'The car turned {abs(math.degrees(run.gyro_rad)):.0f} deg. '
+                f'Drive {turns} full circles, then stop and press Enter.'
+            )
+            return None
         true = resolve_turns(run.lidar[2], run.gyro_rad)
         if true is None:
             self.get_logger().error(
@@ -770,6 +785,11 @@ class OdomCalibrator(CalibratorNode):
         if run is None:
             return None
         lidar_m = math.hypot(run.lidar[0], run.lidar[1])
+        if lidar_m < MIN_DRIVE_M:
+            self.get_logger().error(
+                f'The car drove {lidar_m:.2f} meters. Drive at least {MIN_DRIVE_M:g} meters.'
+            )
+            return None
         odom_m = math.hypot(run.odom[0], run.odom[1])
         if abs(lidar_m - odom_m) > max(CONSISTENT_MIN_M, CONSISTENT_FRACTION * odom_m):
             return [

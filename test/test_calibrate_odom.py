@@ -93,6 +93,18 @@ class TestScaleLimits:
         assert odom.scale_ok(0.96) and odom.scale_ok(1.08)
 
 
+class TestEnoughMotion:
+    def test_a_spin_needs_most_of_the_circles_asked_for(self, odom):
+        turn = 2 * math.pi
+        assert odom.turned_enough(-2.97 * turn, odom.SPIN_TURNS)
+        assert odom.turned_enough(2.0 * turn, odom.CHECK_TURNS)
+        assert not odom.turned_enough(0.0, odom.CHECK_TURNS)
+        assert not odom.turned_enough(1.4 * turn, odom.CHECK_TURNS)
+
+    def test_a_check_drive_needs_the_same_length_as_a_calibration(self, odom):
+        assert odom.MIN_DRIVE_M == 2.0
+
+
 class TestCriteria:
     @pytest.mark.parametrize(
         'measured,status', [(721.0, 'PASS'), (735.0, 'WARN'), (760.0, 'FAIL'), (-722.0, 'PASS')]
