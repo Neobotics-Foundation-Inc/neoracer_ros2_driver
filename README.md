@@ -66,7 +66,7 @@ Published topics:
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 - `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. Off at boot by default; see [Object detection](#object-detection).
 
-The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch decides who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
+The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch selects who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
 Safety and uptime layers:
 
@@ -127,7 +127,7 @@ sudo reboot
 After reboot, verify and start the stack:
 
 ```sh
-racecar status              # USB peripherals + /dev/osrbot_* symlinks + running nodes
+racecar status --quick      # devices, system, services and network, without ROS
 racecar service status      # units enabled by setup, teleop not yet running
 racecar service start       # starts neoracer-teleop (watchdog follows)
 ```
@@ -203,14 +203,14 @@ racecar library --select <dir>  # point the student library at a notebook tree
 racecar selftest --led[=TEXT]   # send test text to the 8x8 display
 racecar clear --led             # blank the display until something writes to it
 racecar udev                    # re-install the udev rules
-racecar status                  # peripherals + symlinks + running nodes
+racecar status                  # whole-car diagnostic (--quick, --json, --strict)
 racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
 
 `racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
 
-`racecar calibrate` keeps its results in the car profile under `~/.config/racecar`. The steering trim is set in the ESP32 firmware with `trim set`, which also trims manual driving, and the profile keeps a copy. Where a step drives the car by itself, it drives only while the handset's mode switch is down (autonomy); flip the switch up to stop. The step tools arrive one at a time, and a step whose tool is not in the driver yet shows as not installed. The lidar step drives the car forward and back at 0.5 m/s and measures the lidar yaw from the direction of travel; it needs the odometry and dynamics tools as well. Until they are in, `python3 scripts/calibration/calibrate_lidar.py --wall` measures it with the car still and squared to a flat wall (`--wall --check` reports without writing). Calibration speeds are given in m/s and converted with the car's `max_speed_mps` and throttle caps. The dynamics step drives straight at 0.62, 0.75 and 1.0 m/s and in full-lock circles at 0.62 m/s, and writes the measured values for the simulator to `params/dynamics.yaml`. It needs a clear straight path of about 4 meters and a clear area of about 3 by 3 meters. Each of its runs starts only after the mode switch has been seen up and then down.
+`racecar calibrate` keeps its results in the car profile under `~/.config/racecar`. The steering trim is set in the ESP32 firmware with `trim set`, which also trims manual driving, and the profile keeps a copy. You drive the car for the odometry step with the handset, mode switch up (manual). A step that drives the car by itself drives only while the handset's mode switch is down (autonomy). Start with the switch up and flip it down when the step asks. Flip it up to stop. Turning the handset off does not stop the car. A step whose tool is not installed shows as not installed. The lidar step drives the car forward and back at 0.5 m/s and measures the lidar yaw from the direction of travel. It needs the odometry and dynamics tools as well. `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/calibration/calibrate_lidar.py --wall` measures the yaw with the car still and squared to a flat wall, and `--wall --check` reports without writing. Calibration speeds are given in m/s and converted with the car's `max_speed_mps` and throttle caps. The dynamics step drives straight at 0.62, 0.75 and 1.0 m/s and in full-lock circles at 0.62 m/s, and writes the measured values for the simulator to `params/dynamics.yaml`. It needs a clear straight path of about 4 meters and a clear area of about 3 by 3 meters. Each of its runs starts only after the mode switch has been seen up and then down.
 
 ## Networking (optional)
 
@@ -266,7 +266,7 @@ racecar navigation rviz         # RViz goal-setting view, on the car's desktop
 
 `twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
 
-Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still decides whether the car follows them.
+Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
 ## Web dashboard
 
@@ -474,7 +474,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 ## Troubleshooting
 
-**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. Check IDs with `racecar status` or `udevadm info -n /dev/ttyACM0`.
+**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. `racecar status` shows which links are present; check a device's IDs with `lsusb` or `udevadm info -n /dev/ttyACM0`.
 
 **No `/scan`.** Confirm the lidar answers: `ping 192.168.8.2`. If it doesn't, the USB-C link should bring up an interface at `192.168.8.1`; see [Networking](#networking-optional). Then read [Checking lidar health](#checking-lidar-health) before concluding the sensor is dead.
 
@@ -486,7 +486,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 
-**FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
+**FlySky channels are wrong.** The shipped mapping fits the FlySky handset the NeoRacer ships with. For another handset, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel`, `steering_channel` and `mode_channel` in the car profile, `~/.config/racecar/params/controller.yaml`. With the mode switch up, a handset that goes off reads `-1` on every channel within a second, which maps to neutral. With the switch down the loss is not reported: the channels repeat their last values.
 
 **JetPack dpkg errors.** Reset the dpkg info directory:
 

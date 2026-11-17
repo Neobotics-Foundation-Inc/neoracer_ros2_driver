@@ -9,9 +9,9 @@ them at launch, so a teleop restart applies them. The steering trim is the
 exception: it lives in the ESP32 firmware (`trim set`), and the profile keeps
 a copy.
 
-The NeoRacer has no IMU, magnetometer or RealSense calibration step: the ESP32
-fuses and bias-corrects the IMU on board, so upstream's IMU bias tools and
-their shared code are not here.
+The NeoRacer has no IMU, magnetometer or RealSense calibration step.
+Upstream's steps calibrate the LSM9DS1 and the RealSense, which the NeoRacer
+does not have, so their shared IMU code is not here.
 """
 
 from __future__ import annotations
@@ -40,6 +40,16 @@ PACKAGE = 'neoracer_ros2_driver'
 os.environ.setdefault('RCUTILS_CONSOLE_OUTPUT_FORMAT', '{message}')
 # Set by calibrate.py for the tools it runs; it backs up and restarts teleop itself.
 SESSION_ENV = 'RACECAR_CALIBRATE_SESSION'
+# The handset's mode switch is the deadman of every step that drives the car.
+# It stays where it is put, and with it DOWN the firmware keeps following the
+# Jetson when the handset goes off.
+DEADMAN = (
+    'Turn the handset on and keep it in your hand.\n'
+    'Start with the mode switch UP (manual).\n'
+    'The car drives itself only while the mode switch is DOWN (autonomy).\n'
+    'Flip it DOWN only when the step asks.\n'
+    'Flip the mode switch UP to stop. Turning the handset off does not stop the car.'
+)
 FIRST_MESSAGE_TIMEOUT = 15.0
 PROGRESS_INTERVAL = 5.0
 

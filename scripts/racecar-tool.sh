@@ -1019,24 +1019,11 @@ __RC_SELFTEST_HELP__
             ;;
 
         status)
-            echo "=== USB peripherals ==="
-            lsusb | grep -iE "303a|1209|1bcf|2993|05a3|espressif|decxin|camera" || echo "  (none of the expected USB devices found)"
-            echo
-            echo "=== Stable device symlinks ==="
-            for s in osrbot_base osrbot_led_matrix osrbot_usb_cam; do
-                if [[ -e "/dev/$s" ]]; then
-                    printf "  /dev/%-18s -> %s\n" "$s" "$(readlink -f /dev/$s)"
-                else
-                    printf "  /dev/%-18s MISSING (run: racecar udev)\n" "$s"
-                fi
-            done
-            echo
-            echo "=== ros2 nodes running ==="
-            if command -v ros2 >/dev/null; then
-                ros2 node list 2>/dev/null || echo "  (no ROS daemon / no nodes)"
-            else
-                echo "  ros2 not on PATH"
-            fi
+            # Whole-car diagnostic. Read-only: it observes topics and reads
+            # sysfs, and never commands the hardware. Exits non-zero when a
+            # check fails (--strict: unless every check passed), so it is
+            # usable from a script.
+            python3 "${RACECAR_DIAGNOSE_SCRIPT:-$pkg_dir/scripts/diagnose.py}" "$@"
             ;;
 
         help|-h|--help|"")
@@ -1084,15 +1071,20 @@ Commands:
                                       the car drives itself
                           odom        gyro yaw scale (circles) and encoder
                                       speed scale (straight drive), both
-                                      against the lidar
+                                      against the lidar; you drive the car
+                                      with the handset, mode switch UP
+                                      (manual)
                           steering    steering trim, set in the ESP32
                                       firmware (trim set), with a copy in the
                                       car profile; the car drives itself
                           dynamics    steering angles, servo time, speeds
                                       and stop distances for the simulator;
                                       the car drives itself; no check
-                        The car drives itself only with the handset's mode
-                        switch DOWN (autonomy). Flip it UP to stop.
+                        A step that drives the car by itself drives only
+                        while the handset's mode switch is DOWN (autonomy).
+                        Start with the switch UP and flip it DOWN when the
+                        step asks. Flip it UP to stop. Turning the handset
+                        off does not stop the car.
                         No arguments: all but dynamics.
                         `racecar calibrate status` lists what is calibrated
                         on this car, when, and the stored values.
@@ -1178,7 +1170,17 @@ Commands:
                           racecar selftest --led            (sends test text)
                           racecar selftest --led=HELLO      (sends custom text)
                         Requires led_matrix_node running (racecar launch led_matrix).
-    status              Show USB peripherals, device symlinks, and running ros2 nodes.
+    status [flags]      Whole-car diagnostic: devices, sensors, actuators,
+                        autonomy, system, services and network in one pass.
+                        Read-only. Exits non-zero when a check fails; WARN
+                        still exits 0.
+                          --quick             skip the ROS sampling phase
+                          --json              machine-readable output
+                          --strict            also exit non-zero on WARN/SKIP
+                          --section a,b       devices, sensors, actuators,
+                                              autonomy, system, services,
+                                              network
+                          --window SEC        ROS sample window (default 5.0)
     help                Show this message.
 
 Extra args are forwarded:
@@ -1209,6 +1211,9 @@ _racecar_complete() {
     case "$sub" in
         calibrate)
             COMPREPLY=( $(compgen -W "status check lidar odom steering dynamics --help" -- "$cur") )
+            ;;
+        status)
+            COMPREPLY=( $(compgen -W "--quick --json --strict --section --window --help" -- "$cur") )
             ;;
         launch)
             local launch_dir="$HOME/ros2_ws/src/neoracer_ros2_driver/launch"

@@ -2,6 +2,7 @@
 
 import math
 from pathlib import Path
+import sys
 
 from conftest import load_script as _load
 import numpy as np
@@ -213,9 +214,38 @@ class TestDrivePlan:
             assert cmd * limits.mps_per_command(mps >= 0) == pytest.approx(mps)
 
     def test_the_operator_is_told_how_to_stop(self, cal):
-        assert 'mode switch DOWN' in cal.STOP
-        assert 'Flip the mode switch UP to stop.' in cal.STOP
-        assert 'RB' not in cal.STOP + cal.MOTION + cal.PLACE
+        # The switch latches: start up, and the handset going off is no stop.
+        assert 'Start with the mode switch UP (manual).' in cal.DEADMAN
+        assert 'mode switch is DOWN (autonomy)' in cal.DEADMAN
+        assert 'Flip the mode switch UP to stop.' in cal.DEADMAN
+        assert 'Turning the handset off does not stop the car.' in cal.DEADMAN
+        assert 'RB' not in cal.DEADMAN + cal.MOTION + cal.PLACE
+
+    def test_without_its_tools_the_driving_method_says_why_and_starts_nothing(
+        self, cal, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(cal, 'missing_drive_tools', lambda: ['calibrate_dynamics.py'])
+        monkeypatch.setattr(cal, 'DriveYawCalibrator', None)
+        for argv in ([], ['--check'], ['--analyze', 'bag']):
+            monkeypatch.setattr(cal.sys, 'argv', ['calibrate_lidar.py', *argv])
+            assert cal.main() == 1
+            err = capsys.readouterr().err
+            assert 'needs calibrate_dynamics.py, which are not in this driver yet' in err
+            assert 'Use --wall meanwhile' in err
+
+    def test_limits_that_cannot_give_the_speed_stop_before_any_node(
+        self, cal, monkeypatch, capsys
+    ):
+        ds = _load('drive_speed')
+        monkeypatch.setattr(cal, 'missing_drive_tools', lambda: [])
+        monkeypatch.setattr(cal, 'drive_limits', lambda: ds.DriveLimits(6.0, 0.05, 1.0))
+        monkeypatch.setattr(cal.sys, 'argv', ['calibrate_lidar.py'])
+        dynamics = type(sys)('calibrate_dynamics')
+        dynamics.Driver = lambda: pytest.fail('the driver started')
+        dynamics.laser_pose = lambda: (0.0, 0.0, 0.0)
+        monkeypatch.setitem(sys.modules, 'calibrate_dynamics', dynamics)
+        assert cal.main() == 1
+        assert 'The driving method cannot run: +0.5 m/s needs /drive' in capsys.readouterr().err
 
     def test_missing_drive_tools_are_named(self, cal, tmp_path):
         assert cal.missing_drive_tools(tmp_path) == [
