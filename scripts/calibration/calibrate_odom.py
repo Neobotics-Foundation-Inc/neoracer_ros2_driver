@@ -14,24 +14,25 @@ from 1 is not written: the ESP32 sends the gyro in rad/s, so it points at the
 axis settings or at a run that did not go as driven.
 
 Drive: the car drives straight toward a wall and stops short of it.
-odometry.speed_scale = base x lidar distance / /odom/integrated distance.
-The base is the current scale when /odom/integrated comes from the
-integrated source, and 1 when it comes from the firmware pose, which the
-driver's scale does not touch.
+odometry.speed_scale = current scale x lidar distance / integrated distance.
+
+Every run and --check report two poses against the lidar. The firmware pose
+is the ESP32's own, on /odom, with the board's odom scale. The integrated
+estimate is what odometry.source: integrated gives with the scales in use:
+/odom/integrated on the integrated source, and on the firmware source a
+replay of the run's /odom speed and /imu/fused gyro through the driver's
+OdomIntegrator with the controller's settings. --check judges the source in
+use and lists the other one for comparison, so a fault in the integration
+shows instead of hiding in a scale.
 
 Both scales act only on the integrated source (odometry.source: integrated,
 neoracer_ros2_driver/odometry.py). The firmware's own `odom scale` is not
-changed here. Both runs also compare /odom/integrated with the lidar, so a
-fault in the integration shows instead of hiding in a scale. Writes the car
-profile's params/odom.yaml for controller_node, keeping the other step's
-value. --check judges /odom/integrated against the lidar with the scales in
-use.
+changed here. Writes the car profile's params/odom.yaml for controller_node,
+keeping the other step's value.
 
 Before a run the tool reads odometry.source and the scales from
-controller_node. It stops when they differ from the files, because the speed
-scale is measured against the pose the controller publishes. On the firmware
-source both runs and --check report how far the ESP32's own pose is from the
-lidar; the scales written then take effect only on the integrated source.
+controller_node. It stops when they differ from the files, because the
+estimates follow the values the controller runs.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from typing import Any
 from nav_msgs.msg import Odometry
 import numpy as np
 from neoracer_ros2_driver.frames import load_frames
+from neoracer_ros2_driver.odometry import OdomIntegrator
 from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters
 import rclpy
@@ -107,6 +109,8 @@ SCALE_KEYS = ('odometry.yaw_rate_scale', 'odometry.speed_scale')
 LIVE_KEYS = ('odometry.source', *SCALE_KEYS)
 # The gyro the integrator reads: /imu/fused after the profile's axis remap.
 GYRO_TOPIC = '/imu/fused'
+# The ESP32's own pose and the frame's body speed, whatever the source.
+FIRMWARE_TOPIC = '/odom'
 PARAM_TIMEOUT = 3.0
 
 HANDS_OFF = f'Press Enter, then keep your hands off the car for {REST_SECONDS:.0f} seconds...'
@@ -170,37 +174,47 @@ def scale_ok(scale: float) -> bool:
     return SCALE_LIMITS[0] <= scale <= SCALE_LIMITS[1]
 
 
+def speed_ratio(lidar_m: float, integrated_m: float) -> float:
+    """Return lidar / integrated distance: the factor the speed scale moves by."""
+    return lidar_m / integrated_m if integrated_m > 0 else math.inf
+
+
 def graded(error: float, passing: float, warning: float) -> str:
     return 'PASS' if abs(error) <= passing else 'WARN' if abs(error) <= warning else 'FAIL'
 
 
-def spin_criterion(odom_deg: float, lidar_deg: float, source: str = 'integrated') -> Criterion:
+def source_advice(scale: str, source: str) -> str:
+    """Return what to do about a pose off the lidar: only the integrated source has scales."""
+    if source == 'integrated':
+        return f'recalibrate the {scale} scale: racecar calibrate odom'
+    return FIRMWARE_ADVICE
+
+
+def spin_criterion(
+    odom_deg: float, lidar_deg: float, source: str = 'integrated', judged: bool = True
+) -> Criterion:
+    """Grade one source's heading against the lidar; a source not in use is INFO."""
     error = odom_deg / lidar_deg - 1.0
     return Criterion(
-        'spin heading',
+        f'spin {source}',
         f'{odom_deg:+.1f} deg ({error:+.2%})',
         f'lidar {lidar_deg:+.1f} within {SPIN_PASS:.0%} (warn to {SPIN_WARN:.0%})',
-        graded(error, SPIN_PASS, SPIN_WARN),
-        (
-            'recalibrate the yaw scale: racecar calibrate odom'
-            if source == 'integrated'
-            else FIRMWARE_ADVICE
-        ),
+        graded(error, SPIN_PASS, SPIN_WARN) if judged else 'INFO',
+        source_advice('yaw', source) if judged else '',
     )
 
 
-def drive_criterion(odom_m: float, lidar_m: float, source: str = 'integrated') -> Criterion:
+def drive_criterion(
+    odom_m: float, lidar_m: float, source: str = 'integrated', judged: bool = True
+) -> Criterion:
+    """Grade one source's distance against the lidar; a source not in use is INFO."""
     error = odom_m / lidar_m - 1.0
     return Criterion(
-        'drive distance',
+        f'drive {source}',
         f'{odom_m:.3f} m ({error:+.2%})',
         f'lidar {lidar_m:.3f} m within {DRIVE_PASS:.0%} (warn to {DRIVE_WARN:.0%})',
-        graded(error, DRIVE_PASS, DRIVE_WARN),
-        (
-            'recalibrate the speed scale: racecar calibrate odom'
-            if source == 'integrated'
-            else FIRMWARE_ADVICE
-        ),
+        graded(error, DRIVE_PASS, DRIVE_WARN) if judged else 'INFO',
+        source_advice('speed', source) if judged else '',
     )
 
 
@@ -296,13 +310,66 @@ def stale_files(
     return ''
 
 
-def firmware_line(what: str, odom: float, lidar: float, passing: float) -> str:
-    """Say how far the firmware pose is from the lidar, beside the --check pass limit."""
+def pose_line(source: str, what: str, odom: float, lidar: float, passing: float) -> str:
+    """Say how far one source's pose is from the lidar, beside the --check pass limit."""
     error = odom / lidar - 1.0 if lidar else math.inf
     return (
-        f'Firmware {what}: {error:+.2%} against the lidar '
+        f'{source.capitalize()} {what}: {error:+.2%} against the lidar '
         f'(the check passes within {passing:.0%}).'
     )
+
+
+@dataclass(frozen=True)
+class Integration:
+    """The controller's odometry.* settings for the integrated source (config/odom.yaml)."""
+
+    speed_scale: float = 1.0
+    yaw_scale: float = 1.0
+    zero_hold_sec: float = 1.0
+    zero_max_rate_dps: float = 2.0
+    bias_tau_sec: float = 30.0
+    stale_sec: float = 0.25
+    turn_gain: float = 0.0
+    wheelbase_m: float = 0.28764
+    max_steer_deg: float = 30.0
+
+
+def integrated_motion(
+    odom: list[list[float]], gyro: list[tuple[float, float]], bias: float, cfg: Integration
+) -> Pose | None:
+    """
+    Replay a run through the driver's integrator, as the integrated source would run it.
+
+    odom holds [t, x, y, yaw, v] samples from /odom, where v is the frame's
+    body speed; gyro holds (t, rate) from /imu/fused with the yaw axis and
+    sign applied. Each /odom sample is one step, as each `s` frame is in the
+    controller, with the gyro rate at its time and the controller's scales.
+    The bias estimate starts from the first rest's mean, where the
+    controller's has had time to settle. Returns base_link's motion in the
+    start frame, heading unwrapped, or None without samples.
+    """
+    if len(odom) < 2 or len(gyro) < 2:
+        return None
+    rates = np.asarray(gyro, float)
+    integrator = OdomIntegrator(
+        zero_hold_sec=cfg.zero_hold_sec,
+        zero_max_rate=math.radians(cfg.zero_max_rate_dps),
+        bias_tau_sec=cfg.bias_tau_sec,
+        stale_sec=cfg.stale_sec,
+        turn_gain=cfg.turn_gain,
+        wheelbase=cfg.wheelbase_m,
+        max_steer=math.radians(cfg.max_steer_deg),
+    )
+    integrator.bias = bias * cfg.yaw_scale
+    heading = 0.0
+    for t, _x, _y, _yaw, v in odom:
+        before = integrator.state.theta
+        rate = float(np.interp(t, rates[:, 0], rates[:, 1]))
+        integrator.step(t, v * cfg.speed_scale, rate * cfg.yaw_scale)
+        turn = integrator.state.theta - before
+        heading += math.atan2(math.sin(turn), math.cos(turn))
+    state = integrator.state
+    return state.x, state.y, heading
 
 
 def odom_motion(poses: list[list[float]]) -> Pose:
@@ -319,8 +386,14 @@ class Run:
 
     lidar: Pose  # base_link motion from the scan match; heading modulo 2 pi
     match: MatchResult
-    odom: Pose  # from /odom/integrated; heading unwrapped
+    odom: Pose  # from /odom/integrated, the source in use; heading unwrapped
     gyro_rad: float  # yaw from the gyro, current scale, bias from the first rest
+    firmware: Pose  # the ESP32's own pose, from /odom
+    integrated: Pose  # the integrated source's estimate with the scales in use
+
+    def poses(self) -> tuple[tuple[str, Pose], tuple[str, Pose]]:
+        """Return both sources' accounts of the run, firmware first."""
+        return ('firmware', self.firmware), ('integrated', self.integrated)
 
 
 # Heading offsets tried around the gyro's guess. ICP converges from about
@@ -373,6 +446,17 @@ class OdomCalibrator(CalibratorNode):
         self.sign = float(params.get('odometry.yaw_rate_sign', 1.0))
         self.yaw_scale = float(params.get('odometry.yaw_rate_scale', 1.0))
         self.speed_scale = float(params.get('odometry.speed_scale', 1.0))
+        self.integration = Integration(
+            speed_scale=self.speed_scale,
+            yaw_scale=self.yaw_scale,
+            zero_hold_sec=float(params.get('odometry.zero_hold_sec', 1.0)),
+            zero_max_rate_dps=float(params.get('odometry.zero_max_rate_dps', 2.0)),
+            bias_tau_sec=float(params.get('odometry.bias_tau_sec', 30.0)),
+            stale_sec=float(params.get('odometry.stale_input_sec', 0.25)),
+            turn_gain=float(params.get('odometry.turn_gain', 0.0)),
+            wheelbase_m=float(params.get('odometry.wheelbase_m', 0.28764)),
+            max_steer_deg=float(params.get('odometry.max_steer_deg', 30.0)),
+        )
         config_dir = install_config_dir() or source_config_dir()
         if config_dir is None:
             raise RuntimeError('No config folder for neoracer_ros2_driver: run racecar build.')
@@ -383,6 +467,7 @@ class OdomCalibrator(CalibratorNode):
             math.radians(frames['laser_yaw_deg']),
         )
         self._gyro: list[tuple[float, float]] = []
+        self._firmware: list[list[float]] = []
         self._gyro_on = False
         self._last_rate = 0.0
         self._last_speed: float | None = None
@@ -391,6 +476,9 @@ class OdomCalibrator(CalibratorNode):
         self._scan_meta: tuple[float, float, float, float] | None = None
         self._aux_lock = threading.Lock()
         self.create_subscription(Imu, GYRO_TOPIC, self._gyro_cb, qos_profile_sensor_data)
+        self.create_subscription(
+            Odometry, FIRMWARE_TOPIC, self._firmware_cb, qos_profile_sensor_data
+        )
         self.create_subscription(LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
 
     def extract(self, msg: Any) -> list[float]:
@@ -415,6 +503,12 @@ class OdomCalibrator(CalibratorNode):
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             with self._aux_lock:
                 self._gyro.append((stamp, rate))
+
+    def _firmware_cb(self, msg: Any) -> None:
+        if self._gyro_on:
+            sample = self.extract(msg)
+            with self._aux_lock:
+                self._firmware.append(sample)
 
     def _scan_cb(self, msg: Any) -> None:
         if self._scan_on:
@@ -463,6 +557,7 @@ class OdomCalibrator(CalibratorNode):
             self._samples = []
         with self._aux_lock:
             self._gyro = []
+            self._firmware = []
         self._collecting = True
         self._gyro_on = True
         start_scan = self._rest_scan()
@@ -483,13 +578,22 @@ class OdomCalibrator(CalibratorNode):
             poses = list(self._samples)
         with self._aux_lock:
             gyro = list(self._gyro)
+            firmware = list(self._firmware)
         if start_scan is None or end_scan is None or len(start_scan) < 50 or len(end_scan) < 50:
             log.error('No lidar scans received. Check that teleop is running.')
             return None
-        if len(poses) < 2:
+        if len(poses) < 2 or len(firmware) < 2:
             log.error('No odometry received. Check that teleop is running.')
             return None
         odom = odom_motion(poses)
+        integrated = (
+            odom
+            if self.source == 'integrated'
+            else integrated_motion(firmware, gyro, bias, self.integration)
+        )
+        if integrated is None:
+            log.error('No gyro received. Check that teleop is running.')
+            return None
         gyro_rad = integrate_rate(gyro, bias) * self.yaw_scale
         # The gyro guesses the heading: it is what the scale corrects, and
         # /odom/integrated is what is under test.
@@ -498,7 +602,8 @@ class OdomCalibrator(CalibratorNode):
             laser_motion((0.0, 0.0, gyro_rad), self.laser),
         ]
         match = best_match(start_scan, end_scan, guesses)
-        return Run(base_motion(match.pose, self.laser), match, odom, gyro_rad)
+        lidar = base_motion(match.pose, self.laser)
+        return Run(lidar, match, odom, gyro_rad, odom_motion(firmware), integrated)
 
     def spin(self, turns: int) -> tuple[Run, float] | None:
         """Return the spin run and its true heading change (rad), or None."""
@@ -523,10 +628,6 @@ class OdomCalibrator(CalibratorNode):
             self.get_logger().error(f'Scan match too poor ({c.measured}); {c.advice}.')
             return False
         return True
-
-    def speed_base(self) -> float:
-        """Return the speed scale already in /odom/integrated: 1 for the firmware pose."""
-        return self.speed_scale if self.source == 'integrated' else 1.0
 
     def run(self) -> int:
         log = self.get_logger()
@@ -580,9 +681,12 @@ class OdomCalibrator(CalibratorNode):
         run, true = spun
         scale = true / run.gyro_rad
         log.info(
-            f'Lidar {math.degrees(true):+.1f} deg, gyro {math.degrees(run.gyro_rad):+.1f} '
-            f'deg, odometry {math.degrees(run.odom[2]):+.1f} deg'
+            f'Lidar {math.degrees(true):+.1f} deg, gyro {math.degrees(run.gyro_rad):+.1f} deg, '
+            f'firmware {math.degrees(run.firmware[2]):+.1f} deg, '
+            f'integrated {math.degrees(run.integrated[2]):+.1f} deg'
         )
+        for source, pose in run.poses():
+            log.info(pose_line(source, 'heading', pose[2], true, SPIN_PASS))
         if not scale_ok(scale):
             log.error(
                 f'Gyro scale {scale:.3f} is outside 0.8 to 1.25. The ESP32 sends the gyro '
@@ -592,8 +696,6 @@ class OdomCalibrator(CalibratorNode):
             return None
         if self.source == 'integrated':
             self._warn_odom_mismatch(run.odom[2], run.gyro_rad, 'heading')
-        else:
-            log.info(firmware_line('heading', run.odom[2], true, SPIN_PASS))
         return 'odometry.yaw_rate_scale', round(self.yaw_scale * scale, 5)
 
     def _speed_step(self) -> tuple[str, float] | None:
@@ -603,22 +705,27 @@ class OdomCalibrator(CalibratorNode):
         if run is None or not self._match_ok(run):
             return None
         lidar_m = math.hypot(run.lidar[0], run.lidar[1])
-        odom_m = math.hypot(run.odom[0], run.odom[1])
-        log.info(f'Lidar {lidar_m:.3f} m, odometry {odom_m:.3f} m')
+        firmware_m = math.hypot(run.firmware[0], run.firmware[1])
+        integrated_m = math.hypot(run.integrated[0], run.integrated[1])
+        log.info(
+            f'Lidar {lidar_m:.3f} m, firmware {firmware_m:.3f} m, integrated {integrated_m:.3f} m'
+        )
         if lidar_m < MIN_DRIVE_M:
             log.error(
                 f'The car drove {lidar_m:.2f} meters. Drive at least {MIN_DRIVE_M:g} meters.'
             )
             return None
-        if self.source != 'integrated':
-            log.info(firmware_line('distance', odom_m, lidar_m, DRIVE_PASS))
-        ratio = lidar_m / odom_m if odom_m > 0 else math.inf
+        log.info(pose_line('firmware', 'distance', firmware_m, lidar_m, DRIVE_PASS))
+        log.info(pose_line('integrated', 'distance', integrated_m, lidar_m, DRIVE_PASS))
+        ratio = speed_ratio(lidar_m, integrated_m)
         if not scale_ok(ratio):
             log.error(
-                f'Odometry is off by more than 20% ({odom_m:.3f} m against {lidar_m:.3f} m).'
+                f'The integrated estimate is off by more than 20% ({integrated_m:.3f} m '
+                f'against {lidar_m:.3f} m).'
             )
             return None
-        return 'odometry.speed_scale', round(self.speed_base() * ratio, 5)
+        # The integrated estimate already carries the current scale.
+        return 'odometry.speed_scale', round(self.speed_scale * ratio, 5)
 
     def _warn_odom_mismatch(self, odom_rad: float, gyro_rad: float, what: str) -> None:
         """Warn when the integrated /odom/integrated disagrees with the gyro it integrates."""
@@ -649,7 +756,12 @@ class OdomCalibrator(CalibratorNode):
         run, true = spun
         return [
             match_criterion('spin scan match', run.match),
-            spin_criterion(math.degrees(run.odom[2]), math.degrees(true), self.source),
+            *(
+                spin_criterion(
+                    math.degrees(pose[2]), math.degrees(true), source, source == self.source
+                )
+                for source, pose in run.poses()
+            ),
             Criterion('gyro', f'{math.degrees(run.gyro_rad):+.1f} deg', '', 'INFO'),
         ]
 
@@ -672,10 +784,11 @@ class OdomCalibrator(CalibratorNode):
             ]
         return [
             match_criterion('drive scan match', run.match),
-            drive_criterion(
-                math.hypot(run.odom[0], run.odom[1]),
-                math.hypot(run.lidar[0], run.lidar[1]),
-                self.source,
+            *(
+                drive_criterion(
+                    math.hypot(pose[0], pose[1]), lidar_m, source, source == self.source
+                )
+                for source, pose in run.poses()
             ),
         ]
 
