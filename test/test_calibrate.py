@@ -432,8 +432,7 @@ class TestLayout:
     def test_plain_layout_off_a_terminal(self):
         common = load_script('calibrate_common')
         header = common.step_header('Step 1 of 2: gyro scale', color=False)
-        assert header.startswith('=== Step 1 of 2: gyro scale ===')
-        assert len(header) == common.HEADER_WIDTH
+        assert header == '=== Step 1 of 2: gyro scale ==='
         assert common.action_lines(1, ['Place the car.', 'Step back.'], color=False) == [
             '  [1] Place the car.',
             '      Step back.',
