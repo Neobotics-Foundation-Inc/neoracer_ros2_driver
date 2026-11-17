@@ -31,8 +31,8 @@ below that, leaving GPU headroom for whatever else the car is running.
 
 With ``pause_while_mapping``, the node drops its camera subscription while
 ``/autonomy/status`` reports mode ``mapping`` and subscribes again on any other
-mode, so slam_toolbox gets the CPU that the frames and the model would take
-while a map is built. The model stays loaded, so detections return with the
+mode. While a map is built, the car then spends no CPU decoding frames and no
+GPU time on the model. The model stays loaded, so detections return with the
 first frame after mapping ends.
 
 Health goes to ``/diagnostics`` (``DiagnosticArray``) on a timer: inference
@@ -149,8 +149,8 @@ class InferenceNode(Node):
         self.image_qos = qos
         self.image_sub = None
         self._subscribe_images()
-        # Latched, as autonomy_node publishes it, so a node started while
-        # mapping reads the mode as soon as it subscribes.
+        # The status subscription is latched, as autonomy_node publishes it, so
+        # a node started while mapping reads the mode as soon as it subscribes.
         latched = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
