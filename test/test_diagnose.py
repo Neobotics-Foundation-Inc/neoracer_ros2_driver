@@ -603,6 +603,21 @@ class TestCheckNetwork:
         assert (up.status, up.detail) == (diag.OK, 'neoracer-1 up on wlP1p1s0')
         assert network(nmcli='HomeNet:wlP1p1s0\n')['hotspot'].status == diag.WARN
 
+    def test_either_link_reaches_the_car(self, network, diag):
+        # Router up, hotspot off: both rows OK, the hotspot not in use.
+        rows = network(eth=_addr('nr_eth0', '192.168.10.100/24'), nmcli='HomeNet:wlP1p1s0\n')
+        assert rows['nr_eth0 router'].status == diag.OK
+        hotspot = rows['hotspot']
+        assert (hotspot.status, hotspot.detail) == (diag.OK, 'not in use: the router link is up')
+        # Hotspot up, router unplugged: both rows OK, the router not in use.
+        rows = network(nmcli='neoracer-ap:wlP1p1s0\n')
+        router = rows['nr_eth0 router']
+        assert (router.status, router.detail) == (diag.OK, 'not in use: the hotspot is up')
+        assert rows['hotspot'].status == diag.OK
+        # Both down: both rows warn.
+        rows = network(nmcli='HomeNet:wlP1p1s0\n')
+        assert rows['nr_eth0 router'].status == rows['hotspot'].status == diag.WARN
+
     def test_hotspot_reports_the_configured_ssid(self, network, diag, tmp_path):
         _networking_env(tmp_path, 'RACECAR_AP_SSID="neoracer-7"\nRACECAR_WIFI_IFACE=wlan0\n')
         detail = network(nmcli='neoracer-ap:wlan0\n')['hotspot'].detail
@@ -853,6 +868,29 @@ class TestDevices:
         row = diag.lidar_link_check(devices.net)
         assert (row.status, row.detail) == (diag.WARN, 'no IPv4 address, expect 192.168.8.1')
 
+    def test_lidar_answers(self, diag, monkeypatch):
+        reply = '64 bytes from 192.168.8.2: icmp_seq=1 ttl=64 time=0.412 ms\n'
+        monkeypatch.setattr(diag, '_run', lambda cmd, timeout=5.0: reply)
+        row = diag.lidar_answers_check(True)
+        assert (row.name, row.status) == ('lidar answers', diag.OK)
+        assert row.detail == '192.168.8.2 in 0.4 ms'
+        monkeypatch.setattr(diag, '_run', lambda cmd, timeout=5.0: '')
+        silent = diag.lidar_answers_check(True)
+        assert (silent.status, silent.detail) == (
+            diag.FAIL,
+            'no answer from 192.168.8.2 (power or cable?)',
+        )
+        # Without a link there is nothing to ping; the link row already fails.
+        assert diag.lidar_answers_check(False).status == diag.SKIP
+
+    def test_a_missing_group_warns(self, diag):
+        # The udev rules make the devices 0666, so a missing group stops nothing.
+        source = (Path(diag.__file__)).read_text()
+        assert "g, 'groups', WARN, f'not a member of" in source
+
+    def test_the_data_unit_is_a_service_row(self, diag):
+        assert 'neoracer-data' in diag.SERVICE_UNITS
+
     def test_lidar_link_up(self, diag, devices, monkeypatch):
         _usb0(devices.net)
         monkeypatch.setattr(diag, '_run', lambda cmd, timeout=5.0: _addr('usb0', '192.168.8.1/24'))
@@ -995,7 +1033,24 @@ class TestTurnedOff:
         assert [c.status for c in out] == [diag.SKIP, diag.FAIL, diag.OK]
         out = diag.note_turned_off(checks, {'camera': False, 'detections': False})
         assert [c.status for c in out] == [diag.SKIP, diag.SKIP, diag.OK]
-        assert out[0].detail.startswith('turned off')
+        assert out[0].detail == 'turned off at launch'
+
+    def test_a_feature_turned_off_does_not_lower_the_result(self, diag):
+        # Inference is off at boot; a healthy car still reads OK, and --strict passes.
+        checks = diag.note_turned_off(
+            [
+                diag.Check('sensors', 'YOLO inference', diag.FAIL, 'not published'),
+                diag.Check('sensors', 'LakiBeam lidar', diag.OK, '30.0 Hz'),
+            ],
+            {'camera': True, 'detections': False},
+        )
+        assert checks[0].status == diag.SKIP
+        assert diag.overall(checks) == diag.OK
+        assert diag.exit_code_for(checks, strict=True) == 0
+        # Any other skip still lowers the result, as upstream.
+        other = [*checks, diag.Check('network', 'hotspot', diag.SKIP, 'nmcli unavailable')]
+        assert diag.overall(other) == diag.WARN
+        assert diag.exit_code_for(other, strict=True) == 1
 
     def test_rows_are_the_features_ids_and_sensor_labels(self, diag):
         assert set(diag.FEATURE_ROWS) == set(diag.features.SUBSYSTEMS)
