@@ -107,8 +107,8 @@ class TestEnoughMotion:
 
 class TestPrompts:
     def test_the_stopped_prompt_waits_for_the_car(self, odom):
-        # The drive block comes first, so an Enter typed at "you can drive now"
-        # is not the answer to this prompt.
+        # The prompt says to wait. An Enter typed after it appears still
+        # answers it; a run with too little motion is then offered again.
         assert odom.STOPPED.startswith('Press Enter only when the car has stopped')
 
 
