@@ -517,7 +517,7 @@ TABLE = (
         subscribers=(
             End(
                 'calibrate_odom (F37)',
-                'scripts/calibration/calibrate_odom.py:297',
+                'scripts/calibration/calibrate_odom.py:367',
                 BE,
             ),
         ),

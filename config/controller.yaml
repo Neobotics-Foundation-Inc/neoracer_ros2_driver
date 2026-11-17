@@ -75,7 +75,9 @@ controller_node:
     throttle_sign: 1
     steering_axis: 3
     steering_channel: 0         # radio Ch1, the right stick
-    steering_sign: 1
+    # /joy follows the ROS gamepad convention, stick left is +1, which the
+    # student library negates for its x. This stick reads +1 to the right.
+    steering_sign: -1
 
     # Mode switch -> manual / autonomy enable buttons (button 4 / LB, button 5 / RB).
     # The ESP32 firmware selects who drives from the mode switch: a count below 1500

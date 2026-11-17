@@ -26,6 +26,12 @@ fault in the integration shows instead of hiding in a scale. Writes the car
 profile's params/odom.yaml for controller_node, keeping the other step's
 value. --check judges /odom/integrated against the lidar with the scales in
 use.
+
+Before a run the tool reads odometry.source and the scales from
+controller_node. It stops when they differ from the files, because the speed
+scale is measured against the pose the controller publishes. On the firmware
+source both runs and --check report how far the ESP32's own pose is from the
+lidar; the scales written then take effect only on the integrated source.
 """
 
 from __future__ import annotations
@@ -97,6 +103,8 @@ MATCH_MIN_INLIERS = 0.3
 SPIN_PASS, SPIN_WARN = 0.01, 0.03
 DRIVE_PASS, DRIVE_WARN = 0.02, 0.05
 SCALE_KEYS = ('odometry.yaw_rate_scale', 'odometry.speed_scale')
+# Read from controller_node before a run: the pose under test follows them.
+LIVE_KEYS = ('odometry.source', *SCALE_KEYS)
 # The gyro the integrator reads: /imu/fused after the profile's axis remap.
 GYRO_TOPIC = '/imu/fused'
 PARAM_TIMEOUT = 3.0
@@ -107,8 +115,17 @@ SPIN_PLACE = 'Place the car on the floor in the middle of the clear space.'
 DRIVE_PLACE = 'Place the car on the floor facing a wall or furniture 3 to 5 meters away.'
 HOW_TO_DRIVE = [
     'Drive with the handset, mode switch UP (manual).',
-    'Keep the speed switch in its slow position.',
+    'Keep the speed switch UP (slow).',
 ]
+# On the firmware source a recalibration does not change the pose under test.
+FIRMWARE_ADVICE = (
+    "the driver's scales do not act on the firmware pose; "
+    'odometry.source: integrated in params/odom.yaml uses them'
+)
+UNUSED_ON_FIRMWARE = (
+    'These scales take effect only with odometry.source: integrated. '
+    'The firmware pose does not change.'
+)
 
 
 def spin_lines(turns: int) -> list[str]:
@@ -157,25 +174,33 @@ def graded(error: float, passing: float, warning: float) -> str:
     return 'PASS' if abs(error) <= passing else 'WARN' if abs(error) <= warning else 'FAIL'
 
 
-def spin_criterion(odom_deg: float, lidar_deg: float) -> Criterion:
+def spin_criterion(odom_deg: float, lidar_deg: float, source: str = 'integrated') -> Criterion:
     error = odom_deg / lidar_deg - 1.0
     return Criterion(
         'spin heading',
         f'{odom_deg:+.1f} deg ({error:+.2%})',
         f'lidar {lidar_deg:+.1f} within {SPIN_PASS:.0%} (warn to {SPIN_WARN:.0%})',
         graded(error, SPIN_PASS, SPIN_WARN),
-        'recalibrate the yaw scale: racecar calibrate odom',
+        (
+            'recalibrate the yaw scale: racecar calibrate odom'
+            if source == 'integrated'
+            else FIRMWARE_ADVICE
+        ),
     )
 
 
-def drive_criterion(odom_m: float, lidar_m: float) -> Criterion:
+def drive_criterion(odom_m: float, lidar_m: float, source: str = 'integrated') -> Criterion:
     error = odom_m / lidar_m - 1.0
     return Criterion(
         'drive distance',
         f'{odom_m:.3f} m ({error:+.2%})',
         f'lidar {lidar_m:.3f} m within {DRIVE_PASS:.0%} (warn to {DRIVE_WARN:.0%})',
         graded(error, DRIVE_PASS, DRIVE_WARN),
-        'recalibrate the speed scale: racecar calibrate odom',
+        (
+            'recalibrate the speed scale: racecar calibrate odom'
+            if source == 'integrated'
+            else FIRMWARE_ADVICE
+        ),
     )
 
 
@@ -191,9 +216,16 @@ def match_criterion(name: str, match: MatchResult) -> Criterion:
 
 
 def scales_criterion(
-    file_scales: tuple[float, float], live: tuple[float, float] | None
+    file_scales: tuple[float, float],
+    live: tuple[float, float] | None,
+    source: str = 'integrated',
 ) -> Criterion:
-    """Compare the scales in params/odom.yaml with the ones controller_node is running."""
+    """
+    Compare the scales in params/odom.yaml with the ones controller_node is running.
+
+    On the firmware source the scales do not act on the pose under test, so a
+    difference is reported without a verdict.
+    """
     yaw, speed = file_scales
     if live is None:
         return Criterion(
@@ -203,10 +235,15 @@ def scales_criterion(
             'INFO',
         )
     if not all(math.isclose(a, b, rel_tol=1e-6) for a, b in zip(file_scales, live, strict=True)):
+        measured = (
+            f'controller_node: yaw {live[0]:g}, speed {live[1]:g}; '
+            f'file: yaw {yaw:g}, speed {speed:g}'
+        )
+        if source != 'integrated':
+            return Criterion('scales in use', measured, f'not used by the {source} source', 'INFO')
         return Criterion(
             'scales in use',
-            f'controller_node: yaw {live[0]:g}, speed {live[1]:g}; '
-            f'file: yaw {yaw:g}, speed {speed:g}',
+            measured,
             'controller_node matches the file',
             'FAIL',
             'restart teleop to load the file: racecar service restart teleop',
@@ -234,6 +271,38 @@ def parameter_number(value: Any) -> float | None:
     if value.type == ParameterType.PARAMETER_INTEGER:
         return float(value.integer_value)
     return None
+
+
+def stale_files(
+    live: dict[str, Any], source: str, scales: tuple[float, float], with_scales: bool
+) -> str:
+    """
+    Return how the running controller_node differs from the files, or ''.
+
+    The source always counts. With `with_scales` the scales count too, on the
+    integrated source, where the speed scale is measured against the pose they
+    produce.
+    """
+    running = live['odometry.source']
+    if running != source:
+        return f'{NODE} runs odometry.source {running}, and the files say {source}.'
+    if with_scales and source == 'integrated':
+        now = (float(live[SCALE_KEYS[0]]), float(live[SCALE_KEYS[1]]))
+        if not all(math.isclose(a, b, rel_tol=1e-6) for a, b in zip(scales, now, strict=True)):
+            return (
+                f'{NODE} runs yaw scale {now[0]:g} and speed scale {now[1]:g}, '
+                f'and the files say {scales[0]:g} and {scales[1]:g}.'
+            )
+    return ''
+
+
+def firmware_line(what: str, odom: float, lidar: float, passing: float) -> str:
+    """Say how far the firmware pose is from the lidar, beside the --check pass limit."""
+    error = odom / lidar - 1.0 if lidar else math.inf
+    return (
+        f'Firmware {what}: {error:+.2%} against the lidar '
+        f'(the check passes within {passing:.0%}).'
+    )
 
 
 def odom_motion(poses: list[list[float]]) -> Pose:
@@ -463,6 +532,8 @@ class OdomCalibrator(CalibratorNode):
         log = self.get_logger()
         if not self.wait_for_first_message():
             return 1
+        if not self._files_match_controller():
+            return 1
         log.info(source_note(self.source))
         if self.check:
             return self._run_check()
@@ -481,7 +552,24 @@ class OdomCalibrator(CalibratorNode):
         for key, value in params.items():
             log.info(f'{key}: {value}')
         log.info(backup_reminder(written))
+        if self.source != 'integrated':
+            log.info(UNUSED_ON_FIRMWARE)
         return 0
+
+    def _files_match_controller(self) -> bool:
+        """Return False, after saying why, when controller_node runs other values."""
+        log = self.get_logger()
+        live = self.live_params()
+        if live is None:
+            log.warning(f'{NODE} did not answer. The source and scales come from the files.')
+            return True
+        scales = (self.yaw_scale, self.speed_scale)
+        stale = stale_files(live, self.source, scales, with_scales=not self.check)
+        if stale:
+            log.error(stale)
+            log.error('Restart teleop so it loads the files: racecar service restart teleop')
+            return False
+        return True
 
     def _gyro_step(self) -> tuple[str, float] | None:
         """Run the spin; return the new yaw scale, or None to offer the step again."""
@@ -498,11 +586,14 @@ class OdomCalibrator(CalibratorNode):
         if not scale_ok(scale):
             log.error(
                 f'Gyro scale {scale:.3f} is outside 0.8 to 1.25. The ESP32 sends the gyro '
-                'in rad/s, so check imu.accel_gyro_axis_order and _sign and '
-                'odometry.yaw_rate_axis, and that the car turned as many times as asked.'
+                'in rad/s, so check imu.accel_gyro_axis_order, imu.accel_gyro_axis_sign '
+                'and odometry.yaw_rate_axis, and that the car turned as many times as asked.'
             )
             return None
-        self._warn_odom_mismatch(run.odom[2], run.gyro_rad, 'heading')
+        if self.source == 'integrated':
+            self._warn_odom_mismatch(run.odom[2], run.gyro_rad, 'heading')
+        else:
+            log.info(firmware_line('heading', run.odom[2], true, SPIN_PASS))
         return 'odometry.yaw_rate_scale', round(self.yaw_scale * scale, 5)
 
     def _speed_step(self) -> tuple[str, float] | None:
@@ -519,6 +610,8 @@ class OdomCalibrator(CalibratorNode):
                 f'The car drove {lidar_m:.2f} meters. Drive at least {MIN_DRIVE_M:g} meters.'
             )
             return None
+        if self.source != 'integrated':
+            log.info(firmware_line('distance', odom_m, lidar_m, DRIVE_PASS))
         ratio = lidar_m / odom_m if odom_m > 0 else math.inf
         if not scale_ok(ratio):
             log.error(
@@ -528,21 +621,16 @@ class OdomCalibrator(CalibratorNode):
         return 'odometry.speed_scale', round(self.speed_base() * ratio, 5)
 
     def _warn_odom_mismatch(self, odom_rad: float, gyro_rad: float, what: str) -> None:
-        """Warn when /odom/integrated disagrees with the gyro it should follow."""
+        """Warn when the integrated /odom/integrated disagrees with the gyro it integrates."""
         if gyro_rad and abs(odom_rad / gyro_rad - 1.0) > SPIN_PASS:
-            cause = (
-                "a fault in the controller's integration, not the scale"
-                if self.source == 'integrated'
-                else "the firmware fuses its own heading, so this is not the driver's scale"
-            )
             self.get_logger().warning(
                 f'Odometry {what} {math.degrees(odom_rad):+.1f} deg differs from the gyro '
-                f'{math.degrees(gyro_rad):+.1f} deg: {cause}.'
+                f"{math.degrees(gyro_rad):+.1f} deg: a fault in the controller's integration, "
+                'not the scale.'
             )
 
     def _run_check(self) -> int:
         log = self.get_logger()
-        log.info(source_note(self.source))
         titles = (f'Step 1 of 2: spin, {CHECK_TURNS} circles', 'Step 2 of 2: straight drive')
         steps = run_sequence(
             2,
@@ -551,7 +639,7 @@ class OdomCalibrator(CalibratorNode):
         )
         criteria = [c for i in sorted(steps) for c in steps[i]]
         file_scales = (self.yaw_scale, self.speed_scale)
-        criteria.append(scales_criterion(file_scales, self.live_scales()))
+        criteria.append(scales_criterion(file_scales, self.live_scales(), self.source))
         return finish_check(log, criteria, self.report)
 
     def _check_spin(self) -> list[Criterion] | None:
@@ -561,7 +649,7 @@ class OdomCalibrator(CalibratorNode):
         run, true = spun
         return [
             match_criterion('spin scan match', run.match),
-            spin_criterion(math.degrees(run.odom[2]), math.degrees(true)),
+            spin_criterion(math.degrees(run.odom[2]), math.degrees(true), self.source),
             Criterion('gyro', f'{math.degrees(run.gyro_rad):+.1f} deg', '', 'INFO'),
         ]
 
@@ -585,28 +673,42 @@ class OdomCalibrator(CalibratorNode):
         return [
             match_criterion('drive scan match', run.match),
             drive_criterion(
-                math.hypot(run.odom[0], run.odom[1]), math.hypot(run.lidar[0], run.lidar[1])
+                math.hypot(run.odom[0], run.odom[1]),
+                math.hypot(run.lidar[0], run.lidar[1]),
+                self.source,
             ),
         ]
 
-    def live_scales(self) -> tuple[float, float] | None:
-        """Return controller_node's (yaw, speed) scales, or None when it does not answer."""
+    def live_params(self) -> dict[str, Any] | None:
+        """Return controller_node's LIVE_KEYS values, or None when it does not answer."""
         client = self.create_client(GetParameters, f'/{NODE}/get_parameters')
         if not client.wait_for_service(timeout_sec=PARAM_TIMEOUT):
             return None
-        future = client.call_async(GetParameters.Request(names=list(SCALE_KEYS)))
+        future = client.call_async(GetParameters.Request(names=list(LIVE_KEYS)))
         deadline = time.monotonic() + PARAM_TIMEOUT
         while not future.done() and time.monotonic() < deadline:
             time.sleep(0.05)
-        values = future.result().values if future.done() and future.result() else []
-        if len(values) != len(SCALE_KEYS):
+        if not future.done() or future.exception() is not None or future.result() is None:
+            return None
+        values = future.result().values
+        if len(values) != len(LIVE_KEYS):
+            return None
+        source = values[0]
+        if source.type != ParameterType.PARAMETER_STRING:
             return None
         # The controller declares its floats dynamically typed, so a hand-written
         # 1 in the YAML arrives as an integer.
-        live = [parameter_number(v) for v in values]
-        if live[0] is None or live[1] is None:
+        yaw, speed = (parameter_number(v) for v in values[1:])
+        if yaw is None or speed is None:
             return None
-        return live[0], live[1]
+        return {LIVE_KEYS[0]: str(source.string_value), SCALE_KEYS[0]: yaw, SCALE_KEYS[1]: speed}
+
+    def live_scales(self) -> tuple[float, float] | None:
+        """Return controller_node's (yaw, speed) scales, or None when it does not answer."""
+        live = self.live_params()
+        if live is None:
+            return None
+        return float(live[SCALE_KEYS[0]]), float(live[SCALE_KEYS[1]])
 
 
 def main() -> int:
