@@ -260,6 +260,17 @@ While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/t
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
+`foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the odometry, the AMCL particles and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Per-car settings go in the car profile, `params/foxglove.yaml`.
+
+To view a mapping run in Lichtblick:
+
+1. Start mapping with the bridge: `racecar launch autonomy map:=room foxglove:=true`.
+2. On a laptop on the car's network, open Lichtblick and choose "Open connection", then "Foxglove WebSocket".
+3. Enter `ws://neoracer.local:8765`, or the car's IP address in place of `neoracer.local`, and connect.
+4. In the layout menu, choose "Import layout from file" and pick `config/foxglove_layout.json` from this repository. The car keeps a copy in `~/ros2_ws/install/neoracer_ros2_driver/share/neoracer_ros2_driver/config/`.
+
+The layout shows a top-down 3D view of the map, the scan and the pose, following the car. It also shows a table of `/autonomy/status` and a plot of the pose.
+
 ## Web dashboard
 
 With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
@@ -462,7 +473,7 @@ ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=false
 
 The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
 
-Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `slam_mapping.yaml`, `slam_localization.yaml` and `amcl.yaml` (the autonomy launch), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
+Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `slam_mapping.yaml`, `slam_localization.yaml` and `amcl.yaml` (the autonomy launch), `foxglove.yaml` (the Foxglove bridge, with `foxglove:=true`), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
 
 ## Troubleshooting
 
