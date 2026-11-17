@@ -74,6 +74,9 @@ class Check:
     status: str
     detail: str = ''
     data: str = ''
+    # A SKIP for a feature turned off at launch: a choice, so it does not
+    # lower the result or fail --strict.
+    switched_off: bool = False
 
 
 @dataclass
@@ -149,6 +152,7 @@ DEVICE_LINKS = (
 # scripts/setup_networking.sh). Every NeoRacer reaches its lidar this way.
 LIDAR_IFACE = 'usb0'
 LIDAR_HOST_ADDR = '192.168.8.1'
+LIDAR_SENSOR_ADDR = '192.168.8.2'
 NET_DIR = Path('/sys/class/net')
 
 # Defaults of scripts/setup_networking.sh, which ~/.config/racecar/networking.env
@@ -168,6 +172,7 @@ SERVICE_UNITS = (
     'neoracer-watchdog',
     'neoracer-dashboard',
     'neoracer-jupyter',
+    'neoracer-data',
 )
 
 # Started for mapping or localization, never at boot, so it is not a service
@@ -207,7 +212,9 @@ def check_devices() -> list[Check]:
             detail = 'missing: check the cable, then racecar udev'
             out.append(Check(g, p.name, FAIL if required else WARN, detail))
 
-    out.append(lidar_link_check())
+    lidar_link = lidar_link_check()
+    out.append(lidar_link)
+    out.append(lidar_answers_check(lidar_link.status != FAIL))
 
     try:
         mine = {grp.getgrgid(gid).gr_name for gid in os.getgroups()}
@@ -226,9 +233,10 @@ def check_devices() -> list[Check]:
     if not existing:
         out.append(Check(g, 'groups', SKIP, 'none of the racecar groups exist'))
     elif missing:
+        # The udev rules make the devices 0666, so a missing group stops nothing.
         out.append(
             Check(
-                g, 'groups', FAIL, f'not a member of {", ".join(missing)} (log out and back in?)'
+                g, 'groups', WARN, f'not a member of {", ".join(missing)} (log out and back in?)'
             )
         )
     else:
@@ -254,6 +262,19 @@ def lidar_link_check(net: Path | None = None) -> Check:
         have = ', '.join(addrs) or 'no IPv4 address'
         return Check('devices', name, WARN, f'{have}, expect {LIDAR_HOST_ADDR}')
     return Check('devices', name, OK, f'carrier, {", ".join(addrs)}')
+
+
+def lidar_answers_check(link_up: bool) -> Check:
+    """Ping the LakiBeam itself: a live link with a sensor that does not answer shows only here."""
+    name = 'lidar answers'
+    if not link_up:
+        return Check('devices', name, SKIP, f'no {LIDAR_IFACE} link')
+    out = _run(['ping', '-c', '1', '-W', '1', LIDAR_SENSOR_ADDR], timeout=3.0)
+    m = re.search(r'time=([\d.]+) ms', out)
+    if not m:
+        detail = f'no answer from {LIDAR_SENSOR_ADDR} (power or cable?)'
+        return Check('devices', name, FAIL, detail)
+    return Check('devices', name, OK, f'{LIDAR_SENSOR_ADDR} in {float(m.group(1)):.1f} ms')
 
 
 def _own_cpu_seconds() -> float:
@@ -530,18 +551,25 @@ def check_network() -> list[Check]:
     eth_iface = networking_setting('RACECAR_ETH_IFACE', ETH_IFACE)
     eth = _iface_v4(eth_iface)
     name = f'{eth_iface} router'
+    wifi_iface = networking_setting('RACECAR_WIFI_IFACE', WIFI_IFACE)
+    ap = _run(['nmcli', '-t', '-f', 'NAME,DEVICE', 'con', 'show', '--active'])
+    hotspot_up = any(ln.startswith(f'{AP_CONNECTION}:') for ln in ap.splitlines())
+    # Either link reaches the car, so one that is down warns only when the
+    # other is down too.
     if eth:
         out.append(Check(g, name, OK, ', '.join(eth)))
+    elif hotspot_up:
+        out.append(Check(g, name, OK, 'not in use: the hotspot is up'))
     else:
         out.append(Check(g, name, WARN, 'no global IPv4 (router unplugged?)'))
 
-    wifi_iface = networking_setting('RACECAR_WIFI_IFACE', WIFI_IFACE)
-    ap = _run(['nmcli', '-t', '-f', 'NAME,DEVICE', 'con', 'show', '--active'])
     if not ap:
         out.append(Check(g, 'hotspot', SKIP, 'nmcli unavailable'))
-    elif any(ln.startswith(f'{AP_CONNECTION}:') for ln in ap.splitlines()):
+    elif hotspot_up:
         ssid = networking_setting('RACECAR_AP_SSID', 'neoracer-1')
         out.append(Check(g, 'hotspot', OK, f'{ssid} up on {wifi_iface}'))
+    elif eth:
+        out.append(Check(g, 'hotspot', OK, 'not in use: the router link is up'))
     else:
         out.append(
             Check(g, 'hotspot', WARN, f'{AP_CONNECTION} not active (racecar setup networking)')
@@ -971,7 +999,11 @@ def note_turned_off(checks: list[Check], running: dict[str, bool] | None = None)
         for name in names
     }
     return [
-        Check(c.group, c.name, SKIP, 'turned off (features.conf)') if c.name in off else c
+        (
+            Check(c.group, c.name, SKIP, 'turned off at launch', switched_off=True)
+            if c.name in off
+            else c
+        )
         for c in checks
     ]
 
@@ -1040,10 +1072,14 @@ ANSI = {OK: '32', WARN: '33', FAIL: '31'}
 
 
 def overall(checks: list[Check]) -> str:
-    """Summary verdict: FAIL on any failure, WARN on any warning or skip, else OK."""
+    """
+    Summary verdict: FAIL on any failure, WARN on any warning or skip, else OK.
+
+    A feature turned off at launch is a choice, so its SKIP does not count.
+    """
     if any(c.status == FAIL for c in checks):
         return FAIL
-    if any(c.status in (WARN, SKIP) for c in checks):
+    if any(c.status == WARN or (c.status == SKIP and not c.switched_off) for c in checks):
         return WARN
     return OK
 
@@ -1052,10 +1088,11 @@ def exit_code_for(checks: list[Check], strict: bool = False) -> int:
     """
     Return 1 when any check failed, else 0.
 
-    Strict mode also fails on WARN and SKIP, so 0 means every check was OK.
+    Strict mode also fails on WARN and SKIP, so 0 means every check was OK;
+    a feature turned off at launch is a choice and does not fail it.
     """
     if strict:
-        return 0 if all(c.status == OK for c in checks) else 1
+        return 0 if all(c.status == OK or c.switched_off for c in checks) else 1
     return 1 if any(c.status == FAIL for c in checks) else 0
 
 
@@ -1211,7 +1248,11 @@ def main() -> int:
                     'result': overall(checks),
                     'strict': args.strict,
                     'exit_code': exit_code,
-                    'checks': [c.__dict__ for c in checks],
+                    # Upstream's keys only; the result already counts switched_off.
+                    'checks': [
+                        {k: v for k, v in c.__dict__.items() if k != 'switched_off'}
+                        for c in checks
+                    ],
                 },
                 indent=2,
             )
