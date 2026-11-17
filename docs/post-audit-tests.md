@@ -35,7 +35,7 @@ ros2 node list   # controller_node, gamepad_node, mux_node, throttle_node,
 
 ## 4. FlySky -> /joy mapping (tune on-car)
 With the transmitter ON, `ros2 topic echo /joy` and confirm:
-- [ ] throttle stick moves `axes[1]`, steering stick moves `axes[3]`
+- [ ] throttle stick moves `axes[1]` (forward +1), steering stick moves `axes[3]` (left +1)
 - [ ] `axes[2]` and `axes[5]` rest at +1.0
 - [ ] the mode switch up or in the middle sets `buttons[4]` (manual), down sets
   `buttons[5]` (autonomy)
