@@ -1,0 +1,80 @@
+# slam_toolbox mapping (async_slam_toolbox_node), started by autonomy.launch.py
+# with mode:=mapping. Values follow the package's mapper_params_online_async.yaml
+# except where commented. Per-car overrides go in the car profile,
+# params/slam_mapping.yaml.
+#
+# Humble's slam_toolbox (2.6.10) is a plain node, so the launch starts it with
+# no lifecycle manager and this file has no use_lifecycle_manager. 2.6.10 also
+# has no restamp_tf or check_min_dist_and_heading_precisely; upstream sets both
+# to false, which is what 2.6.10 does.
+slam_toolbox:
+  ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # 2.6.10 defaults base_frame to base_footprint, so every frame is named.
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link             # the floor point under the rear axle (config/frames.yaml)
+    scan_topic: /scan                 # the LakiBeam, frame laser
+    use_map_saver: true
+    mode: mapping
+
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.05    # map -> odom at 20 Hz; it changes with each scan match (about 2 Hz)
+    map_update_interval: 5.0
+    resolution: 0.05
+    # Upstream's antennas (about 0.27 m) and Ethernet cable header (0.24 m)
+    # return inside 0.3 m; the RPLIDAR A1 is rated to 12 m.
+    min_laser_range: 0.3
+    max_laser_range: 12.0
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000       # serializing large maps needs the larger stack
+    enable_interactive_mode: false    # RViz interactive markers; not used on the car
+
+    use_scan_matching: true
+    use_scan_barycenter: true
+    # 0.5 m and 0.5 rad by default; a room-sized space needs denser nodes.
+    minimum_travel_distance: 0.25
+    minimum_travel_heading: 0.25
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # A scan match is discounted by 0.2 x (difference from odometry)^2 / variance,
+    # floored at the minimum penalty. The package defaults barely weight the
+    # odometry, so scans distorted by fast turns override the gyro heading.
+    # Loop closure matching is not discounted.
+    distance_variance_penalty: 0.1
+    angle_variance_penalty: 0.03
+
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.5
+    minimum_distance_penalty: 0.3
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1

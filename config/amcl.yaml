@@ -1,0 +1,71 @@
+# AMCL localization on a saved map, started by autonomy.launch.py with
+# mode:=localization (localizer:=amcl, the default), which sets the map file and
+# the start pose. Per-car overrides go in the car profile, params/amcl.yaml.
+# Every key below exists in Humble's nav2_amcl (1.1.20).
+amcl:
+  ros__parameters:
+    # 1.1.20 defaults base_frame_id to base_footprint, so every frame is named.
+    global_frame_id: map
+    odom_frame_id: odom
+    base_frame_id: base_link
+    scan_topic: /scan                 # the LakiBeam, frame laser
+    map_topic: /map
+    tf_broadcast: true
+    transform_tolerance: 1.0
+
+    # An Ackermann car has no sideways motion, so the differential model fits.
+    robot_model_type: nav2_amcl::DifferentialMotionModel
+    # Odometry noise: rotation from rotation, rotation from translation,
+    # translation from translation, translation from rotation, strafe (omni only).
+    # The gyro heading and lidar-calibrated encoder are far better than the
+    # Nav2 defaults (0.2) assume; at 0.2 the particle cloud never tightens.
+    alpha1: 0.02
+    alpha2: 0.02
+    alpha3: 0.02
+    alpha4: 0.02
+    alpha5: 0.2
+
+    laser_model_type: likelihood_field
+    max_beams: 60
+    laser_min_range: 0.3              # self-returns inside 0.3 m
+    laser_max_range: 12.0
+    laser_likelihood_max_dist: 2.0
+    sigma_hit: 0.1                    # wall distance spread, m; Nav2 default 0.2
+    z_hit: 0.9                        # with z_rand: weight of the wall fit over random returns
+    z_short: 0.05
+    z_max: 0.05
+    z_rand: 0.1
+    lambda_short: 0.1
+    # Beam skipping drops beams most particles disagree on: people or objects
+    # passing through.
+    do_beamskip: true
+    beam_skip_distance: 0.5
+    beam_skip_threshold: 0.3
+    beam_skip_error_threshold: 0.9
+
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+    resample_interval: 1
+    recovery_alpha_fast: 0.0
+    recovery_alpha_slow: 0.0
+    update_min_d: 0.15
+    update_min_a: 0.15
+    save_pose_rate: 0.5
+
+    set_initial_pose: false
+    always_reset_initial_pose: false
+    first_map_only: false
+
+map_server:
+  ros__parameters:
+    topic_name: map
+    frame_id: map
+
+# The Nav2 lifecycle manager configures and activates map_server and AMCL;
+# slam_toolbox needs none on Humble.
+lifecycle_manager_localization:
+  ros__parameters:
+    autostart: true
+    node_names: [map_server, amcl]

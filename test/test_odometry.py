@@ -333,12 +333,17 @@ def _setup_node(controller, monkeypatch, params=None, legacy_tf=False):
 
 
 class TestOdometrySetup:
-    def test_defaults_publish_from_the_firmware_pose_without_tf(self, controller, monkeypatch):
+    def test_defaults_publish_from_the_firmware_pose_with_tf(self, controller, monkeypatch):
         node = _setup_node(controller, monkeypatch)
         assert node.topics == ['/odom/integrated']
-        assert node._odometry is None and node._odom_tf is None
+        assert node._odometry is None and node._odom_tf == 'odometry tf'
         assert node.errors == [] and node.warnings == []
-        assert node.infos[-1].endswith('from the firmware pose; TF odom -> base_link off')
+        assert node.infos[-1].endswith('from the firmware pose; TF odom -> base_link on')
+
+    def test_the_tf_can_be_turned_off(self, controller, monkeypatch):
+        node = _setup_node(controller, monkeypatch, {'odometry.publish_tf': False})
+        assert node._odom_tf is None
+        assert node.infos[-1].endswith('TF odom -> base_link off')
 
     def test_a_bad_source_falls_back_to_firmware(self, controller, monkeypatch):
         node = _setup_node(controller, monkeypatch, {'odometry.source': 'integrate'})
@@ -442,15 +447,22 @@ class TestConfig:
         # Plan D4: the default changes only on the on-car acceptance numbers.
         assert _odom_params()['odometry.source'] == 'firmware'
 
-    def test_the_tf_is_off_so_the_ekf_stays_the_only_parent(self):
-        assert _odom_params()['odometry.publish_tf'] is False
-        assert _declared_default(CONTROLLER.read_text(), 'odometry.publish_tf') == 'False'
+    def test_the_tf_is_on_and_base_link_has_one_parent(self):
+        # The vendor EKF left the autonomy launch (plan D1), so the controller
+        # publishes odom -> base_link for slam_toolbox and AMCL, as upstream's
+        # pit_node does. The older /odom transform stays off.
+        assert _odom_params()['odometry.publish_tf'] is True
+        assert _declared_default(CONTROLLER.read_text(), 'odometry.publish_tf') == 'True'
         controller_yaml = yaml.safe_load((ROOT / 'config' / 'controller.yaml').read_text())
         assert controller_yaml['controller_node']['ros__parameters']['publish_tf'] is False
-        # The autonomy launch's EKF is the odom -> base_link publisher.
         autonomy = (ROOT / 'launch' / 'autonomy.launch.py').read_text()
-        assert "'base_link_frame': 'base_link'" in autonomy
-        assert "'publish_tf': True" in autonomy
+        assert 'robot_localization' not in autonomy and 'ekf_node' not in autonomy
+        # The controller is the only TF broadcaster in the package.
+        package = ROOT / 'neoracer_ros2_driver'
+        broadcasters = {
+            p.name for p in package.glob('*.py') if 'TransformBroadcaster(' in p.read_text()
+        }
+        assert broadcasters == {'controller.py'}
 
     def test_the_s_frame_feeds_odometry_from_the_published_imu(self):
         src = CONTROLLER.read_text()

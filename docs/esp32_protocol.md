@@ -105,9 +105,11 @@ the car profile, `params/odom.yaml`. `odometry.source` picks the pose:
   `odom scale set` factor.
 
 Both sources stamp the message with the `/imu/fused` stamp of the frame. The
-`odom -> base_link` transform from this topic is off (`odometry.publish_tf:
-false`), because the robot_localization EKF in the autonomy launch publishes
-that transform and a frame takes one parent. Firmware `/odom` is unchanged.
+controller also publishes this topic's `odom -> base_link` transform with the
+same stamp (`odometry.publish_tf: true`), which slam_toolbox and AMCL in the
+autonomy launch read. The older transform from `/odom` (`publish_tf` in
+`config/controller.yaml`) stays off, so `base_link` has one parent. Firmware
+`/odom` is unchanged.
 Older firmware that sends separate `i` and `o` frames gets no
 `/odom/integrated`; the controller logs that once.
 

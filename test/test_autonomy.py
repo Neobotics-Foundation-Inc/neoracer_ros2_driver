@@ -1,11 +1,12 @@
 """
-Unit tests for maps.py and autonomy_node.py's setup, read from the source.
+Unit tests for the autonomy launch, maps.py, the SLAM configs and autonomy_node's setup.
 
-The autonomy launch and the SLAM configs arrive with the autonomy launch
-feature, with their own tests here.
+The launch tests load the launch file, which imports launch and launch_ros, so
+they run where ROS is installed (on the car) and are skipped elsewhere.
 """
 
 import ast
+import importlib.util
 from pathlib import Path
 import re
 
@@ -16,6 +17,33 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / 'config'
 NODE = ROOT / 'neoracer_ros2_driver' / 'autonomy_node.py'
+SLAM_CONFIGS = ('slam_mapping.yaml', 'slam_localization.yaml')
+# Keys upstream's Jazzy configs set that Humble's slam_toolbox (2.6.10) does not
+# declare; upstream's values match what 2.6.10 does without them.
+JAZZY_ONLY_KEYS = ('use_lifecycle_manager', 'restamp_tf', 'check_min_dist_and_heading_precisely')
+
+
+@pytest.fixture(scope='module')
+def autonomy():
+    pytest.importorskip('launch_ros')
+    spec = importlib.util.spec_from_file_location(
+        'autonomy_launch', ROOT / 'launch' / 'autonomy.launch.py'
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _dicts(spec):
+    out = {}
+    for p in spec['parameters']:
+        if isinstance(p, dict):
+            out.update(p)
+    return out
+
+
+def _slam_params(name):
+    return yaml.safe_load((CONFIG / name).read_text())['slam_toolbox']['ros__parameters']
 
 
 class TestMaps:
@@ -50,6 +78,312 @@ class TestMaps:
     def test_bad_pose(self, text):
         with pytest.raises(ValueError):
             maps.parse_pose(text)
+
+
+class TestLaunch:
+    def test_mapping_runs_slam_toolbox_async(self, autonomy):
+        (node,) = autonomy.slam_specs('mapping', 'amcl', '', '', str(CONFIG))
+        assert node['executable'] == 'async_slam_toolbox_node'
+        assert node['parameters'] == [str(CONFIG / 'slam_mapping.yaml')]
+
+    def test_amcl_localization(self, autonomy, tmp_path, monkeypatch):
+        monkeypatch.setenv(maps.ROOT_ENV, str(tmp_path))
+        nodes = autonomy.slam_specs('localization', 'amcl', 'room', '', str(CONFIG))
+        assert [n['name'] for n in nodes] == [
+            'map_server',
+            'amcl',
+            'lifecycle_manager_localization',
+        ]
+        assert _dicts(nodes[0])['yaml_filename'] == str(tmp_path / 'room' / 'room.yaml')
+        p = _dicts(nodes[1])
+        assert p['set_initial_pose'] is True
+        assert (p['initial_pose.x'], p['initial_pose.y'], p['initial_pose.yaw']) == (0, 0, 0)
+
+    def test_amcl_start_pose(self, autonomy):
+        nodes = autonomy.slam_specs('localization', 'amcl', 'room', '1,2,0.5', str(CONFIG))
+        p = _dicts(nodes[1])
+        assert p['set_initial_pose'] is True
+        assert (p['initial_pose.x'], p['initial_pose.y'], p['initial_pose.yaw']) == (1.0, 2.0, 0.5)
+
+    def test_slam_toolbox_localization(self, autonomy, tmp_path, monkeypatch):
+        monkeypatch.setenv(maps.ROOT_ENV, str(tmp_path))
+        (node,) = autonomy.slam_specs('localization', 'slam_toolbox', 'room', '', str(CONFIG))
+        assert node['executable'] == 'localization_slam_toolbox_node'
+        p = _dicts(node)
+        assert p['map_file_name'] == str(tmp_path / 'room' / 'room')
+        assert p['map_start_pose'] == [0.0, 0.0, 0.0]
+
+    @pytest.mark.parametrize(
+        'args',
+        [
+            ('drive', 'amcl', '', ''),
+            ('localization', 'gmapping', 'room', ''),
+            ('localization', 'amcl', '', ''),
+            ('localization', 'amcl', 'room', '1,2'),
+        ],
+    )
+    def test_bad_arguments(self, autonomy, args):
+        with pytest.raises(ValueError):
+            autonomy.slam_specs(*args, str(CONFIG))
+
+    def test_local_override_loads_last(self, autonomy, tmp_path, car_profile_dir):
+        (tmp_path / 'slam_mapping.yaml').write_text('slam_toolbox: {ros__parameters: {}}\n')
+        (car_profile_dir / 'params').mkdir(parents=True)
+        override = car_profile_dir / 'params' / 'slam_mapping.yaml'
+        override.write_text('slam_toolbox: {ros__parameters: {}}\n')
+        (node,) = autonomy.slam_specs('mapping', 'amcl', '', '', str(tmp_path))
+        assert node['parameters'] == [str(tmp_path / 'slam_mapping.yaml'), str(override)]
+
+    def test_launch_description_declares_the_arguments(self, autonomy):
+        from launch.actions import DeclareLaunchArgument
+
+        ld = autonomy.generate_launch_description()
+        names = [e.name for e in ld.entities if isinstance(e, DeclareLaunchArgument)]
+        assert names == [
+            'mode',
+            'localizer',
+            'map',
+            'pose',
+            'session',
+            'resume',
+            'extend',
+            'foxglove',
+            'pose_source',
+        ]
+
+
+class TestHumbleLaunch:
+    """Humble's slam_toolbox is a plain node; the lifecycle manager runs map_server and AMCL."""
+
+    @pytest.mark.parametrize(
+        'mode,localizer,nodes',
+        [
+            ('mapping', 'amcl', [('slam_toolbox', 'async_slam_toolbox_node')]),
+            (
+                'localization',
+                'amcl',
+                [
+                    ('nav2_map_server', 'map_server'),
+                    ('nav2_amcl', 'amcl'),
+                    ('nav2_lifecycle_manager', 'lifecycle_manager'),
+                ],
+            ),
+            ('localization', 'slam_toolbox', [('slam_toolbox', 'localization_slam_toolbox_node')]),
+        ],
+    )
+    def test_each_mode_starts_these_nodes(
+        self, autonomy, tmp_path, monkeypatch, mode, localizer, nodes
+    ):
+        monkeypatch.setenv(maps.ROOT_ENV, str(tmp_path))
+        specs = autonomy.node_specs(mode, localizer, 'room', '', str(CONFIG))
+        expected = [*nodes, ('neoracer_ros2_driver', 'autonomy_node')]
+        assert [(s['package'], s['executable']) for s in specs] == expected
+        # No namespace: slam_toolbox serves /slam_toolbox/*, which autonomy_node calls.
+        assert all(set(s) == {'package', 'executable', 'name', 'parameters'} for s in specs)
+
+    def test_the_lifecycle_manager_runs_map_server_and_amcl_only(
+        self, autonomy, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv(maps.ROOT_ENV, str(tmp_path))
+        managers = [
+            s
+            for mode, localizer in (
+                ('mapping', 'amcl'),
+                ('localization', 'slam_toolbox'),
+                ('localization', 'amcl'),
+            )
+            for s in autonomy.node_specs(mode, localizer, 'room', '', str(CONFIG))
+            if s['package'] == 'nav2_lifecycle_manager'
+        ]
+        assert [m['name'] for m in managers] == ['lifecycle_manager_localization']
+        assert managers[0]['parameters'] == [str(CONFIG / 'amcl.yaml')]
+
+    def test_the_autonomy_override_loads_after_the_shipped_file(self, autonomy, car_profile_dir):
+        (car_profile_dir / 'params').mkdir(parents=True)
+        override = car_profile_dir / 'params' / 'autonomy.yaml'
+        override.write_text('autonomy_node: {ros__parameters: {}}\n')
+        spec = autonomy.node_specs('mapping', 'amcl', 'room', '', str(CONFIG))[-1]
+        # The shipped config, the car profile's params/autonomy.yaml, then the launch's values.
+        assert spec['parameters'][:2] == [str(CONFIG / 'autonomy.yaml'), str(override)]
+        assert isinstance(spec['parameters'][2], dict) and len(spec['parameters']) == 3
+
+    def test_every_node_ends_the_launch_with_no_namespace(self, autonomy, monkeypatch):
+        from launch import LaunchContext
+        from launch.actions import Shutdown
+
+        monkeypatch.setattr(autonomy, 'get_package_share_directory', lambda _: str(ROOT))
+        context = LaunchContext()
+        args = {'mode': 'mapping', 'localizer': 'amcl', 'map': 'room', 'foxglove': 'true'}
+        for name in ('pose', 'session', 'resume', 'pose_source', 'extend'):
+            args[name] = ''
+        context.launch_configurations.update(args)
+        nodes = autonomy._launch_setup(context)
+        assert [n.node_executable for n in nodes] == [
+            'async_slam_toolbox_node',
+            'autonomy_node',
+            'foxglove_bridge',
+        ]
+        for node in nodes:
+            assert node._Node__node_namespace is None
+            assert isinstance(node._ExecuteLocal__on_exit, Shutdown)
+
+
+class TestAutonomyNodeSpec:
+    def test_every_mode_adds_autonomy_node(self, autonomy):
+        for args in (('mapping', 'amcl', 'room', ''), ('localization', 'amcl', 'room', '')):
+            assert autonomy.node_specs(*args, str(CONFIG))[-1]['name'] == 'autonomy_node'
+
+    def test_autonomy_node_parameters(self, autonomy):
+        spec = autonomy.node_specs(
+            'localization', 'amcl', 'room', '1,2,0', str(CONFIG), session='s1'
+        )[-1]
+        assert spec['parameters'][0] == str(CONFIG / 'autonomy.yaml')
+        p = _dicts(spec)
+        assert (p['mode'], p['map'], p['session'], p['pose_source']) == (
+            'localization',
+            'room',
+            's1',
+            'pose',
+        )
+
+    @pytest.mark.parametrize(
+        'pose,source', [('', 'origin'), ('global', 'global'), ('1,2,0', 'pose')]
+    )
+    def test_pose_source(self, autonomy, pose, source):
+        spec = autonomy.node_specs('localization', 'amcl', 'room', pose, str(CONFIG))[-1]
+        assert _dicts(spec)['pose_source'] == source
+
+    def test_global_starts_amcl_without_a_pose(self, autonomy):
+        nodes = autonomy.slam_specs('localization', 'amcl', 'room', 'global', str(CONFIG))
+        assert _dicts(nodes[1])['set_initial_pose'] is False
+
+    @pytest.mark.parametrize(
+        'mode,localizer', [('mapping', 'amcl'), ('localization', 'slam_toolbox')]
+    )
+    def test_global_needs_amcl_localization(self, autonomy, mode, localizer):
+        with pytest.raises(ValueError):
+            autonomy.slam_specs(mode, localizer, 'room', 'global', str(CONFIG))
+
+
+class TestResumeAndFoxglove:
+    def test_resume_loads_the_autosave_at_the_pose(self, autonomy):
+        specs = autonomy.node_specs(
+            'mapping',
+            'amcl',
+            'room',
+            '1,2,0.5',
+            str(CONFIG),
+            session='s',
+            resume='/m/room/autosave/room',
+        )
+        slam = _dicts(specs[0])
+        assert slam == {
+            'map_file_name': '/m/room/autosave/room',
+            'map_start_pose': [1.0, 2.0, 0.5],
+        }
+        node = _dicts(specs[-1])
+        assert node['resumed_from_autosave'] is True and node['pose_source'] == 'autosave'
+
+    def test_fresh_mapping_loads_no_graph(self, autonomy):
+        specs = autonomy.node_specs('mapping', 'amcl', 'room', '', str(CONFIG))
+        assert _dicts(specs[0]) == {} and _dicts(specs[-1])['resumed_from_autosave'] is False
+
+    def test_resume_is_for_mapping(self, autonomy):
+        with pytest.raises(ValueError):
+            autonomy.slam_specs('localization', 'amcl', 'room', '', str(CONFIG), resume='/x')
+
+    def test_foxglove_on_demand(self, autonomy):
+        assert 'foxglove_bridge' not in [
+            s['name'] for s in autonomy.node_specs('mapping', 'amcl', 'r', '', str(CONFIG))
+        ]
+        specs = autonomy.node_specs('mapping', 'amcl', 'r', '', str(CONFIG), foxglove=True)
+        assert specs[-1]['parameters'][0] == str(CONFIG / 'foxglove.yaml')
+
+    def test_pose_source_given(self, autonomy):
+        spec = autonomy.node_specs(
+            'localization', 'amcl', 'r', '1,2,0', str(CONFIG), pose_source='last_pose'
+        )[-1]
+        assert _dicts(spec)['pose_source'] == 'last_pose'
+
+
+class TestConfigs:
+    @pytest.mark.parametrize('name', SLAM_CONFIGS)
+    def test_slam_toolbox_frames_and_ranges(self, name):
+        p = _slam_params(name)
+        assert (p['base_frame'], p['odom_frame'], p['map_frame']) == ('base_link', 'odom', 'map')
+        assert p['scan_topic'] == '/scan'
+        assert p['min_laser_range'] == 0.3 and p['max_laser_range'] == 12.0
+        assert p['mode'] == name.split('_')[1].removesuffix('.yaml')
+
+    @pytest.mark.parametrize('name', SLAM_CONFIGS)
+    def test_slam_toolbox_is_a_plain_node_on_humble(self, name):
+        # Upstream's test_slam_toolbox_runs_under_the_lifecycle_manager cannot
+        # hold on Humble: slam_toolbox 2.6.10 has no lifecycle, so the file
+        # configures slam_toolbox alone and sets no Jazzy-only key.
+        data = yaml.safe_load((CONFIG / name).read_text())
+        assert list(data) == ['slam_toolbox']
+        assert not set(JAZZY_ONLY_KEYS) & set(data['slam_toolbox']['ros__parameters'])
+
+    @pytest.mark.parametrize('name', SLAM_CONFIGS)
+    def test_scan_matching_weights_the_odometry(self, name):
+        p = _slam_params(name)
+        assert p['angle_variance_penalty'] <= 0.05 and p['minimum_angle_penalty'] <= 0.5
+        assert p['distance_variance_penalty'] <= 0.1
+
+    def test_amcl(self):
+        data = yaml.safe_load((CONFIG / 'amcl.yaml').read_text())
+        p = data['amcl']['ros__parameters']
+        assert p['base_frame_id'] == 'base_link' and p['laser_min_range'] == 0.3
+        assert (p['odom_frame_id'], p['global_frame_id'], p['scan_topic']) == (
+            'odom',
+            'map',
+            '/scan',
+        )
+        assert p['robot_model_type'] == 'nav2_amcl::DifferentialMotionModel'
+        assert all(p[f'alpha{i}'] <= 0.05 for i in range(1, 5))
+        assert p['sigma_hit'] <= 0.1 and p['z_hit'] >= 0.9 and p['z_rand'] <= 0.1
+        manager = data['lifecycle_manager_localization']['ros__parameters']
+        assert manager == {'autostart': True, 'node_names': ['map_server', 'amcl']}
+
+
+class TestExtend:
+    def test_extend_loads_the_saved_graph_near_the_pose(self, autonomy):
+        specs = autonomy.node_specs(
+            'mapping', 'amcl', 'hall', '1,2,0.5', str(CONFIG), session='s', extend='/m/room/room'
+        )
+        assert _dicts(specs[0]) == {
+            'map_file_name': '/m/room/room',
+            'map_start_pose': [1.0, 2.0, 0.5],
+        }
+        node = _dicts(specs[-1])
+        assert node['resumed_from_autosave'] is False and node['pose_source'] == 'pose'
+        assert node['source'] == '/m/room/room' and node['extended_from'] == 'room'
+
+    def test_extend_an_autosave_names_the_map(self, autonomy):
+        spec = autonomy.node_specs(
+            'mapping', 'amcl', 'hall', '0,0,0', str(CONFIG), extend='/m/room/autosave/room'
+        )[-1]
+        assert _dicts(spec)['extended_from'] == 'room'
+
+    def test_resume_carries_from_the_autosave(self, autonomy):
+        spec = autonomy.node_specs(
+            'mapping', 'amcl', 'room', '0,0,0', str(CONFIG), resume='/m/room/autosave/room'
+        )[-1]
+        assert _dicts(spec)['source'] == '/m/room/autosave/room'
+        assert _dicts(spec)['extended_from'] == ''
+
+    @pytest.mark.parametrize(
+        'mode,resume', [('localization', ''), ('mapping', '/m/room/autosave/room')]
+    )
+    def test_bad_extend(self, autonomy, mode, resume):
+        with pytest.raises(ValueError):
+            autonomy.slam_specs(mode, 'amcl', 'room', '', str(CONFIG), resume, '/m/room/room')
+
+
+def test_foxglove_stops_quickly(autonomy):
+    specs = autonomy.node_specs('mapping', 'amcl', 'r', '', str(CONFIG), foxglove=True)
+    assert autonomy._stop_timeouts(specs[-1]) == {'sigterm_timeout': '2', 'sigkill_timeout': '2'}
+    assert autonomy._stop_timeouts(specs[0]) == {}
 
 
 def _declared_defaults():

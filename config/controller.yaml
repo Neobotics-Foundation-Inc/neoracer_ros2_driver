@@ -37,9 +37,9 @@ controller_node:
     imu.mag_axis_sign: [1.0, 1.0, 1.0]
 
     # ---- Optional publications ----
-    # odom -> base_link TF is owned by the EKF in the autonomy base
-    # service (robot_localization fusing /odom + IMU). Turn this on only if
-    # the autonomy service is disabled and something still needs raw-odom TF.
+    # odom -> base_link from /odom. Off: the transform comes from
+    # /odom/integrated (odometry.publish_tf in config/odom.yaml), and a frame
+    # takes one parent. With both on, only odometry.publish_tf writes.
     publish_tf: false
     publish_mag: true           # firmware emits "m"; feeds rc.physics.get_magnetic_field()
     publish_joy: true           # synthesize /joy from the FlySky "r" channels

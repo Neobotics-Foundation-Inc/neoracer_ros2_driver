@@ -12,7 +12,9 @@ driver side exists with the message type, and the QoS on each end lets the
 two connect (a RELIABLE subscriber hears nothing from a BEST_EFFORT
 publisher; a TRANSIENT_LOCAL subscriber needs a TRANSIENT_LOCAL publisher).
 Every read of the deployed fork must be live: the 0.9.0 driver may not break
-the cars in the field.
+the cars in the field. The one exception is /compute_path_to_pose: plan D1
+(decided 2026-11-12) leaves navigation to upstream's 0.9.4, and the library
+resync (F45) drops rc.nav in the same release (FORK_READS_NOT_PROVIDED).
 
 Evidence is matched against code only: comments, docstrings and YAML or
 XML comments are stripped first, so a commented-out publisher does not count.
@@ -121,6 +123,8 @@ SCAN_READERS = (
     _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
     _overview(61),
     End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
+    End('slam_toolbox', 'launch/autonomy.launch.py (sensor data QoS)', BE),
+    End('AMCL', 'launch/autonomy.launch.py localizer:=amcl (sensor data QoS)', BE),
 )
 DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
@@ -142,19 +146,21 @@ FORK_PHYSICS = 'physics_real.py:57 (depth 1)'
 AUTONOMY = 'launch/autonomy.launch.py'
 FRAMES_URDF = 'urdf/neoracer.urdf.xacro'
 TELEOP = 'launch/teleop.launch.py'
-TOOL = 'scripts/racecar-tool.sh'
-# racecar mapping and racecar navigation start the vendor SLAM and Nav2.
-MAPPING_CMD = (TOOL, 'exec ros2 launch osracer_slam "$sub.launch.py"')
-NAVIGATION_CMD = (TOOL, 'exec ros2 launch osracer_navigation nav2.launch.py')
-SLAM_INCLUDE = (
+# The autonomy launch runs slam_toolbox under its own name and with no
+# namespace while mapping (test_autonomy.py checks both), and map_server with
+# AMCL, or the slam_toolbox localizer, in localization.
+SLAM_NODE = (
     AUTONOMY,
-    "get_package_share_directory('osracer_slam'), 'launch', 'slam_toolbox.launch.py'",
+    "'package': 'slam_toolbox', 'executable': 'async_slam_toolbox_node', 'name': 'slam_toolbox'",
 )
-NAV_INCLUDE = (
+SLAM_LOCALIZER = (
     AUTONOMY,
-    "get_package_share_directory('osracer_navigation'), 'launch', 'nav2.launch.py'",
+    "'package': 'slam_toolbox', 'executable': 'localization_slam_toolbox_node', "
+    "'name': 'slam_toolbox'",
 )
-VENDOR = 'live under racecar mapping and racecar navigation, through the vendor stack'
+MAP_SERVER = (AUTONOMY, "'package': 'nav2_map_server', 'executable': 'map_server'")
+AMCL_NODE = (AUTONOMY, "'package': 'nav2_amcl', 'executable': 'amcl'")
+SLAM = 'live while the autonomy launch runs (racecar launch autonomy, neoracer-autonomy)'
 
 TABLE = (
     # -- read by the library --
@@ -331,16 +337,17 @@ TABLE = (
         '/map',
         'nav_msgs/msg/OccupancyGrid',
         publishers=(
-            End('slam_toolbox', f'racecar mapping ({TOOL}), {AUTONOMY} slam:=true', REL, TL),
-            End('nav2 map_server', f'racecar navigation ({TOOL}), {AUTONOMY} nav:=true', REL, TL),
+            End('slam_toolbox', f'{AUTONOMY} mode:=mapping', REL, TL),
+            End('nav2 map_server', f'{AUTONOMY} mode:=localization', REL, TL),
+            End('slam_toolbox localizer', f'{AUTONOMY} localizer:=slam_toolbox', REL, TL),
         ),
         subscribers=(
             End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),
             _fork('slam_real.py:52 (latched)', REL, TL),
             End('autonomy_node', f'{AUTONOMY_NODE}:201 (latched, localization)', REL, TL),
         ),
-        evidence=(SLAM_INCLUDE, NAV_INCLUDE, MAPPING_CMD, NAVIGATION_CMD),
-        note=f'{VENDOR}; F24 replaces the vendor SLAM and must keep /map latched',
+        evidence=(SLAM_NODE, SLAM_LOCALIZER, MAP_SERVER, ('config/amcl.yaml', 'topic_name: map')),
+        note=f'{SLAM}; slam_toolbox and map_server publish it latched, as upstream',
     ),
     Row(
         '/autonomy/save_map',
@@ -539,7 +546,7 @@ TABLE = (
         'TF base_link -> laser',
         'tf2_msgs/msg/TFMessage',
         publishers=(End('robot_state_publisher (frames, /tf_static)', FRAMES_URDF, REL, TL),),
-        subscribers=(End('SLAM', 'upstream F24', REL, TL),),
+        subscribers=(End('slam_toolbox and AMCL', AUTONOMY, REL, TL),),
         evidence=((FRAMES_URDF, '<child link="laser" />'), (TELEOP, "'frames': 'true'")),
         kind='frame',
         note=(
@@ -547,38 +554,39 @@ TABLE = (
             'writes to the car profile; library v0.9.2-bot reads its yaw in the 0.9.2 port'
         ),
     ),
-    # -- read by the deployed library fork through the vendor autonomy stack --
+    # -- read by the deployed library fork through the autonomy launch --
     Row(
         'TF map -> base_footprint',
         'tf2_msgs/msg/TFMessage',
         publishers=(
-            End('robot_localization EKF (odom -> base_link)', f'{AUTONOMY}:118', REL),
-            End('robot_state_publisher (base_link -> base_footprint, static)', FRAMES_URDF, REL),
             End(
-                'slam_toolbox (map -> odom)',
-                f'racecar mapping ({TOOL}), {AUTONOMY} slam:=true',
+                'TransformBroadcaster (controller_node, odom -> base_link)',
+                f'{CONTROLLER}:339',
                 REL,
             ),
-            End('AMCL (map -> odom)', f'racecar navigation ({TOOL}), osracer_navigation', REL),
+            End('robot_state_publisher (base_link -> base_footprint, static)', FRAMES_URDF, REL),
+            End('slam_toolbox (map -> odom)', f'{AUTONOMY} mode:=mapping', REL),
+            End('AMCL (map -> odom)', f'{AUTONOMY} mode:=localization', REL),
         ),
         subscribers=(
             _fork('slam_real.py:77 (lookup_transform)', REL),
             _fork('nav_real.py:64 (lookup_transform)', REL),
         ),
         evidence=(
-            (AUTONOMY, "'base_link_frame': 'base_link'"),
+            (CONTROLLER, 'self._odom_tf = TransformBroadcaster(self)'),
+            ('config/odom.yaml', 'odometry.publish_tf: true'),
+            ('launch/controller.launch.py', "('odom_config', 'odom.yaml')"),
             (FRAMES_URDF, '<child link="base_footprint" />'),
             (TELEOP, "'frames': 'true'"),
-            SLAM_INCLUDE,
-            MAPPING_CMD,
-            NAV_INCLUDE,
-            NAVIGATION_CMD,
+            SLAM_NODE,
+            AMCL_NODE,
+            ('config/amcl.yaml', 'tf_broadcast: true'),
         ),
         kind='frame',
         note=(
-            f'{VENDOR}; since F05 the EKF publishes odom -> base_link and the teleop frames '
-            'publish base_footprint as a static child of base_link for one release; '
-            'F24 keeps map -> odom (slam_toolbox when mapping, AMCL when navigating)'
+            f'{SLAM}; the controller publishes odom -> base_link (plan D1 retired the EKF), '
+            'the teleop frames publish base_footprint as a static child of base_link for '
+            'one release (D5), and slam_toolbox or AMCL publishes map -> odom'
         ),
     ),
     Row(
@@ -588,36 +596,38 @@ TABLE = (
             _fork('slam_real.py:63 (client)', REL),
             End('autonomy_node', f'{AUTONOMY_NODE}:223 (client, saves)', REL),
         ),
-        evidence=(SLAM_INCLUDE, MAPPING_CMD),
+        evidence=(SLAM_NODE,),
         kind='service',
         note=(
-            f'{VENDOR}; F24 must keep slam_toolbox under this name: autonomy_node saves '
-            'through it, and the fork reads it until F45'
+            f'{SLAM} in mapping; autonomy_node saves through it, and the fork reads it '
+            'until F45'
         ),
     ),
     Row(
         '/slam_toolbox/deserialize_map',
         'slam_toolbox/srv/DeserializePoseGraph',
         subscribers=(_fork('slam_real.py:66 (client)', REL),),
-        evidence=(SLAM_INCLUDE, MAPPING_CMD),
+        evidence=(SLAM_NODE,),
         kind='service',
-        note=VENDOR,
+        note=f'{SLAM} in mapping',
     ),
     Row(
         '/slam_toolbox/clear_changes',
         'slam_toolbox/srv/Clear',
         subscribers=(_fork('slam_real.py:69 (client)', REL),),
-        evidence=(SLAM_INCLUDE, MAPPING_CMD),
+        evidence=(SLAM_NODE,),
         kind='service',
-        note=VENDOR,
+        note=f'{SLAM} in mapping',
     ),
     Row(
         '/compute_path_to_pose',
         'nav2_msgs/action/ComputePathToPose',
         subscribers=(_fork('nav_real.py:48 (action client)', REL),),
-        evidence=(NAV_INCLUDE, NAVIGATION_CMD),
         kind='action',
-        note='live under racecar navigation (vendor Nav2); plan D1 decides how rc.nav is served',
+        absent=(
+            'not provided until upstream 0.9.4: plan D1 (decided 2026-11-12) has no '
+            'navigation until then, and the library resync (F45) drops rc.nav'
+        ),
     ),
 )
 
@@ -659,6 +669,8 @@ FORK_READS = {
     '/slam_toolbox/clear_changes', '/compute_path_to_pose',
 }  # fmt: skip
 FORK_WRITES = {'/drive', '/dotmatrix/text'}
+# Fork reads with no server until upstream 0.9.4 (decided 2026-11-12).
+FORK_READS_NOT_PROVIDED = {'/compute_path_to_pose'}
 
 LIVE = [r for r in TABLE if not r.pending and not r.absent]
 
@@ -803,9 +815,13 @@ def test_every_library_read_is_covered():
 def test_every_fork_read_is_live():
     # Deployed cars run the fork until F45; the 0.9.0 driver must not break them.
     rows = {r.name: r for r in TABLE}
+    assert FORK_READS_NOT_PROVIDED <= FORK_READS
     for name in FORK_READS:
         row = rows[name]
         assert any(s.who == FORK for s in row.subscribers), name
+        if name in FORK_READS_NOT_PROVIDED:
+            assert row.absent and not row.pending, f'{name}: marked not provided'
+            continue
         assert not row.pending and not row.absent, f'{name}: deployed cars read it'
     for row in TABLE:
         if any(s.who == FORK for s in row.subscribers):

@@ -44,6 +44,8 @@
   <exec_depend>nav2_amcl</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <!-- the autonomy launch starts foxglove_bridge with foxglove:=true -->
+  <exec_depend>foxglove_bridge</exec_depend>
   <!-- inference node also needs ultralytics and a Tegra torch build; both come
        from scripts/setup_ml.sh, which has no rosdep key on this platform -->
 
