@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-app="Web teleop">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web Teleop · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/lost.js?v=2" defer></script>
+<script src="/ui/charts.js?v=2"></script>
+<style>
+  /* This page only. The shared pieces are in /ui/neoracer.css. */
+  .col { display: flex; flex-direction: column; gap: var(--nr-gap); min-width: 0; }
+  .view { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: contain; }
+  figure { margin: 0; position: relative; }
+  #overlay { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #overlay[hidden] { display: none; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 700; font-size: 13px; color: var(--nr-ink-2); }
+  .lidar { aspect-ratio: 1; width: 100%; max-width: 560px; margin-inline: auto; }
+  .zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .zoom .nr-btn { width: 36px; min-height: 36px; padding: 0; background: var(--nr-surface-2); }
+  .chart { height: 150px; }
+  .log-chart { height: 200px; }
+  .readout { font: 400 13px/20px var(--nr-font-mono); color: var(--nr-ink-2); white-space: pre-wrap; }
+  #state, #battery { font-family: var(--nr-font-title); font-size: 22px; font-weight: 700; letter-spacing: 0.04em; text-align: center; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .pair { grid-template-columns: 1fr; } }
+  .compass { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: center; }
+  @media (max-width: 700px) { .compass { grid-template-columns: 1fr; } }
+  #compass { width: 200px; height: 200px; }
+  .pad { display: grid; grid-template-columns: repeat(3, 84px); grid-template-rows: repeat(3, 84px); gap: 8px; justify-content: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .pad button { font: 700 28px/1 var(--nr-font-title); border-radius: var(--nr-radius-card); border: 1px solid var(--nr-glass-edge); background: var(--nr-glass-card); color: var(--nr-ink); cursor: pointer; touch-action: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  .pad button .key { font: 700 12px/1 var(--nr-font-mono); color: var(--nr-ink-2); }
+  .pad button.down { background: var(--nr-red); border-color: var(--nr-red); color: var(--nr-ink-on-red); }
+  .pad button.down .key { color: var(--nr-ink-on-red); }
+  .pad .mid { border: 1px dashed var(--nr-glass-edge); border-radius: var(--nr-radius-card); display: flex; align-items: center; justify-content: center; text-align: center; font: 700 12px/16px var(--nr-font-sans); color: var(--nr-ink-2); }
+  label.slider { display: block; color: var(--nr-ink-2); font-weight: 700; font-size: 13px; }
+  label.slider b { color: var(--nr-ink); font-variant-numeric: tabular-nums; }
+  #tuneform { display: grid; gap: 12px; }
+  .text-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .text-row .nr-input { max-width: 420px; font-family: var(--nr-font-sans); }
+  select.nr-input { max-width: 220px; }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" id="home" href="/" aria-label="NeoRacer, back to the apps page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">Web Teleop</h1>
+  <div class="nr-meta">
+    <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
+    <button type="button" class="nr-btn quiet small" onclick="reset()" title="Reload saved settings.">Reset</button>
+    <button type="button" class="nr-btn danger small" onclick="stopCar()" title="Set speed to 0.">Stop</button>
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main" id="main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:6"><b id="thr">-</b><span>Throttle</span></div>
+      <div class="nr-stat" style="--len:6"><b id="steer">-</b><span>Steer</span></div>
+      <div class="nr-stat" style="--len:6"><b id="enc">-</b><span>Encoder m/s</span></div>
+      <div class="nr-stat" style="--len:4"><b id="fps">-</b><span>Camera fps</span></div>
+      <div class="nr-stat" style="--len:8"><b id="res">-</b><span>Frame</span></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-camera">
+    <div class="nr-head">
+      <h2 class="nr-panel-title" id="t-camera">Camera</h2>
+      <label class="switch" id="detswitch"><input type="checkbox" id="dettoggle"><span>Detections</span></label>
+    </div>
+    <figure class="nr-view">
+      <img id="color" class="view" alt="Color camera">
+      <canvas id="overlay"></canvas>
+    </figure>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-lidar">
+    <h2 class="nr-panel-title" id="t-lidar">Lidar</h2>
+    <div class="nr-view lidar">
+      <canvas id="lidar" width="560" height="560" title="Nose up. Scroll to zoom."></canvas>
+      <div class="zoom">
+        <button type="button" class="nr-btn" onclick="zoom(1 / 1.25)" aria-label="Zoom in"><svg class="nr-icon"><use href="/ui/icons.svg#plus"/></svg></button>
+        <button type="button" class="nr-btn" onclick="zoom(1.25)" aria-label="Zoom out"><svg class="nr-icon"><use href="/ui/icons.svg#minus"/></svg></button>
+      </div>
+      <span class="cap">Range <span id="lidarRange">4.0</span> m</span>
+    </div>
+  </section>
+
+  <div class="col nr-span-4">
+    <section class="nr-panel" aria-labelledby="t-encoder">
+      <h2 class="nr-panel-title" id="t-encoder">Encoder</h2>
+      <div class="nr-status off" id="state">STOPPED</div>
+      <div class="nr-chart chart" id="encChart"></div>
+      <div class="nr-legend" id="encLegend"></div>
+    </section>
+    <section class="nr-panel" aria-labelledby="t-imu">
+      <h2 class="nr-panel-title" id="t-imu">IMU</h2>
+      <div class="nr-chart chart" id="accChart"></div>
+      <div class="nr-legend" id="accLegend"></div>
+      <div class="nr-chart chart" id="gyroChart"></div>
+      <div class="nr-legend" id="gyroLegend"></div>
+      <div class="readout" id="imu"></div>
+    </section>
+  </div>
+
+  <section class="nr-panel nr-span-8" aria-labelledby="t-drive">
+    <h2 class="nr-panel-title" id="t-drive">Drive</h2>
+    <div class="pad" id="pad">
+      <div></div>
+      <button type="button" data-axis="fwd" data-val="1" title="Forward (W)">&#9650;<span class="key">W</span></button>
+      <div></div>
+      <button type="button" data-axis="turn" data-val="-1" title="Left (A)">&#9664;<span class="key">A</span></button>
+      <div class="mid">WASD<br>or arrows</div>
+      <button type="button" data-axis="turn" data-val="1" title="Right (D)">&#9654;<span class="key">D</span></button>
+      <div></div>
+      <button type="button" data-axis="fwd" data-val="-1" title="Back (S)">&#9660;<span class="key">S</span></button>
+      <div></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-tune">
+    <h2 class="nr-panel-title" id="t-tune">Tune</h2>
+    <div id="tuneform"></div>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn primary small" onclick="post('/save').then(() => toast('Saved to the car profile.'))">Save</button>
+      <button type="button" class="nr-btn small" onclick="reset()">Load</button>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-8" aria-labelledby="t-battery">
+    <h2 class="nr-panel-title" id="t-battery">Battery</h2>
+    <div class="nr-status off" id="battery">No battery reading</div>
+    <div class="pair">
+      <div><div class="nr-chart chart" id="voltChart"></div><div class="nr-legend" id="voltLegend"></div></div>
+      <div><div class="nr-chart chart" id="ampChart"></div><div class="nr-legend" id="ampLegend"></div></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-compass">
+    <h2 class="nr-panel-title" id="t-compass">Compass</h2>
+    <div class="compass">
+      <div class="nr-view"><canvas id="compass" width="200" height="200" title="Car points up. Red: magnetic north."></canvas></div>
+      <div>
+        <div class="nr-chart chart" id="magChart"></div>
+        <div class="nr-legend" id="magLegend"></div>
+        <div class="readout" id="mag"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-matrix">
+    <h2 class="nr-panel-title" id="t-matrix">Dot matrix</h2>
+    <p class="nr-note">The 8x8 panel scrolls the text it was sent and keeps it until something else writes to it.</p>
+    <div class="text-row">
+      <input type="text" class="nr-input" id="matrixText" maxlength="255" value="Hello, NeoRacer!" aria-label="Text (show_text)">
+      <button type="button" class="nr-btn primary small" onclick="sendText()">Show text</button>
+    </div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-logs">
+    <h2 class="nr-panel-title" id="t-logs">Logs</h2>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn small" onclick="saveLog()">Save log</button>
+      <select class="nr-input" id="logsel" aria-label="Log file"></select>
+      <button type="button" class="nr-btn small" onclick="loadLog()">Load log</button>
+      <span class="nr-note" id="loginfo"></span>
+    </div>
+    <div class="nr-chart log-chart" id="logChart"></div>
+    <div class="nr-legend" id="logLegend"></div>
+  </section>
+</main>
+<div id="nr-toast" role="status"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const { timeChart, legendHtml, recentTicks } = NrCharts;
+// The theme's colors, read when drawing, so the canvases follow Dark and Light.
+const ink = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+$('home').href = `${location.protocol}//${location.hostname}:8080/`;
+const SLIDERS = [
+  { key: 'speed', tip: 'Throttle, 0 to 1.', min: 0, max: 1, step: 0.01 },
+  { key: 'angle', tip: 'Steering, 0 to 1. 1 is full lock.', min: 0, max: 1, step: 0.01 },
+];
+const KEYS = {
+  KeyW: ['fwd', 1], ArrowUp: ['fwd', 1], KeyS: ['fwd', -1], ArrowDown: ['fwd', -1],
+  KeyA: ['turn', -1], ArrowLeft: ['turn', -1], KeyD: ['turn', 1], ArrowRight: ['turn', 1],
+};
+const XYZ = [['x', 'a'], ['y', 'b'], ['z', 'c']];
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+}
+function toast(msg) {
+  const t = $('nr-toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ---- driving: whatever is held right now, from any source ----
+// Two holds on different axes give a diagonal; two on one axis cancel to 0.
+const held = new Set();
+function command() {
+  const sum = (axis) => [...held].filter((h) => h.startsWith(axis + ':')).reduce((a, h) => a + parseInt(h.split(':')[1]), 0);
+  return { fwd: Math.sign(sum('fwd')), turn: Math.sign(sum('turn')) };
+}
+let lastSent = '';
+function sendCmd(force) {
+  const c = command(), s = JSON.stringify(c);
+  if (s !== lastSent || force) { lastSent = s; post('/cmd', c); }
+  for (const b of document.querySelectorAll('#pad button')) b.classList.toggle('down', held.has(`${b.dataset.axis}:${b.dataset.val}`));
+}
+function press(axis, val) { held.add(`${axis}:${val}`); sendCmd(false); }
+function release_(axis, val) { held.delete(`${axis}:${val}`); sendCmd(false); }
+function releaseAll() { held.clear(); sendCmd(true); }
+// The service drops a command older than cmd_timeout, so repeat while held.
+setInterval(() => { if (held.size) sendCmd(true); }, 100);
+const typing = (e) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName);
+document.addEventListener('keydown', (e) => {
+  if (e.repeat || !(e.code in KEYS) || typing(e)) return;
+  e.preventDefault(); press(...KEYS[e.code]);
+});
+document.addEventListener('keyup', (e) => {
+  if (!(e.code in KEYS)) return;
+  e.preventDefault(); release_(...KEYS[e.code]);
+});
+// A page that loses focus loses its keyup events too.
+window.addEventListener('blur', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+for (const b of document.querySelectorAll('#pad button')) {
+  const axis = b.dataset.axis, val = parseInt(b.dataset.val);
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); press(axis, val); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => release_(axis, val));
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+function stopCar() {
+  releaseAll();
+  post('/params', { speed: 0 }).then(() => { $('tuneform').dataset.built = ''; });
+}
+function reset() { post('/load').then(() => { $('tuneform').dataset.built = ''; toast('Loaded.'); }); }
+
+// ---- tune ----
+let pending = {}, sendTimer = null;
+function queue(key, value) {
+  pending[key] = value;
+  if (sendTimer) return;
+  sendTimer = setTimeout(() => { const body = pending; pending = {}; sendTimer = null; post('/params', body); }, 60);
+}
+// The slider's red fill follows its value.
+function fill(el) { el.style.setProperty('--v', `${(el.value - el.min) / (el.max - el.min) * 100}%`); }
+function buildForm(p) {
+  const form = $('tuneform');
+  if (form.dataset.built) return;
+  form.dataset.built = '1';
+  form.innerHTML = SLIDERS.map((s) => `<label class="slider" title="${s.tip}">${s.key} <b id="val_${s.key}">${p[s.key]}</b>
+    <input id="in_${s.key}" type="range" min="${s.min}" max="${s.max}" step="${s.step}" value="${p[s.key]}"></label>`).join('');
+  for (const s of SLIDERS) {
+    const el = $(`in_${s.key}`);
+    fill(el);
+    el.oninput = (e) => { fill(e.target); $(`val_${s.key}`).textContent = e.target.value; queue(s.key, parseFloat(e.target.value)); };
+  }
+}
+function syncForm(p) {
+  if (document.querySelector('input:active')) return;
+  for (const s of SLIDERS) {
+    const el = $(`in_${s.key}`);
+    if (el && parseFloat(el.value) !== p[s.key]) { el.value = p[s.key]; fill(el); $(`val_${s.key}`).textContent = p[s.key]; }
+  }
+}
+
+// ---- camera: one frame in flight ----
+function liveView(id, path) {
+  const img = $(id);
+  (function tick() {
+    if (document.hidden) { setTimeout(tick, 250); return; }
+    const t = Date.now();
+    const done = () => {
+      img.removeEventListener('load', done); img.removeEventListener('error', done);
+      setTimeout(tick, Math.max(20, 120 - (Date.now() - t)));
+    };
+    img.addEventListener('load', done); img.addEventListener('error', done);
+    img.src = `${path}?${t}`;
+  })();
+}
+liveView('color', '/frame');
+
+// ---- detections: boxes arrive as fractions of the frame ----
+// Boxes are red with white names in both themes: they sit on the photo.
+const detToggle = $('dettoggle');
+const DET = { on: detToggle.checked, boxes: [] };
+detToggle.addEventListener('change', () => { DET.on = detToggle.checked; drawOverlay(); });
+function drawOverlay() {
+  const img = $('color'), cv = $('overlay');
+  const w = Math.round(img.clientWidth), h = Math.round(img.clientHeight);
+  if (cv.width && cv.height) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  cv.hidden = !(DET.on && w && h);
+  if (cv.hidden) return;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  const x = cv.getContext('2d');
+  x.font = '600 12px "Space Grotesk", Arial, sans-serif';
+  for (const [bx, by, bw, bh, label, score] of DET.boxes) {
+    const px = bx * w, py = by * h, pw = bw * w, ph = bh * h;
+    x.strokeStyle = '#FF0033'; x.lineWidth = 2; x.strokeRect(px, py, pw, ph);
+    const text = score ? `${label} ${Math.round(score * 100)}%` : label;
+    if (!text) continue;
+    const tw = x.measureText(text).width + 8, above = py >= 15;
+    x.fillStyle = '#FF0033'; x.fillRect(px, above ? py - 15 : py, Math.min(tw, w - px), 15);
+    x.fillStyle = '#FFFFFF'; x.fillText(text, px + 4, above ? py - 4 : py + 11);
+  }
+}
+window.addEventListener('resize', drawOverlay);
+
+// ---- lidar ----
+let VIEW = 4.0;
+function zoom(f) { VIEW = Math.min(12, Math.max(1, VIEW * f)); }
+$('lidar').addEventListener('wheel', (e) => { e.preventDefault(); zoom(e.deltaY > 0 ? 1.2 : 1 / 1.2); });
+function drawLidar(scan) {
+  const c = $('lidar'), x = c.getContext('2d');
+  const cx = c.width / 2, cy = c.height / 2, k = (cx - 10) / VIEW;
+  x.clearRect(0, 0, c.width, c.height);
+  x.strokeStyle = ink('--nr-edge'); x.lineWidth = 1;
+  for (let r = 1; r <= VIEW; r++) { x.beginPath(); x.arc(cx, cy, r * k, 0, 2 * Math.PI); x.stroke(); }
+  // 0 deg is the nose (up); positive degrees are to the right.
+  x.fillStyle = ink('--nr-red');
+  for (const [deg, r] of scan) {
+    const a = deg * Math.PI / 180;
+    x.fillRect(cx + Math.sin(a) * r * k - 1.5, cy - Math.cos(a) * r * k - 1.5, 3, 3);
+  }
+  x.fillStyle = ink('--nr-ink');
+  x.beginPath(); x.moveTo(cx, cy - 10); x.lineTo(cx - 7, cy + 8); x.lineTo(cx + 7, cy + 8); x.fill();
+  $('lidarRange').textContent = VIEW.toFixed(1);
+}
+
+// ---- compass: the car points up; turning left by h moves north h clockwise ----
+function drawCompass(heading) {
+  const cv = $('compass'), c = cv.getContext('2d'), w = cv.width, r = w / 2 - 16;
+  const fg = ink('--nr-ink'), red = ink('--nr-red');
+  c.clearRect(0, 0, w, w);
+  c.save(); c.translate(w / 2, w / 2);
+  c.strokeStyle = ink('--nr-edge'); c.beginPath(); c.arc(0, 0, r, 0, 2 * Math.PI); c.stroke();
+  c.fillStyle = fg; c.beginPath(); c.moveTo(0, -18); c.lineTo(-7, 10); c.lineTo(7, 10); c.fill();
+  c.rotate(heading * Math.PI / 180);
+  c.fillStyle = red; c.beginPath(); c.moveTo(0, -r + 6); c.lineTo(-7, -r + 22); c.lineTo(7, -r + 22); c.fill();
+  c.font = '700 14px "Space Grotesk", Arial, sans-serif'; c.textAlign = 'center'; c.fillText('N', 0, -r + 38);
+  c.restore();
+  c.fillStyle = fg; c.font = '600 13px "Space Grotesk", Arial, sans-serif'; c.textAlign = 'center';
+  c.fillText(`${heading.toFixed(1)} deg`, w / 2, w - 4);
+}
+
+// ---- dot matrix: text only on the NeoRacer's 8x8 panel ----
+function sendText() { post('/text', { text: $('matrixText').value }).then(() => toast('Sent to the dot matrix.')); }
+
+// ---- charts ----
+// Battery arrives at 1 Hz; keep the last minute in the page.
+const battery = [];
+const BATTERY_S = 60;
+function xyzSeries(rows, start, unit, digits) {
+  return XYZ.map(([name, style], i) => ({ name, style, axis: 'l', unit, digits, minSpan: 0.1, pts: rows.map((r) => [r[0], r[start + i]]) }));
+}
+function drawCharts(d) {
+  const sense = d.sense || [], hist = d.hist || [];
+  const now = (sense.length ? sense[sense.length - 1][0] : (hist.length ? hist[hist.length - 1][0] : 0));
+  const t0 = now - 10, ticks = recentTicks(now, 2), opts = { gapSec: 0.5 };
+  const enc = [
+    { name: 'Encoder', style: 'a', axis: 'l', unit: 'm/s', digits: 2, minSpan: 0.2, pts: hist.map((r) => [r[0], r[1]]) },
+    { name: 'Throttle', style: 'b', axis: 'r', unit: '', digits: 2, pts: hist.map((r) => [r[0], r[2]]) },
+  ];
+  timeChart($('encChart'), t0, now, enc, ticks, { ...opts, fixed: { r: [-1, 1] }, marks: d.marks });
+  setLegend('encLegend', [{ name: 'Encoder (m/s, left)', style: 'a' }, { name: 'Throttle (-1 to 1, right)', style: 'b' }]);
+  timeChart($('accChart'), t0, now, xyzSeries(sense, 1, 'm/s2', 2), ticks, opts);
+  setLegend('accLegend', [{ name: 'Linear acceleration (m/s2):', style: null }, ...XYZ.map(([n, s]) => ({ name: n, style: s }))]);
+  timeChart($('gyroChart'), t0, now, xyzSeries(sense, 4, 'rad/s', 3), ticks, opts);
+  setLegend('gyroLegend', [{ name: 'Angular velocity (rad/s):', style: null }, ...XYZ.map(([n, s]) => ({ name: n, style: s }))]);
+  timeChart($('magChart'), t0, now, xyzSeries(sense, 7, 'uT', 1), ticks, opts);
+  setLegend('magLegend', [{ name: 'Magnetic field (uT):', style: null }, ...XYZ.map(([n, s]) => ({ name: n, style: s }))]);
+  if (d.volts !== undefined && d.volts !== null && (!battery.length || battery[battery.length - 1][0] < now - 0.9)) {
+    battery.push([now, d.volts, d.amps]);
+    while (battery.length && battery[0][0] < now - BATTERY_S) battery.shift();
+  }
+  const bt = recentTicks(now, 20);
+  timeChart($('voltChart'), now - BATTERY_S, now,
+    [{ name: 'Voltage', style: 'a', axis: 'l', unit: 'V', digits: 2, minSpan: 0.1, pts: battery.map((r) => [r[0], r[1]]) }], bt, { gapSec: 3 });
+  setLegend('voltLegend', [{ name: 'Voltage (V)', style: 'a' }]);
+  // The NeoRacer has no current sensor: its current arrives as null and the chart stays empty.
+  const amps = battery.filter((r) => r[2] !== null && r[2] !== undefined);
+  timeChart($('ampChart'), now - BATTERY_S, now,
+    [{ name: 'Current', style: 'a', axis: 'l', unit: 'A', digits: 2, minSpan: 0.2, pts: amps.map((r) => [r[0], r[2]]) }], bt, { gapSec: 3 });
+  setLegend('ampLegend', [{ name: amps.length ? 'Current (A)' : 'Current: no sensor on this car', style: 'a' }]);
+}
+const shown = new Map();
+function setLegend(id, items) {
+  const html = items.map((s) => (s.style ? legendHtml([s]) : `<span>${s.name}</span>`)).join('');
+  if (shown.get(id) !== html) { shown.set(id, html); $(id).innerHTML = html; }
+}
+
+// Live while the car answers; No answer after a second of missed polls.
+let misses = 0, lastBeat = 0;
+function beat(ok) {
+  const el = $('live'), word = el.querySelector('span');
+  if (ok) {
+    misses = 0;
+    $('main').classList.remove('nr-lost-data');
+    if (Date.now() - lastBeat < 1000) return;
+    lastBeat = Date.now();
+    el.className = 'nr-live beat'; word.textContent = 'Live';
+    setTimeout(() => { el.className = 'nr-live'; }, 120);
+  } else if (++misses >= 8) {
+    el.className = 'nr-live lost'; word.textContent = 'No answer';
+    $('main').classList.add('nr-lost-data');
+  }
+}
+
+// ---- state ----
+const WORDS = { '1': 'FORWARD', '-1': 'BACK' }, TURNS = { '1': 'RIGHT', '-1': 'LEFT' };
+const fmt = (v) => v.map((n) => (n >= 0 ? ' ' : '') + n.toFixed(3)).join('  ');
+let busy = false;
+function update() {
+  if (busy) return;
+  busy = true;
+  fetch('/state').then((r) => r.json()).then((d) => {
+    busy = false;
+    beat(true);
+    $('thr').textContent = d.speed_cmd;
+    $('steer').textContent = d.steer;
+    $('enc').textContent = d.enc_speed;
+    $('fps').textContent = d.cam_fps;
+    $('res').textContent = d.res[0] ? `${d.res[0]}x${d.res[1]}` : 'none';
+
+    DET.boxes = d.dets || [];
+    detToggle.disabled = !d.params.detections_topic;
+    $('detswitch').title = !d.params.detections_topic
+      ? 'No detector set up.'
+      : !d.det_ok ? 'No detections. Turn detections on from the apps page (inference is off at boot).'
+        : `${d.dets.length} detection(s) at ${d.det_fps} Hz.`;
+    drawOverlay();
+
+    const box = $('state');
+    const words = [WORDS[d.fwd], TURNS[d.turn]].filter(Boolean).join(' ');
+    box.textContent = d.timed_out ? 'TIMED OUT' : (words || 'STOPPED');
+    box.className = 'nr-status ' + (d.timed_out ? 'warn' : (words ? 'ok' : 'off'));
+    box.title = d.timed_out ? `No command for ${d.params.cmd_timeout} s. Driving zero.`
+      : d.params.speed === 0 ? 'Speed is 0.' : `Measured ${d.enc_speed} m/s.`;
+
+    buildForm(d.params);
+    syncForm(d.params);
+    drawLidar(d.scan);
+    drawCharts(d);
+    const volts = d.volts === undefined || d.volts === null ? null : d.volts;
+    $('battery').textContent = volts === null ? 'No battery reading'
+      : (d.amps === null || d.amps === undefined) ? `${volts.toFixed(2)} V` : `${volts.toFixed(2)} V · ${d.amps.toFixed(2)} A`;
+    $('battery').className = 'nr-status ' + (volts === null ? 'warn' : 'info');
+    if (d.accel) $('imu').textContent = `accel ${fmt(d.accel)}\ngyro  ${fmt(d.gyro)}`;
+    if (d.mag) {
+      const norm = Math.hypot(...d.mag);
+      $('mag').textContent = `field ${d.mag.map((v) => v.toFixed(2)).join('  ')} uT  |B| ${norm.toFixed(2)}\nheading ${d.heading.toFixed(1)} deg`;
+      drawCompass(d.heading);
+    }
+  }).catch(() => { busy = false; beat(false); });
+}
+
+// ---- logs ----
+const logTicks = (t0) => Object.assign((a, b) => {
+  const span = b - a, step = NrCharts.niceTicks(0, span, 5)[1] || 1, out = [];
+  for (let s = 0; s <= span + 1e-6; s += step) out.push([a + s, `${(a + s - t0).toFixed(0)} s`]);
+  return out;
+}, { label: (t) => `${(t - t0).toFixed(1)} s` });
+function loadLog() {
+  const f = $('logsel').value;
+  if (!f) return;
+  fetch('/logs/' + f).then((r) => r.text()).then((txt) => {
+    const lines = txt.trim().split('\n');
+    const marks = lines.filter((l) => l.startsWith('# mark')).map((l) => { const p = l.split(','); return [parseFloat(p[1]), p.slice(2).join(',')]; });
+    const rows = lines.filter((l) => !l.startsWith('#')).slice(1).map((l) => l.split(',').map(Number));
+    const moving = rows.filter((r) => r[1] || r[2]).length;
+    $('loginfo').textContent = `${f}: ${rows.length} rows, ${marks.length} changes, ${moving} with a button down`;
+    if (!rows.length) return;
+    const t0 = rows[0][0], t1 = rows[rows.length - 1][0];
+    timeChart($('logChart'), t0, t1, [
+      { name: 'Encoder', style: 'a', axis: 'l', unit: 'm/s', digits: 2, minSpan: 0.2, pts: rows.map((r) => [r[0], r[5]]) },
+      { name: 'Throttle', style: 'b', axis: 'r', unit: '', digits: 2, pts: rows.map((r) => [r[0], r[3]]) },
+      { name: 'Steer', style: 'c', axis: 'r', unit: '', digits: 2, pts: rows.map((r) => [r[0], r[4]]) },
+    ], logTicks(t0), { gapSec: 0.5, fixed: { r: [-1, 1] }, marks });
+    setLegend('logLegend', [{ name: 'Encoder (m/s, left)', style: 'a' }, { name: 'Throttle (right)', style: 'b' }, { name: 'Steer (right)', style: 'c' }]);
+  });
+}
+function saveLog() { post('/logs/save').then(() => { refreshLogs(true); toast('Log saved.'); }); }
+function refreshLogs(loadLatest) {
+  fetch('/logs').then((r) => r.json()).then((names) => {
+    const sel = $('logsel');
+    sel.innerHTML = names.map((n) => `<option>${n}</option>`).join('');
+    sel.selectedIndex = names.length - 1;
+    if (loadLatest && names.length) loadLog();
+  });
+}
+refreshLogs(false);
+
+update();
+setInterval(update, 120);
+</script>
+</body>
+</html>
