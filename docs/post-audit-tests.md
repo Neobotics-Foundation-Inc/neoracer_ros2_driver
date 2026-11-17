@@ -50,7 +50,7 @@ profile, `params/controller.yaml`.
   from the receiver directly; nothing on the Jetson is in that path.
 - [ ] Mode switch **down** (autonomy) and publish `/drive` (or run a student
   script): the wheels respond.
-- [ ] Stop the publisher: within 0.5 s the mux publishes zero and the wheels stop.
+- [ ] Stop the publisher: within 0.5 s the mux publishes zero and the wheels coast to a stop.
 - [ ] Flip the switch back up: the ESP32 ignores the Jetson again.
 - [ ] Verify drive **direction** and that top speed feels safe; tune
   `max_speed_mps` (`config/controller.yaml`), the caps in

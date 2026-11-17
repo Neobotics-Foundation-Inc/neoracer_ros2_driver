@@ -486,7 +486,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 
-**FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. On receiver failsafe the ESP32 sends `-1` on every channel, which maps to neutral. With the mode switch down a handset that goes off is not reported: the channels repeat their last values.
+**FlySky channels are wrong.** The shipped mapping fits the FlySky handset the NeoRacer ships with. For another handset, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel`, `steering_channel` and `mode_channel` in the car profile, `~/.config/racecar/params/controller.yaml`. With the mode switch up, a handset that goes off reads `-1` on every channel within a second, which maps to neutral. With the switch down the loss is not reported: the channels repeat their last values.
 
 **JetPack dpkg errors.** Reset the dpkg info directory:
 
