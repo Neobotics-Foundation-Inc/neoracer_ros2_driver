@@ -193,7 +193,6 @@ def paint(text: str, status: str, color: bool, bold: bool = False) -> str:
 # The guided output: a header per step, numbered action blocks, `>>` prompts,
 # status lines and a result block. Colour shows only on a terminal
 # (use_color), so piped output keeps the same layout as plain text.
-HEADER_WIDTH = 60
 HEADER_COLOR = '36'
 PROMPT_COLOR = '33'
 STATUS_INDENT = ' ' * 5
@@ -212,10 +211,8 @@ def _color(color: bool | None) -> bool:
 
 
 def step_header(title: str, color: bool | None = None) -> str:
-    """Return a step's banner, `=== title ===...`, padded to HEADER_WIDTH."""
-    text = f'=== {title} '
-    text += '=' * max(3, HEADER_WIDTH - len(text))
-    return styled(text, HEADER_COLOR, _color(color), bold=True)
+    """Return a step's banner, `=== title ===`."""
+    return styled(f'=== {title} ===', HEADER_COLOR, _color(color), bold=True)
 
 
 def action_lines(number: int, lines: list[str], color: bool | None = None) -> list[str]:
