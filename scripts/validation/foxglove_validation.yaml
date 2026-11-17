@@ -1,0 +1,23 @@
+# foxglove_bridge for validation sessions (slam_session.py): the map, scan,
+# frames, and poses for Lichtblick; no camera streams, which would load the WiFi.
+foxglove_bridge:
+  ros__parameters:
+    port: 8765
+    topic_whitelist:
+      - '^/map$'
+      - '^/map_metadata$'
+      - '^/scan$'
+      - '^/tf$'
+      - '^/tf_static$'
+      - '^/robot_description$'
+      - '^/odom/integrated$'
+      - '^/pose$'
+      - '^/amcl_pose$'
+      - '^/particle_cloud$'
+      - '^/slam_toolbox/graph_visualization$'
+      - '^/autonomy/pose$'
+      - '^/autonomy/status$'
+    capabilities: [clientPublish]
+    client_topic_whitelist: ['^/initialpose$']
+    service_whitelist: ['^$']
+    param_whitelist: ['^$']
