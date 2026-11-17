@@ -149,6 +149,7 @@ DEVICE_LINKS = (
 # scripts/setup_networking.sh). Every NeoRacer reaches its lidar this way.
 LIDAR_IFACE = 'usb0'
 LIDAR_HOST_ADDR = '192.168.8.1'
+LIDAR_SENSOR_ADDR = '192.168.8.2'
 NET_DIR = Path('/sys/class/net')
 
 # Defaults of scripts/setup_networking.sh, which ~/.config/racecar/networking.env
@@ -168,6 +169,7 @@ SERVICE_UNITS = (
     'neoracer-watchdog',
     'neoracer-dashboard',
     'neoracer-jupyter',
+    'neoracer-data',
 )
 
 # Started for mapping or localization, never at boot, so it is not a service
@@ -207,7 +209,9 @@ def check_devices() -> list[Check]:
             detail = 'missing: check the cable, then racecar udev'
             out.append(Check(g, p.name, FAIL if required else WARN, detail))
 
-    out.append(lidar_link_check())
+    lidar_link = lidar_link_check()
+    out.append(lidar_link)
+    out.append(lidar_answers_check(lidar_link.status != FAIL))
 
     try:
         mine = {grp.getgrgid(gid).gr_name for gid in os.getgroups()}
@@ -226,9 +230,10 @@ def check_devices() -> list[Check]:
     if not existing:
         out.append(Check(g, 'groups', SKIP, 'none of the racecar groups exist'))
     elif missing:
+        # The udev rules make the devices 0666, so a missing group stops nothing.
         out.append(
             Check(
-                g, 'groups', FAIL, f'not a member of {", ".join(missing)} (log out and back in?)'
+                g, 'groups', WARN, f'not a member of {", ".join(missing)} (log out and back in?)'
             )
         )
     else:
@@ -254,6 +259,19 @@ def lidar_link_check(net: Path | None = None) -> Check:
         have = ', '.join(addrs) or 'no IPv4 address'
         return Check('devices', name, WARN, f'{have}, expect {LIDAR_HOST_ADDR}')
     return Check('devices', name, OK, f'carrier, {", ".join(addrs)}')
+
+
+def lidar_answers_check(link_up: bool) -> Check:
+    """Ping the LakiBeam itself: a live link with a sensor that does not answer shows only here."""
+    name = 'lidar answers'
+    if not link_up:
+        return Check('devices', name, SKIP, f'no {LIDAR_IFACE} link')
+    out = _run(['ping', '-c', '1', '-W', '1', LIDAR_SENSOR_ADDR], timeout=3.0)
+    m = re.search(r'time=([\d.]+) ms', out)
+    if not m:
+        detail = f'no answer from {LIDAR_SENSOR_ADDR} (power or cable?)'
+        return Check('devices', name, FAIL, detail)
+    return Check('devices', name, OK, f'{LIDAR_SENSOR_ADDR} in {float(m.group(1)):.1f} ms')
 
 
 def _own_cpu_seconds() -> float:
@@ -530,18 +548,25 @@ def check_network() -> list[Check]:
     eth_iface = networking_setting('RACECAR_ETH_IFACE', ETH_IFACE)
     eth = _iface_v4(eth_iface)
     name = f'{eth_iface} router'
+    wifi_iface = networking_setting('RACECAR_WIFI_IFACE', WIFI_IFACE)
+    ap = _run(['nmcli', '-t', '-f', 'NAME,DEVICE', 'con', 'show', '--active'])
+    hotspot_up = any(ln.startswith(f'{AP_CONNECTION}:') for ln in ap.splitlines())
+    # Either link reaches the car, so one that is down warns only when the
+    # other is down too.
     if eth:
         out.append(Check(g, name, OK, ', '.join(eth)))
+    elif hotspot_up:
+        out.append(Check(g, name, OK, 'not in use: the hotspot is up'))
     else:
         out.append(Check(g, name, WARN, 'no global IPv4 (router unplugged?)'))
 
-    wifi_iface = networking_setting('RACECAR_WIFI_IFACE', WIFI_IFACE)
-    ap = _run(['nmcli', '-t', '-f', 'NAME,DEVICE', 'con', 'show', '--active'])
     if not ap:
         out.append(Check(g, 'hotspot', SKIP, 'nmcli unavailable'))
-    elif any(ln.startswith(f'{AP_CONNECTION}:') for ln in ap.splitlines()):
+    elif hotspot_up:
         ssid = networking_setting('RACECAR_AP_SSID', 'neoracer-1')
         out.append(Check(g, 'hotspot', OK, f'{ssid} up on {wifi_iface}'))
+    elif eth:
+        out.append(Check(g, 'hotspot', OK, 'not in use: the router link is up'))
     else:
         out.append(
             Check(g, 'hotspot', WARN, f'{AP_CONNECTION} not active (racecar setup networking)')
