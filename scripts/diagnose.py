@@ -736,6 +736,10 @@ class RosResult:
     counts: dict[str, int] = field(default_factory=dict)
     elapsed: float = 0.0
     present: set[str] = field(default_factory=set)
+    # Topics with a publisher. `present` also lists a topic that only a
+    # subscriber holds, such as /autonomy/status, which the throttle node
+    # subscribes to whether or not an autonomy node runs.
+    published: set[str] = field(default_factory=set)
     values: dict[str, Any] = field(default_factory=dict)
     reported: dict[str, float] = field(default_factory=dict)
 
@@ -874,6 +878,7 @@ def sample_ros(window: float, specs: list[TopicSpec]) -> RosResult:
         if grab:
             latest.update(_grab_once(node, grab, msg_classes, qos))
 
+        result.published = {t for t in result.present if node.count_publishers(t) > 0}
         result.counts = dict(counts)
         result.values = latest
         result.reported = dict(reported)
@@ -917,9 +922,17 @@ def rate_checks(group: str, specs: list[TopicSpec], ros: RosResult) -> list[Chec
             continue
         if spec.topic in DIAGNOSTIC_SOURCED:
             hz = ros.reported[spec.topic]
+            rate = rate_status(hz, spec)
         else:
-            hz = ros.counts.get(spec.topic, 0) / ros.elapsed if ros.elapsed else 0.0
-        status = worst(rate_status(hz, spec), value_status)
+            count = ros.counts.get(spec.topic, 0)
+            hz = count / ros.elapsed if ros.elapsed else 0.0
+            rate = rate_status(hz, spec)
+            if ros.elapsed * spec.nominal < 2:
+                # A window shorter than two periods of a slow stream, such as
+                # the 0.5 Hz battery frame under --window 3, can hold no frame
+                # at all. One frame is enough there, and none only warns.
+                rate = OK if count else WARN
+        status = worst(rate, value_status)
         out.append(Check(group, spec.label, status, f'{hz:.1f}/{spec.nominal:g} Hz', data))
     return out
 
@@ -968,14 +981,15 @@ def autonomy_checks(unit_state: str, ros: RosResult, sampled: bool) -> list[Chec
     Mode, localized, scan fit, spread, and saves from /autonomy/status, plus the pose rate.
 
     `unit_state` is `systemctl is-active` for the autonomy unit. The node can
-    also run outside the unit, so a status topic in the sampled graph counts
-    as running. No autonomy node is the usual state and reads OK. With
+    also run outside the unit, so a publisher of the status topic in the
+    sampled graph counts as running; the throttle node's subscription to it
+    does not. No autonomy node is the usual state and reads OK. With
     `sampled` false (--quick) only the unit row is reported.
     """
     g = 'autonomy'
     if unit_state == 'failed':
         return [Check(g, 'unit', WARN, f'{AUTONOMY_UNIT} failed; journalctl -u {AUTONOMY_UNIT}')]
-    outside = sampled and unit_state != 'active' and AUTONOMY_STATUS in ros.present
+    outside = sampled and unit_state != 'active' and AUTONOMY_STATUS in ros.published
     if unit_state != 'active' and not outside:
         return [Check(g, 'unit', OK, 'stopped')]
     out = [Check(g, 'unit', OK, 'stopped, node running' if outside else 'active')]
