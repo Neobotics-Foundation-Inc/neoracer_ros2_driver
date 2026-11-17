@@ -60,16 +60,21 @@ from sensor_msgs.msg import Imu, LaserScan
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calibrate_common import (  # noqa: E402, I100
+    action_lines,
     backup_reminder,
     CalibratorNode,
     Criterion,
     finish_check,
     install_config_dir,
+    log_block,
     node_params,
-    read_line,
+    read_prompt,
+    result_lines,
     run_sequence,
     source_config_dir,
     spin_until_done,
+    status_line,
+    step_header,
     write_local_yaml,
 )
 from scan_match import (  # noqa: E402, I100
@@ -118,7 +123,7 @@ FIRMWARE_TOPIC = '/odom'
 PARAM_TIMEOUT = 3.0
 
 HANDS_OFF = f'Press Enter, then keep your hands off the car for {REST_SECONDS:.0f} seconds...'
-STOPPED = 'Press Enter when the car has stopped, then keep your hands off it...'
+STOPPED = 'Press Enter only when the car has stopped, then keep your hands off it...'
 SPIN_PLACE = 'Place the car on the floor in the middle of the clear space.'
 DRIVE_PLACE = 'Place the car on the floor facing a wall or furniture 3 to 5 meters away.'
 HOW_TO_DRIVE = [
@@ -147,11 +152,6 @@ DRIVE_LINES = [
     'Drive straight toward the wall at a steady speed.',
     'Stop at least 0.5 meters before the wall. The exact position does not matter.',
 ]
-
-
-def log_lines(log: Any, lines: list[str]) -> None:
-    for line in lines:
-        log.info(line)
 
 
 def integrate_rate(samples: list[tuple[float, float]], bias: float = 0.0) -> float:
@@ -560,8 +560,8 @@ class OdomCalibrator(CalibratorNode):
     def measure(self, place: str, drive: list[str]) -> Run | None:
         """Run one rest scan, drive, rest scan sequence; return both accounts of it."""
         log = self.get_logger()
-        log.info(place)
-        read_line(HANDS_OFF)
+        log_block(log, action_lines(1, [place]))
+        read_prompt(HANDS_OFF)
         with self._lock:
             self._samples = []
         with self._aux_lock:
@@ -573,16 +573,16 @@ class OdomCalibrator(CalibratorNode):
         with self._aux_lock:
             rest = [r for _, r in self._gyro]
         bias = float(np.mean(rest)) if rest else 0.0
-        log.info('Done. You can drive now.')
-        log_lines(log, HOW_TO_DRIVE + drive)
-        read_line(STOPPED)
+        log.info(status_line('Done. You can drive now.'))
+        log_block(log, action_lines(2, HOW_TO_DRIVE + drive))
+        read_prompt(STOPPED)
         if not self._wait_still():
             self._collecting = self._gyro_on = False
             log.error('The car did not stop. Nothing measured.')
             return None
         end_scan = self._rest_scan()
         self._collecting = self._gyro_on = False
-        log.info('Done. You can move the car now.')
+        log.info(status_line('Done. You can move the car now.'))
         with self._lock:
             poses = list(self._samples)
         with self._aux_lock:
@@ -650,26 +650,25 @@ class OdomCalibrator(CalibratorNode):
             return 1
         if not self._files_match_controller():
             return 1
-        log.info(source_note(self.source))
+        log.info(status_line(source_note(self.source)))
         if self.check:
             return self._run_check()
         titles = ('Step 1 of 2: gyro scale', 'Step 2 of 2: speed scale')
         steps = run_sequence(
             2,
-            lambda i: log.info(titles[i]),
+            lambda i: log_block(log, [step_header(titles[i])]),
             lambda i: self._gyro_step() if i == 0 else self._speed_step(),
         )
         params = dict(steps.values())
 
         if not params:
-            log.info('Nothing calibrated.')
+            log.info(status_line('Nothing calibrated.'))
             return 0
         written = write_local_yaml(CAL_NAME, NODE, params, TOOL, merge=True)
-        for key, value in params.items():
-            log.info(f'{key}: {value}')
-        log.info(backup_reminder(written))
+        log_block(log, result_lines([f'{key}: {value}' for key, value in params.items()]))
+        log.info(status_line(backup_reminder(written)))
         if self.source != 'integrated':
-            log.info(UNUSED_ON_FIRMWARE)
+            log.info(status_line(UNUSED_ON_FIRMWARE))
         return 0
 
     def _files_match_controller(self) -> bool:
@@ -695,13 +694,15 @@ class OdomCalibrator(CalibratorNode):
             return None
         run, true = spun
         scale = true / run.gyro_rad
-        log.info(
+        rows = [
             f'Lidar {math.degrees(true):+.1f} deg, gyro {math.degrees(run.gyro_rad):+.1f} deg, '
             f'firmware {math.degrees(run.firmware[2]):+.1f} deg, '
             f'integrated {math.degrees(run.integrated[2]):+.1f} deg'
-        )
-        for source, pose in run.poses():
-            log.info(pose_line(source, 'heading', pose[2], true, SPIN_PASS))
+        ]
+        rows += [
+            pose_line(source, 'heading', pose[2], true, SPIN_PASS) for source, pose in run.poses()
+        ]
+        log_block(log, result_lines(rows))
         if not scale_ok(scale):
             log.error(
                 f'Gyro scale {scale:.3f} is outside 0.8 to 1.25. The ESP32 sends the gyro '
@@ -722,16 +723,20 @@ class OdomCalibrator(CalibratorNode):
         lidar_m = math.hypot(run.lidar[0], run.lidar[1])
         firmware_m = math.hypot(run.firmware[0], run.firmware[1])
         integrated_m = math.hypot(run.integrated[0], run.integrated[1])
-        log.info(
+        rows = [
             f'Lidar {lidar_m:.3f} m, firmware {firmware_m:.3f} m, integrated {integrated_m:.3f} m'
-        )
+        ]
         if lidar_m < MIN_DRIVE_M:
+            log_block(log, result_lines(rows))
             log.error(
                 f'The car drove {lidar_m:.2f} meters. Drive at least {MIN_DRIVE_M:g} meters.'
             )
             return None
-        log.info(pose_line('firmware', 'distance', firmware_m, lidar_m, DRIVE_PASS))
-        log.info(pose_line('integrated', 'distance', integrated_m, lidar_m, DRIVE_PASS))
+        rows += [
+            pose_line('firmware', 'distance', firmware_m, lidar_m, DRIVE_PASS),
+            pose_line('integrated', 'distance', integrated_m, lidar_m, DRIVE_PASS),
+        ]
+        log_block(log, result_lines(rows))
         ratio = speed_ratio(lidar_m, integrated_m)
         if not scale_ok(ratio):
             log.error(
@@ -756,7 +761,7 @@ class OdomCalibrator(CalibratorNode):
         titles = (f'Step 1 of 2: spin, {CHECK_TURNS} circles', 'Step 2 of 2: straight drive')
         steps = run_sequence(
             2,
-            lambda i: log.info(titles[i]),
+            lambda i: log_block(log, [step_header(titles[i])]),
             lambda i: self._check_spin() if i == 0 else self._check_drive(),
         )
         criteria = [c for i in sorted(steps) for c in steps[i]]

@@ -53,6 +53,7 @@ import argparse
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -68,12 +69,17 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
 from calibrate_common import (  # noqa: E402, I100
+    action_lines,
     backup_reminder,
     DEADMAN,
     install_config_dir,
+    log_block,
     node_params,
+    result_lines,
     run_sequence,
     source_config_dir,
+    status_line,
+    step_header,
     update_local_values,
 )
 from drive_speed import drive_limits, drive_segments  # noqa: E402, I100
@@ -170,6 +176,13 @@ CIRCLE_PLACE = {
         'edge of the area. The car turns left.'
     ),
 }
+
+
+def sentences(text: str) -> list[str]:
+    """Split a placement text into one sentence per line, the words unchanged."""
+    return re.split(r'(?<=\.) ', text)
+
+
 # Wheelbase and track of the NeoRacer (neoracer-mujoco spec, CAD), m.
 # Per car: odometry.wheelbase_m in odom.yaml / the profile's params/odom.yaml (measured).
 WHEELBASE_M = float(node_params('odom', 'controller_node').get('odometry.wheelbase_m', 0.28764))
@@ -762,13 +775,13 @@ class Driver:
         the countdown.
         """
         self.arming.reset()
-        if self.rb:
-            self.log.info('The mode switch is DOWN. Flip it UP first.')
-        self.log.info(
+        lines = ['The mode switch is DOWN. Flip it UP first.'] if self.rb else []
+        lines += [
             'Flip the mode switch DOWN (autonomy). The car starts driving '
-            f'{COUNTDOWN_SEC + lead:.0f} seconds after you flip it.'
-        )
-        self.log.info('Flip the mode switch UP at any time to stop the car.')
+            f'{COUNTDOWN_SEC + lead:.0f} seconds after you flip it.',
+            'Flip the mode switch UP at any time to stop the car.',
+        ]
+        log_block(self.log, action_lines(2, lines))
         end = time.monotonic() + ARM_TIMEOUT_SEC
         while not self.arming.armed:
             if time.monotonic() >= end:
@@ -816,8 +829,10 @@ class Driver:
                 # the rest before the first move and the pauses between moves.
                 # The rest at the end is still.
                 if k == last_move + 1:
-                    self.log.info('You can flip the mode switch UP now.')
-                    self.log.info(f'Keep your hands off the car for {seconds:.0f} seconds.')
+                    self.log.info(status_line('You can flip the mode switch UP now.'))
+                    self.log.info(
+                        status_line(f'Keep your hands off the car for {seconds:.0f} seconds.')
+                    )
                 need_rb = k <= last_move
                 if not self._hold(seconds, speed, steer, need_rb=need_rb):
                     ok = False
@@ -828,7 +843,7 @@ class Driver:
             recorder.send_signal(signal.SIGINT)
             recorder.wait(timeout=15)
         if ok:
-            self.log.info('Done.')
+            self.log.info(status_line('Done.'))
             return bag_dir
         if self.timed_out:
             self.log.error(
@@ -854,9 +869,8 @@ def write_values(values: dict[str, float], log: Any) -> int:
     stored = (yaml.safe_load(local.read_text()) or {}) if local.exists() else {}
     values = {**values, **lock_to_lock({**stored, **values})}
     written = update_local_values('dynamics', values, TOOL)
-    for key, value in sorted(values.items()):
-        log.info(f'{key}: {value}')
-    log.info(backup_reminder(written))
+    log_block(log, result_lines([f'{key}: {value}' for key, value in sorted(values.items())]))
+    log.info(status_line(backup_reminder(written)))
     return 0
 
 
@@ -881,9 +895,9 @@ def run_session(plans: dict[str, list[tuple[float, float, float]]]) -> int:
     runs = list(RUNS)
 
     def show(i: int) -> None:
-        log.info(f'Run {i + 1} of {len(runs)}: {TITLES[runs[i]]}')
-        log.info(CIRCLE_PLACE.get(runs[i], STRAIGHT_PLACE))
-        log.info(DEADMAN)
+        log_block(log, [step_header(f'Run {i + 1} of {len(runs)}: {TITLES[runs[i]]}')])
+        place = sentences(CIRCLE_PLACE.get(runs[i], STRAIGHT_PLACE))
+        log_block(log, action_lines(1, [*place, *DEADMAN.split('\n')]))
 
     def run_one(i: int) -> dict[str, float] | None:
         bag = driver.drive(runs[i], plans[runs[i]])
@@ -891,14 +905,13 @@ def run_session(plans: dict[str, list[tuple[float, float, float]]]) -> int:
             if driver.timed_out:
                 raise ArmTimeout
             return None
-        log.info('Analyzing the run...')
+        log.info(status_line('Analyzing the run...'))
         try:
             got, lines = analyze(bag)
         except (ValueError, StopIteration) as exc:
             log.error(f'The run could not be analyzed: {analysis_error(exc)}. Its bag is {bag}.')
             return None
-        for line in lines:
-            log.info(line)
+        log_block(log, result_lines(lines))
         return got
 
     try:
@@ -911,7 +924,7 @@ def run_session(plans: dict[str, list[tuple[float, float, float]]]) -> int:
         for _, got in sorted(run_sequence(len(runs), show, run_one).items()):
             values.update(got)
         if not values:
-            log.info('Nothing measured.')
+            log.info(status_line('Nothing measured.'))
             return 0
         return write_values(values, log)
     except ArmTimeout:
@@ -943,17 +956,16 @@ def main(argv: list[str] | None = None) -> int:
         bag = Path(name).expanduser()
         if not bag.exists():
             bag = Path(resolve_log_root(load_config().get('DIR'))) / name
-        log.info(bag.name)
+        log_block(log, [step_header(bag.name)])
         try:
             got, lines = analyze(bag)
         except (ValueError, StopIteration) as exc:
             log.error(f'Not analyzed: {analysis_error(exc)}.')
             continue
-        for line in lines:
-            log.info(line)
+        log_block(log, result_lines(lines))
         values.update(got)
     if not values:
-        log.info('Nothing measured.')
+        log.info(status_line('Nothing measured.'))
         return 1
     return write_values(values, log)
 

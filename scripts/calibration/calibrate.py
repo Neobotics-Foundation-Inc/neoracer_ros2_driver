@@ -39,6 +39,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any
 
 from neoracer_ros2_driver import car_profile
@@ -52,9 +53,11 @@ from calibrate_common import (  # noqa: E402, I100
     Criterion,
     DEADMAN,
     paint,
-    read_line,
+    read_prompt,
     SESSION_ENV,
     source_config_dir,
+    status_line,
+    step_header,
     use_color,
 )
 
@@ -286,9 +289,9 @@ def teleop_active() -> bool:
 
 
 def ask(prompt: str) -> str:
-    """Prompt for one line (calibrate_common.read_line); end of input reads as q."""
+    """Prompt for one line (calibrate_common.read_prompt); end of input reads as q."""
     try:
-        return read_line(prompt).strip().lower()
+        return read_prompt(prompt).strip().lower()
     except (EOFError, OSError):
         return 'q'
 
@@ -324,14 +327,16 @@ def run_steps(steps: list[Step]) -> int:
     first_before: dict[int, dict[str, Any]] = {}
 
     def header(i: int) -> None:
-        print(f'\n=== {i + 1}/{len(steps)} {steps[i].label} ===')
-        print(setup_text(steps[i].position) if steps[i].installed else NOTHING_TO_SET_UP)
+        print()
+        print(step_header(f'{i + 1}/{len(steps)} {steps[i].label}'))
+        text = setup_text(steps[i].position) if steps[i].installed else NOTHING_TO_SET_UP
+        print(textwrap.indent(text, '  '))
 
     def run(i: int) -> tuple[Step, str, dict[str, Any], dict[str, Any]]:
         step = steps[i]
         before = first_before.setdefault(i, step_values(step))
         if not step.installed:
-            print(f'{step.missing_text}; nothing to run.')
+            print(status_line(f'{step.missing_text}; nothing to run.'))
             return step, 'not installed', before, before
         rc = subprocess.run(
             [sys.executable, str(HERE / step.tool)],
@@ -342,24 +347,26 @@ def run_steps(steps: list[Step]) -> int:
 
     results = [e if len(e) == 4 else (*e, {}, {}) for e in walk_steps(steps, header, run)]
 
-    print('\n=== Summary ===')
+    print()
+    print(step_header('Summary'))
     for step, outcome, before, after in results:
-        print(f'{step.key:10s} {outcome}')
+        print(f'  {step.key:10s} {outcome}')
         for key in step.keys if outcome == 'done' else ():
             if key not in before and key not in after:
                 continue  # not written by this tool, such as odometry.turn_gain
             old = fmt(before[key]) if key in before else 'default'
-            print(f'    {key}: {old} -> {fmt(after.get(key, "?"))}')
+            print(f'      {key}: {old} -> {fmt(after.get(key, "?"))}')
 
     if any(outcome == 'done' for _, outcome, *_ in results):
         restart = [*shlex.split(os.environ.get('RACECAR_SUDO', 'sudo')), *systemctl()]
         restart += ['restart', TELEOP_UNIT]
-        print('Restarting teleop uses sudo, which may ask for your password.')
+        print()
+        print('  Restarting teleop uses sudo, which may ask for your password.')
         if ask('Restart teleop now so the nodes load the new values? [y/N] ') == 'y':
             subprocess.run(restart, check=False)
         else:
-            print(f'Apply later: {shlex.join(restart)}')
-        print('Then verify: racecar calibrate check')
+            print(status_line(f'Apply later: {shlex.join(restart)}'))
+        print(status_line('Then verify: racecar calibrate check'))
     failed = [step.key for step, outcome, *_ in results if outcome == 'failed']
     return 1 if failed else 0
 
@@ -377,11 +384,11 @@ def summary_lines(
     results: list[tuple[Step, str, list[Criterion]]], color: bool = False
 ) -> list[str]:
     """Render the end-of-run table: each step's verdict, then each criterion."""
-    lines = ['', '=== Check summary ===']
+    lines = ['', step_header('Check summary', color)]
     for step, verdict, criteria in results:
         mark = paint(f'{verdict:7s}', verdict, color, bold=True)
-        lines.append(f'{step.key:10s} {mark} {step.label}')
-        lines += criteria_lines(criteria, indent='    ', color=color)
+        lines.append(f'  {step.key:10s} {mark} {step.label}')
+        lines += criteria_lines(criteria, indent='      ', color=color)
     counts = {
         v: sum(1 for _, verdict, _ in results if verdict == v) for v in ('PASS', 'WARN', 'FAIL')
     }
@@ -395,7 +402,7 @@ def summary_lines(
     # A step with no tool installed checked nothing, so it cannot count as a pass.
     worst = 'FAIL' if counts['FAIL'] else 'WARN' if counts['WARN'] or missing else 'PASS'
     lines.append(
-        f'RESULT {paint(worst, worst, color, bold=True)}  {tallies}  {skipped} skipped'
+        f'  RESULT {paint(worst, worst, color, bold=True)}  {tallies}  {skipped} skipped'
         + (f'  {not_run} not run' if not_run else '')
         + (f'  {missing} not installed' if missing else '')
     )
@@ -407,13 +414,15 @@ def run_checks(steps: list[Step]) -> int:
     with tempfile.TemporaryDirectory() as tmp:
 
         def header(i: int) -> None:
-            print(f'\n=== Check {i + 1}/{len(steps)}: {steps[i].label} ===')
-            print(setup_text(steps[i].check) if steps[i].installed else NOTHING_TO_SET_UP)
+            print()
+            print(step_header(f'Check {i + 1}/{len(steps)}: {steps[i].label}'))
+            text = setup_text(steps[i].check) if steps[i].installed else NOTHING_TO_SET_UP
+            print(textwrap.indent(text, '  '))
 
         def run(i: int) -> tuple[Step, str, list[Criterion]]:
             step = steps[i]
             if not step.installed:
-                print(f'{step.missing_text}; nothing to check.')
+                print(status_line(f'{step.missing_text}; nothing to check.'))
                 return step, 'not installed', []
             report = Path(tmp) / f'{step.key}.json'
             report.unlink(missing_ok=True)

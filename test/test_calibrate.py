@@ -410,6 +410,58 @@ class TestColor:
         assert common.use_color() is False
 
 
+class TestLayout:
+    """The guided output: headers, numbered actions, `>>` prompts, status and result blocks."""
+
+    def test_plain_layout_off_a_terminal(self):
+        common = load_script('calibrate_common')
+        header = common.step_header('Step 1 of 2: gyro scale', color=False)
+        assert header.startswith('=== Step 1 of 2: gyro scale ===')
+        assert len(header) == common.HEADER_WIDTH
+        assert common.action_lines(1, ['Place the car.', 'Step back.'], color=False) == [
+            '  [1] Place the car.',
+            '      Step back.',
+        ]
+        assert common.prompt_text('Press Enter.', color=False) == '  >> Press Enter.'
+        assert common.status_line('Done.') == '     Done.'
+        assert common.result_lines(['a', 'b']) == ['  Result   a', '           b']
+
+    def test_colour_only_when_asked(self):
+        common = load_script('calibrate_common')
+        assert '\033[1;36m' in common.step_header('Run 1', color=True)  # cyan header
+        assert common.prompt_text('Go.', color=True) == '  \033[1;33m>> Go.\033[0m'
+        assert common.action_lines(2, ['Drive.', 'Stop.'], color=True)[0] == (
+            '  [2] \033[1mDrive.\033[0m'
+        )
+        for text in (
+            common.step_header('Run 1', color=False),
+            common.prompt_text('Go.', color=False),
+            *common.action_lines(2, ['Drive.', 'Stop.'], color=False),
+        ):
+            assert '\033[' not in text
+
+    def test_a_block_keeps_every_instruction_word_for_word(self):
+        common = load_script('calibrate_common')
+        lines = common.DEADMAN.split('\n')
+        block = common.action_lines(1, lines, color=False)
+        assert [line[6:] for line in block] == lines
+
+    def test_prompts_go_through_read_line(self, monkeypatch):
+        common = load_script('calibrate_common')
+        monkeypatch.setattr(common, 'use_color', lambda: False)
+        seen = []
+        monkeypatch.setattr(common, 'read_line', lambda p='': seen.append(p) or 's')
+        assert common.read_prompt('Press Enter: ') == 's'
+        assert seen == ['  >> Press Enter: ']
+
+    def test_a_block_starts_with_a_blank_line(self):
+        common = load_script('calibrate_common')
+        logged = []
+        log = type('L', (), {'info': lambda self, m: logged.append(m)})()
+        common.log_block(log, ['  [1] Place the car.'])
+        assert logged == ['', '  [1] Place the car.']
+
+
 class TestTypeAhead:
     def test_terminal_input_is_flushed_before_the_prompt(self, monkeypatch):
         common = load_script('calibrate_common')

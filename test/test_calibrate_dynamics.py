@@ -1,6 +1,7 @@
 """Unit tests for calibrate_dynamics.py: circle fit, Ackermann angles, timing, scan chaining."""
 
 import math
+import re
 
 from conftest import load_script
 import numpy as np
@@ -153,6 +154,18 @@ class Log:
 
     error = info
 
+    @property
+    def texts(self):
+        """The logged lines without the layout: indent and `[n]` labels removed."""
+        return [re.sub(r'^\[\d+\] ', '', m.strip()) for m in self.lines]
+
+
+class TestPlacementText:
+    def test_sentences_keep_the_words(self, md):
+        for text in (*md.CIRCLE_PLACE.values(), md.STRAIGHT_PLACE):
+            assert ' '.join(md.sentences(text)) == text
+        assert len(md.sentences(md.CIRCLE_PLACE['circle_right'])) == 3
+
 
 class TestDriveGate:
     def _driver(self, md, monkeypatch, tmp_path, buttons=(False, True), before=None):
@@ -214,7 +227,7 @@ class TestDriveGate:
 
         d._hold = hold
         assert d.drive('straight05') is not None
-        assert 'You can flip the mode switch UP now.' in d.log.lines
+        assert 'You can flip the mode switch UP now.' in d.log.texts
         assert all(need for speed, _, need in held if speed != 0.0)
 
     def test_flipping_up_while_driving_stops_the_run(self, md, monkeypatch, tmp_path):
@@ -254,7 +267,7 @@ class TestDriveGate:
         assert (
             'Flip the mode switch DOWN (autonomy). The car starts driving 5 seconds after '
             'you flip it.'
-        ) in d.log.lines
+        ) in d.log.texts
 
     def test_runs_go_out_as_drive_values_for_their_mps(self, md, monkeypatch, tmp_path):
         d, held, _ = self._driver(md, monkeypatch, tmp_path)
@@ -267,7 +280,7 @@ class TestDriveGate:
             md, monkeypatch, tmp_path, buttons=(True, False, True), before=True
         )
         assert d.drive('straight025') is not None
-        assert 'The mode switch is DOWN. Flip it UP first.' in d.log.lines
+        assert 'The mode switch is DOWN. Flip it UP first.' in d.log.texts
         first_move = next(i for i, (speed, _, _) in enumerate(held) if speed != 0.0)
         # The rest, three waits (DOWN, UP, DOWN), the countdown, the first still segment.
         assert first_move == 6
@@ -528,4 +541,4 @@ class TestPauseBetweenMoves:
         assert d.drive('yaw', plan, prefix='lidar') is not None
         needs = [need for _, _, need in held][-5:]
         assert needs == [True, True, True, True, False]
-        assert d.log.lines.count('You can flip the mode switch UP now.') == 1
+        assert d.log.texts.count('You can flip the mode switch UP now.') == 1

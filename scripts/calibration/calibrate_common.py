@@ -184,6 +184,65 @@ def paint(text: str, status: str, color: bool, bold: bool = False) -> str:
     return f'\033[{"1;" if bold else ""}{code}m{text}\033[0m'
 
 
+# The guided output: a header per step, numbered action blocks, `>>` prompts,
+# status lines and a result block. Colour shows only on a terminal
+# (use_color), so piped output keeps the same layout as plain text.
+HEADER_WIDTH = 60
+HEADER_COLOR = '36'
+PROMPT_COLOR = '33'
+STATUS_INDENT = ' ' * 5
+RESULT_LABEL = '  Result   '
+
+
+def styled(text: str, code: str, color: bool, bold: bool = False) -> str:
+    """Wrap text in one ANSI style when `color` is set; return it unchanged otherwise."""
+    if not color:
+        return text
+    return f'\033[{"1;" if bold else ""}{code}m{text}\033[0m'
+
+
+def _color(color: bool | None) -> bool:
+    return use_color() if color is None else color
+
+
+def step_header(title: str, color: bool | None = None) -> str:
+    """Return a step's banner, `=== title ===...`, padded to HEADER_WIDTH."""
+    text = f'=== {title} '
+    text += '=' * max(3, HEADER_WIDTH - len(text))
+    return styled(text, HEADER_COLOR, _color(color), bold=True)
+
+
+def action_lines(number: int, lines: list[str], color: bool | None = None) -> list[str]:
+    """Return a numbered action block: `  [n] first line`, the rest aligned below it."""
+    label = f'[{number}] '
+    first = styled(lines[0], '1', _color(color)) if lines else ''
+    pad = ' ' * len(label)
+    return [f'  {label}{first}', *(f'  {pad}{line}' for line in lines[1:])]
+
+
+def prompt_text(text: str, color: bool | None = None) -> str:
+    """Return a prompt as a `>>` line, bold yellow on a terminal."""
+    return '  ' + styled(f'>> {text}', PROMPT_COLOR, _color(color), bold=True)
+
+
+def status_line(text: str) -> str:
+    """Return a progress or status line, indented under the action it follows."""
+    return f'{STATUS_INDENT}{text}'
+
+
+def result_lines(rows: list[str]) -> list[str]:
+    """Return a run's result block: `Result` beside the first row, the rest aligned below."""
+    pad = ' ' * len(RESULT_LABEL)
+    return [f'{RESULT_LABEL if i == 0 else pad}{row}' for i, row in enumerate(rows)]
+
+
+def log_block(log: Any, lines: list[str]) -> None:
+    """Log a blank line, then each line: one block of the guided output."""
+    log.info('')
+    for line in lines:
+        log.info(line)
+
+
 def criteria_lines(
     criteria: list[Criterion], indent: str = '  ', color: bool = False
 ) -> list[str]:
@@ -201,10 +260,9 @@ def finish_check(log: Any, criteria: list[Criterion], report: str | None) -> int
     """Log the criteria table, write the JSON report, and return the exit code (1 on FAIL)."""
     import json
 
-    for line in criteria_lines(criteria):
-        log.info(line)
+    log_block(log, [step_header('Check result'), *criteria_lines(criteria, color=use_color())])
     verdict = overall(criteria)
-    log.info(f'Check: {verdict}')
+    log.info(f'Check: {paint(verdict, verdict, use_color(), bold=True)}')
     if report:
         Path(report).write_text(
             json.dumps({'overall': verdict, 'criteria': [c.__dict__ for c in criteria]})
@@ -238,6 +296,11 @@ def read_line(prompt: str = '') -> str:
         line += ch
 
 
+def read_prompt(text: str) -> str:
+    """read_line with the prompt laid out as a `>>` line (prompt_text)."""
+    return read_line(prompt_text(text))
+
+
 STEP_PROMPT = 'Press Enter to run this step, or s to skip it: '
 STEP_PROMPT_BACK = 'Press Enter to run this step, s to skip it, or b to redo the previous step: '
 
@@ -265,7 +328,7 @@ def run_sequence(
     i = 0
     while i < count:
         show(i)
-        answer = read_line(prompt(i)).strip().lower()
+        answer = read_prompt(prompt(i)).strip().lower()
         if answer == 'b':
             if i > 0:
                 i -= 1
@@ -320,7 +383,7 @@ class CalibratorNode(Node):
                 self._samples.append(sample)
 
     def wait_for_first_message(self, timeout: float = FIRST_MESSAGE_TIMEOUT) -> bool:
-        self.get_logger().info(f'Waiting for {self.topic}...')
+        self.get_logger().info(status_line(f'Waiting for {self.topic}...'))
         if self._first.wait(timeout):
             return True
         self.get_logger().error(f'No messages on {self.topic} after {timeout:.0f} seconds.')
@@ -331,7 +394,8 @@ class CalibratorNode(Node):
         """Record samples for `duration` seconds and return them."""
         with self._lock:
             self._samples = []
-        self.get_logger().info(f'{description}: collecting for {duration:.0f} seconds')
+        log = self.get_logger()
+        log.info(status_line(f'{description}: collecting for {duration:.0f} seconds'))
         self._collecting = True
         start = time.monotonic()
         next_report = start + PROGRESS_INTERVAL
@@ -340,13 +404,15 @@ class CalibratorNode(Node):
                 with self._lock:
                     n = len(self._samples)
                 remaining = duration - (now - start)
-                self.get_logger().info(f'{description}: {remaining:.0f} seconds left, {n} samples')
+                self.get_logger().info(
+                    status_line(f'{description}: {remaining:.0f} seconds left, {n} samples')
+                )
                 next_report += PROGRESS_INTERVAL
             time.sleep(0.1)
         self._collecting = False
         with self._lock:
             samples = list(self._samples)
-        self.get_logger().info(f'{description}: {len(samples)} samples')
+        self.get_logger().info(status_line(f'{description}: {len(samples)} samples'))
         return samples
 
 

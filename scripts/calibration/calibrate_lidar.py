@@ -49,15 +49,20 @@ from sensor_msgs.msg import LaserScan
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calibrate_common import (  # noqa: E402, I100
+    action_lines,
     backup_reminder,
     CalibratorNode,
     Criterion,
     DEADMAN,
     finish_check,
     install_config_dir,
-    read_line,
+    log_block,
+    read_prompt,
+    result_lines,
     source_config_dir,
     spin_until_done,
+    status_line,
+    step_header,
     update_local_values,
 )
 from drive_speed import drive_limits, drive_segments  # noqa: E402, I100
@@ -85,6 +90,12 @@ PASS_ANGLE_DEG = 0.5
 # beyond it the mount moved or the car is badly placed.
 WARN_ANGLE_DEG = 2.0
 PASS_RMS_MM = 10.0
+WALL_SETUP = [
+    'Place the car on the ground, facing a flat, clear wall.',
+    'Ensure the front bumper is 0.5 to 2 meters away from the wall.',
+    'Use a tape measure to measure from the wall to the center of each front wheel.',
+    'Turn the car until the two distances are equal.',
+]
 
 
 @dataclass(frozen=True)
@@ -204,12 +215,9 @@ class LidarYawCalibrator(CalibratorNode):
             log.error(f'Lidar roll or pitch over {MAX_TILT_DEG:.0f} deg; this tool assumes level.')
             return 1
 
-        log.info('Lidar yaw calibration')
-        log.info('Place the car on the ground, facing a flat, clear wall.')
-        log.info('Ensure the front bumper is 0.5 to 2 meters away from the wall.')
-        log.info('Use a tape measure to measure from the wall to the center of each front wheel.')
-        log.info('Turn the car until the two distances are equal.')
-        read_line(f'Press Enter, then keep the car still for {SCAN_SECONDS:.0f} seconds...')
+        log_block(log, [step_header('Lidar yaw calibration')])
+        log_block(log, action_lines(1, WALL_SETUP))
+        read_prompt(f'Press Enter, then keep the car still for {SCAN_SECONDS:.0f} seconds...')
         scans = self.collect(SCAN_SECONDS, 'Scan')
         ranges = median_ranges(scans)
         if ranges is None or self.meta is None:
@@ -223,16 +231,19 @@ class LidarYawCalibrator(CalibratorNode):
             return 1
 
         new_yaw = corrected_yaw_deg(yaw_deg, fit)
-        log.info(f'Wall points: {fit.points}; RMS {fit.rms_mm:.1f} mm, max {fit.max_mm:.1f} mm')
-        log.info(f'Wall distance from base_link: {fit.distance_mm:.1f} mm')
-        log.info(f'Wall angle error: {fit.angle_deg:+.2f} deg')
-        log.info(f'laser_yaw_deg: {yaw_deg:.2f} configured, {new_yaw:.2f} fitted')
+        rows = [
+            f'Wall points: {fit.points}; RMS {fit.rms_mm:.1f} mm, max {fit.max_mm:.1f} mm',
+            f'Wall distance from base_link: {fit.distance_mm:.1f} mm',
+            f'Wall angle error: {fit.angle_deg:+.2f} deg',
+            f'laser_yaw_deg: {yaw_deg:.2f} configured, {new_yaw:.2f} fitted',
+        ]
         if self.wall_distance_mm is not None:
             dx = fit.distance_mm - self.wall_distance_mm
-            log.info(
+            rows.append(
                 f'Taped wall distance {self.wall_distance_mm:.1f} mm: lidar x error '
                 f'{dx:+.1f} mm (laser_x_mm {frames["laser_x_mm"] - dx:.1f} would match)'
             )
+        log_block(log, result_lines(rows))
         if fit.rms_mm > PASS_RMS_MM:
             log.warning(f'RMS above {PASS_RMS_MM:.0f} mm: the wall is cluttered or not flat.')
 
@@ -245,7 +256,7 @@ class LidarYawCalibrator(CalibratorNode):
             )
             return 1
         written = update_local_values('frames', {'laser_yaw_deg': round(new_yaw, 3)}, TOOL)
-        log.info(backup_reminder(written))
+        log.info(status_line(backup_reminder(written)))
         return 0
 
 
@@ -435,21 +446,24 @@ class DriveYawCalibrator:
             if self.driver.timed_out:
                 raise ArmTimeout
             return None
-        self.log.info('Analyzing the run...')
+        self.log.info(status_line('Analyzing the run...'))
         legs = measure_legs(read_bag(bag), self.laser)
         good = []
+        rows = []
         for leg in legs:
             if leg.problem:
                 self.log.error(f'{leg.direction.capitalize()}: {leg.problem}')
                 continue
             note = '' if leg.counted else ' Not counted: the reverse leg returns the car.'
-            self.log.info(
+            rows.append(
                 f'{leg.direction.capitalize()}: {leg.chord_m:.2f} m, turned '
                 f'{leg.heading_deg:+.1f} deg: lidar yaw {leg.yaw_deg:.2f} deg '
                 f'(scan match {leg.rms_m * 1e3:.1f} mm, {leg.inliers:.0%}).{note}'
             )
             if leg.counted:
                 good.append(leg)
+        if rows:
+            log_block(self.log, result_lines(rows))
         if any('reverse' in leg.problem for leg in legs):
             self.log.error(
                 'The car did not reverse from rest. The ESC may need a brake before '
@@ -484,12 +498,9 @@ class DriveYawCalibrator:
             self.driver.close()
 
     def _show(self, i: int, count: int) -> None:
-        self.log.info(f'Placement {i + 1} of {count}')
-        self.log.info(PLACE)
-        if i:
-            self.log.info(PLACE_AGAIN)
-        self.log.info(MOTION)
-        self.log.info(DEADMAN)
+        log_block(self.log, [step_header(f'Placement {i + 1} of {count}')])
+        lines = [PLACE, *([PLACE_AGAIN] if i else []), MOTION, *DEADMAN.split('\n')]
+        log_block(self.log, action_lines(1, lines))
 
     def _calibrate(self) -> int:
         from calibrate_common import run_sequence
@@ -502,12 +513,17 @@ class DriveYawCalibrator:
         mean, se = yaw_summary(estimates)
         count = PLACEMENTS
         while se > MAX_YAW_SE_DEG and count < MAX_PLACEMENTS and estimates:
-            log.info(
-                f'The estimates scatter too much (standard error {se:.2f} deg, '
-                f'needs {MAX_YAW_SE_DEG}). One more placement is needed.'
+            log_block(
+                log,
+                [
+                    status_line(
+                        f'The estimates scatter too much (standard error {se:.2f} deg, '
+                        f'needs {MAX_YAW_SE_DEG}). One more placement is needed.'
+                    )
+                ],
             )
             self._show(count, count + 1)
-            if read_line('Press Enter to run it, or s to stop: ').strip().lower() == 's':
+            if read_prompt('Press Enter to run it, or s to stop: ').strip().lower() == 's':
                 break
             legs = self.placement()
             if legs:
@@ -566,20 +582,21 @@ def analyze_bags(names: list[str]) -> int:
 def write_yaw(estimates: list[float], configured: float, log: Any) -> int:
     """Report the mean and write it as laser_yaw_deg when its standard error allows."""
     if not estimates:
-        log.info('Nothing measured.')
+        log.info(status_line('Nothing measured.'))
         return 0
     mean, se = yaw_summary(estimates)
-    log.info(
+    summary = (
         f'Lidar yaw {mean:.3f} deg from {len(estimates)} estimates (standard error '
         f'{se:.2f} deg, spread {min(estimates):.2f} to {max(estimates):.2f}); '
         f'configured {configured:.3f} deg.'
     )
     if se > MAX_YAW_SE_DEG:
+        log_block(log, result_lines([summary]))
         log.error(f'The standard error is above {MAX_YAW_SE_DEG} deg. Nothing written.')
         return 1
     written = update_local_values('frames', {'laser_yaw_deg': round(mean, 3)}, TOOL)
-    log.info(f'laser_yaw_deg: {configured:.3f} -> {mean:.3f}')
-    log.info(backup_reminder(written))
+    log_block(log, result_lines([summary, f'laser_yaw_deg: {configured:.3f} -> {mean:.3f}']))
+    log.info(status_line(backup_reminder(written)))
     return 0
 
 

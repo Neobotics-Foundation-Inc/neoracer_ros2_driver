@@ -105,6 +105,13 @@ class TestEnoughMotion:
         assert odom.MIN_DRIVE_M == 2.0
 
 
+class TestPrompts:
+    def test_the_stopped_prompt_waits_for_the_car(self, odom):
+        # The drive block comes first, so an Enter typed at "you can drive now"
+        # is not the answer to this prompt.
+        assert odom.STOPPED.startswith('Press Enter only when the car has stopped')
+
+
 class TestCriteria:
     @pytest.mark.parametrize(
         'measured,status', [(721.0, 'PASS'), (735.0, 'WARN'), (760.0, 'FAIL'), (-722.0, 'PASS')]
