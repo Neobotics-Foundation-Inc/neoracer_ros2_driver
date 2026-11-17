@@ -1,10 +1,16 @@
-"""Unit tests for the YOLO helpers in inference_lib (no ROS, no GPU required)."""
+"""
+Unit tests for the YOLO helpers in inference_lib and the node's pause while mapping.
+
+No GPU is required. The pause tests import inference_node, which imports
+rclpy and the ROS message packages, so this file runs where ROS 2 is installed.
+"""
 
 import cv2
 import numpy as np
 import pytest
 
 from neoracer_ros2_driver import inference_lib as il
+from neoracer_ros2_driver.inference_node import InferenceNode, pauses_for
 
 COCO_NAMES = {0: 'person', 2: 'car', 39: 'bottle'}
 
@@ -201,3 +207,68 @@ def test_fallback_weights_only_applies_to_engine(tmp_path):
     assert il.fallback_weights(str(tmp_path / 'yolo26n.pt')) is None
     assert il.fallback_weights('') is None
     assert il.fallback_weights(None) is None
+
+
+# ---------- pause while mapping ----------
+
+
+class _Pausable:
+    """The status handling of InferenceNode without the GPU or rclpy."""
+
+    _status_cb = InferenceNode._status_cb
+    _subscribe_images = InferenceNode._subscribe_images
+
+    def __init__(self, enabled=True):
+        self.pause_while_mapping = enabled
+        self.paused = False
+        self.image_topic = '/camera/color'
+        self.image_qos = None
+        self._image_cb = None
+        self.last_image_time = 'stale'
+        self.image_sub = 'sub-0'
+        self.created, self.destroyed = 0, []
+        self.log = []
+
+    def create_subscription(self, *_):
+        self.created += 1
+        return f'sub-{self.created}'
+
+    def destroy_subscription(self, sub):
+        self.destroyed.append(sub)
+
+    def get_logger(self):
+        return self
+
+    def info(self, text):
+        self.log.append(text)
+
+
+def _status(mode):
+    from diagnostic_msgs.msg import DiagnosticStatus, KeyValue
+
+    values = [KeyValue(key='map', value='m'), KeyValue(key='mode', value=mode)]
+    return DiagnosticStatus(values=values)
+
+
+def test_pauses_for_mapping_only():
+    assert pauses_for('mapping', True)
+    assert not pauses_for('localization', True)
+    assert not pauses_for('off', True)
+    assert not pauses_for('mapping', False)
+
+
+def test_unsubscribes_while_mapping_and_resubscribes_after():
+    node = _Pausable()
+    node._status_cb(_status('mapping'))
+    assert node.paused and node.destroyed == ['sub-0'] and node.image_sub is None
+    node._status_cb(_status('mapping'))  # no change, nothing repeated
+    assert node.destroyed == ['sub-0'] and node.created == 0
+    node._status_cb(_status('off'))
+    assert not node.paused and node.image_sub == 'sub-1'
+    assert node.last_image_time is None  # the stale check restarts with the stream
+
+
+def test_setting_off_keeps_inferring():
+    node = _Pausable(enabled=False)
+    node._status_cb(_status('mapping'))
+    assert not node.paused and node.destroyed == []

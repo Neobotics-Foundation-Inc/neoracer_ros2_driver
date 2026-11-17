@@ -23,6 +23,10 @@ inference_node:
     # Cap inference below the camera's 60 fps; the newest frame always wins.
     max_rate_hz: 15.0
 
+    # Drop the camera subscription while /autonomy/status reports mapping, so
+    # slam_toolbox gets the CPU; back on any other mode. The model stays loaded.
+    pause_while_mapping: true
+
     # Overlay for the dashboard and for `ros2 run rqt_image_view`. Encoded only
     # while something is subscribed, so leaving it on costs nothing idle.
     publish_annotated: false
