@@ -363,7 +363,7 @@ def measure_legs(bag: Any, laser: Any) -> list[Leg]:
         elif abs(chord / odom_m - 1.0) > 0.15:
             problem = f'The lidar measured {chord:.2f} m and the odometry {odom_m:.2f} m.'
         yaw = math.nan
-        if not problem:
+        if not problem and true is not None:
             try:
                 direction_rad = math.atan2(rel[1], rel[0])
                 yaw = math.degrees(
