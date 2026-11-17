@@ -24,7 +24,7 @@ DEFAULT_CFG = {
     'throttle_sign': 1,
     'steering_axis': 3,
     'steering_channel': 0,
-    'steering_sign': 1,
+    'steering_sign': -1,
     'mode_channel': 6,
     'mode_mid_thresh': -1.0,
     'mode_high_thresh': 0.608,
@@ -127,7 +127,7 @@ def test_rc_to_joy_shape_and_trigger_rest():
 def test_rc_to_joy_throttle_and_steering():
     axes, _ = cl.rc_to_joy(_channels(**{'2': 1807, '0': 240}), DEFAULT_CFG)
     assert axes[1] == 1.0  # throttle channel 2 full -> axis 1
-    assert axes[3] == -1.0  # steering channel 0 min -> axis 3
+    assert axes[3] == 1.0  # steering channel 0 min, stick left -> axis 3 reads +1
 
 
 def test_rc_to_joy_mode_switch_follows_the_firmware():
@@ -272,7 +272,7 @@ def test_only_the_mode_channel_in_failsafe_sets_no_buttons():
     # The sticks still read; only the mode button is withheld.
     axes, buttons = cl.rc_to_joy(_channels(**{'6': -1, '2': 1807, '0': 240}), DEFAULT_CFG)
     assert not any(buttons)
-    assert axes[1] == 1.0 and axes[3] == -1.0
+    assert axes[1] == 1.0 and axes[3] == 1.0
 
 
 def test_the_cars_rest_frame_reads_centred_and_manual():
@@ -280,6 +280,20 @@ def test_the_cars_rest_frame_reads_centred_and_manual():
     axes, buttons = cl.rc_to_joy(CAR_REST_FRAME, DEFAULT_CFG)
     assert axes == [0.0, 0.0, 1.0, 0.0, 0.0, 1.0]
     assert buttons[4] == 1 and sum(buttons) == 1
+
+
+def test_stick_right_reads_minus_one_on_joy_as_a_ros_gamepad():
+    # The student library negates axes[3] for its x, so right must read -1
+    # here for the library to report +1. /rc/channels keeps the wiring.
+    right = list(CAR_REST_FRAME)
+    right[0] = 1807
+    axes, _ = cl.rc_to_joy(right, DEFAULT_CFG)
+    assert axes[3] == -1.0
+    assert cl.rc_to_channels(right, DEFAULT_CFG)[0] == 1.0
+    forward = list(CAR_REST_FRAME)
+    forward[2] = 1807
+    axes, _ = cl.rc_to_joy(forward, DEFAULT_CFG)
+    assert axes[1] == 1.0
 
 
 def test_shipped_yaml_and_code_defaults_match_the_test_config():
@@ -294,6 +308,8 @@ def test_shipped_yaml_and_code_defaults_match_the_test_config():
         'mode_channel',
         'mode_mid_thresh',
         'mode_high_thresh',
+        'throttle_sign',
+        'steering_sign',
     ):
         assert params[key] == DEFAULT_CFG[key], key
         match = re.search(rf"p\('{key}', ([-0-9.]+)\)", source)
