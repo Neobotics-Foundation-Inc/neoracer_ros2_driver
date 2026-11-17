@@ -230,7 +230,7 @@ class TestDriveGate:
         assert d.drive('circle_right') is None
         assert not d.timed_out
         assert sent[-1] == (0.0, 0.0)
-        assert any(m.startswith('Stopped: the mode switch was flipped UP') for m in d.log.lines)
+        assert any(m.startswith('Stopped: the mode switch went UP') for m in d.log.lines)
 
     def test_flipping_up_in_the_rest_before_the_first_move_stops_the_run(
         self, md, monkeypatch, tmp_path
@@ -238,9 +238,15 @@ class TestDriveGate:
         d, held, _ = self._driver(md, monkeypatch, tmp_path)
         real_hold = d._hold
 
+        guarded = []
+
         def hold(seconds, speed, steer, need_rb):
-            if need_rb and seconds == 2.0:  # the plan's rest after the countdown
-                d._button(False)
+            # The countdown and the plan's rest hold in whole seconds: three
+            # for the countdown, then the rest. Flip UP in the rest.
+            if need_rb and speed == 0.0:
+                guarded.append(seconds)
+                if len(guarded) == 4:
+                    d._button(False)
             return real_hold(seconds, speed, steer, need_rb)
 
         d._hold = hold
@@ -252,9 +258,12 @@ class TestDriveGate:
         d, _, _ = self._driver(md, monkeypatch, tmp_path)
         d.drive('straight05')
         assert (
-            'Flip the mode switch DOWN (autonomy). The car starts driving 5 seconds after '
-            'you flip it.'
+            'Flip the mode switch DOWN (autonomy) to start the run. The car starts '
+            'driving 5 seconds after you flip it.'
         ) in d.log.lines
+        # A visible countdown to the first move, then the move itself.
+        shown = [m for m in d.log.lines if m.startswith('Starting in') or m == 'Driving.']
+        assert shown == [f'Starting in {n}...' for n in (5, 4, 3, 2, 1)] + ['Driving.']
 
     def test_runs_go_out_as_drive_values_for_their_mps(self, md, monkeypatch, tmp_path):
         d, held, _ = self._driver(md, monkeypatch, tmp_path)
@@ -267,10 +276,17 @@ class TestDriveGate:
             md, monkeypatch, tmp_path, buttons=(True, False, True), before=True
         )
         assert d.drive('straight025') is not None
-        assert 'The mode switch is DOWN. Flip it UP first.' in d.log.lines
+        assert 'The mode switch is DOWN. Flip it UP now.' in d.log.lines
+        # The flip DOWN is asked for only after the switch has gone UP.
+        up = d.log.lines.index('The mode switch is DOWN. Flip it UP now.')
+        down = next(
+            i for i, m in enumerate(d.log.lines) if m.startswith('Flip the mode switch DOWN')
+        )
+        assert up < down
         first_move = next(i for i, (speed, _, _) in enumerate(held) if speed != 0.0)
-        # The rest, three waits (DOWN, UP, DOWN), the countdown, the first still segment.
-        assert first_move == 6
+        # The rest, three waits (DOWN, UP, DOWN), the countdown in three whole
+        # seconds and the plan's 2 s still segment in two.
+        assert first_move == 9
 
     def test_no_flip_times_out_without_driving(self, md, monkeypatch, tmp_path):
         # Before the RC calibration update button 5 never sets: the switch reads UP.

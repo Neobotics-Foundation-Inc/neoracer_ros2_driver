@@ -762,18 +762,44 @@ class Driver:
         the countdown.
         """
         self.arming.reset()
-        if self.rb:
-            self.log.info('The mode switch is DOWN. Flip it UP first.')
-        self.log.info(
-            'Flip the mode switch DOWN (autonomy). The car starts driving '
-            f'{COUNTDOWN_SEC + lead:.0f} seconds after you flip it.'
-        )
-        self.log.info('Flip the mode switch UP at any time to stop the car.')
         end = time.monotonic() + ARM_TIMEOUT_SEC
+        # One instruction at a time: a switch left DOWN is asked UP first, and
+        # the flip DOWN is asked for only once the switch has been seen UP.
+        if self.rb:
+            self.log.info('The mode switch is DOWN. Flip it UP now.')
+            while not self.arming.seen_up:
+                if time.monotonic() >= end:
+                    return False
+                self._hold(0.1, 0.0, 0.0, need_rb=False)
+        self.log.info(
+            'Flip the mode switch DOWN (autonomy) to start the run. The car starts '
+            f'driving {COUNTDOWN_SEC + lead:.0f} seconds after you flip it.'
+        )
+        self.log.info('Flip it UP at any time to stop the car.')
         while not self.arming.armed:
             if time.monotonic() >= end:
                 return False
             self._hold(0.1, 0.0, 0.0, need_rb=False)
+        return True
+
+    def _count_down(self, seconds: float, until_move: float) -> bool:
+        """
+        Hold still with the switch guarded, printing the whole seconds left until the car moves.
+
+        `until_move` is the time left until the first move when this hold starts.
+        Return False when the switch goes UP or /joy stops arriving.
+        """
+        # Whole-second holds, one per number shown; each hold still checks
+        # the switch at RATE_HZ.
+        done = 0.0
+        while done < seconds - 1e-6:
+            left = math.ceil(until_move - done - 1e-6)
+            if left > 0:
+                self.log.info(f'Starting in {left}...')
+            chunk = min(1.0, seconds - done)
+            if not self._hold(chunk, 0.0, 0.0, need_rb=True):
+                return False
+            done += chunk
         return True
 
     def drive(
@@ -803,23 +829,30 @@ class Driver:
         ok = False
         self.timed_out = False
         moving = [k for k, seg in enumerate(plan) if seg[0] != 0.0]
+        first_move = moving[0] if moving else len(plan)
         last_move = moving[-1] if moving else -1
-        lead = sum(seg[2] for seg in plan[: moving[0]]) if moving else 0.0
+        lead = sum(seg[2] for seg in plan[:first_move])
         try:
             self._hold(2.0, 0.0, 0.0, need_rb=False)
             if not self._wait_for_flip(lead):
                 self.timed_out = True
             else:
-                ok = self._hold(COUNTDOWN_SEC, 0.0, 0.0, need_rb=True)
+                ok = self._count_down(COUNTDOWN_SEC, COUNTDOWN_SEC + lead)
             for k, (speed, steer, seconds) in enumerate(plan if ok else []):
                 # The switch stays DOWN from the flip to the last move: through
                 # the rest before the first move and the pauses between moves.
                 # The rest at the end is still.
+                if k == first_move:
+                    self.log.info('Driving.')
                 if k == last_move + 1:
                     self.log.info('You can flip the mode switch UP now.')
                     self.log.info(f'Keep your hands off the car for {seconds:.0f} seconds.')
-                need_rb = k <= last_move
-                if not self._hold(seconds, speed, steer, need_rb=need_rb):
+                if k < first_move:
+                    until_move = sum(seg[2] for seg in plan[k:first_move])
+                    held = self._count_down(seconds, until_move)
+                else:
+                    held = self._hold(seconds, speed, steer, need_rb=k <= last_move)
+                if not held:
                     ok = False
                     break
             if not ok:
@@ -838,8 +871,8 @@ class Driver:
             )
         else:
             self.log.error(
-                'Stopped: the mode switch was flipped UP, or /joy stopped arriving. '
-                'This run is not measured.'
+                'Stopped: the mode switch went UP before the run ended, or the handset '
+                'signal was lost. The car stopped, and this run is not measured.'
             )
         return None
 
