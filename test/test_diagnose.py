@@ -218,6 +218,22 @@ class TestRateChecks:
         ros = self._ros(diag, {spec.topic: count}, elapsed=5.0)
         assert diag.rate_checks('sensors', [spec], ros)[0].status == status
 
+    @pytest.mark.parametrize(
+        'elapsed, count, status',
+        [(3.0, 1, 'OK'), (3.0, 0, 'WARN'), (1.0, 1, 'OK'), (1.0, 0, 'WARN'), (4.0, 0, 'FAIL')],
+    )
+    def test_short_window_judges_the_battery_by_its_frames(self, diag, elapsed, count, status):
+        # Under two 2 s periods a healthy battery stream can deliver no frame,
+        # so a short --window must not fail it.
+        spec = next(s for s in diag.SENSOR_TOPICS if s.topic == '/battery/voltage')
+        ros = self._ros(diag, {spec.topic: count}, elapsed=elapsed)
+        assert diag.rate_checks('sensors', [spec], ros)[0].status == status
+
+    def test_short_window_leaves_fast_streams_alone(self, diag):
+        spec = next(s for s in diag.SENSOR_TOPICS if s.topic == '/scan')
+        ros = self._ros(diag, {spec.topic: 0}, elapsed=1.0)
+        assert diag.rate_checks('sensors', [spec], ros)[0].status == diag.FAIL
+
     def test_diagnostic_sourced_topic_uses_the_reported_rate(self, diag, monkeypatch):
         # A topic whose publisher reports its own rate is never counted here,
         # so a zero count must not read as a dead stream.
@@ -893,6 +909,7 @@ class TestAutonomy:
             counts={'/autonomy/pose': pose_count, '/autonomy/status': 5},
             elapsed=elapsed,
             present=present,
+            published=present,
             values={'/autonomy/status': status} if status is not None else {},
         )
 
@@ -912,6 +929,15 @@ class TestAutonomy:
         # The usual state: the unit is not running and nothing publishes the status.
         ros = diag.RosResult(available=True, present={'/scan'})
         rows = diag.autonomy_checks('inactive', ros, sampled=True)
+        assert [(c.name, c.status, c.detail) for c in rows] == [('unit', 'OK', 'stopped')]
+
+    def test_status_subscriber_alone_is_not_a_node(self, diag):
+        # The throttle node subscribes to /autonomy/status, so the topic is in
+        # the graph on every car with teleop running and no autonomy node.
+        ros = diag.RosResult(
+            available=True, present={'/scan', '/autonomy/status'}, published={'/scan'}
+        )
+        rows = diag.autonomy_checks('', ros, sampled=True)
         assert [(c.name, c.status, c.detail) for c in rows] == [('unit', 'OK', 'stopped')]
 
     def test_node_outside_the_unit_is_read(self, diag):
