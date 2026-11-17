@@ -74,6 +74,9 @@ class Check:
     status: str
     detail: str = ''
     data: str = ''
+    # A SKIP for a feature turned off at launch: a choice, so it does not
+    # lower the result or fail --strict.
+    switched_off: bool = False
 
 
 @dataclass
@@ -996,7 +999,11 @@ def note_turned_off(checks: list[Check], running: dict[str, bool] | None = None)
         for name in names
     }
     return [
-        Check(c.group, c.name, SKIP, 'turned off (features.conf)') if c.name in off else c
+        (
+            Check(c.group, c.name, SKIP, 'turned off at launch', switched_off=True)
+            if c.name in off
+            else c
+        )
         for c in checks
     ]
 
@@ -1065,10 +1072,14 @@ ANSI = {OK: '32', WARN: '33', FAIL: '31'}
 
 
 def overall(checks: list[Check]) -> str:
-    """Summary verdict: FAIL on any failure, WARN on any warning or skip, else OK."""
+    """
+    Summary verdict: FAIL on any failure, WARN on any warning or skip, else OK.
+
+    A feature turned off at launch is a choice, so its SKIP does not count.
+    """
     if any(c.status == FAIL for c in checks):
         return FAIL
-    if any(c.status in (WARN, SKIP) for c in checks):
+    if any(c.status == WARN or (c.status == SKIP and not c.switched_off) for c in checks):
         return WARN
     return OK
 
@@ -1077,10 +1088,11 @@ def exit_code_for(checks: list[Check], strict: bool = False) -> int:
     """
     Return 1 when any check failed, else 0.
 
-    Strict mode also fails on WARN and SKIP, so 0 means every check was OK.
+    Strict mode also fails on WARN and SKIP, so 0 means every check was OK;
+    a feature turned off at launch is a choice and does not fail it.
     """
     if strict:
-        return 0 if all(c.status == OK for c in checks) else 1
+        return 0 if all(c.status == OK or c.switched_off for c in checks) else 1
     return 1 if any(c.status == FAIL for c in checks) else 0
 
 
@@ -1236,7 +1248,11 @@ def main() -> int:
                     'result': overall(checks),
                     'strict': args.strict,
                     'exit_code': exit_code,
-                    'checks': [c.__dict__ for c in checks],
+                    # Upstream's keys only; the result already counts switched_off.
+                    'checks': [
+                        {k: v for k, v in c.__dict__.items() if k != 'switched_off'}
+                        for c in checks
+                    ],
                 },
                 indent=2,
             )

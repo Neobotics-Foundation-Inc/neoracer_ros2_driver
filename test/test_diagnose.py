@@ -1033,7 +1033,24 @@ class TestTurnedOff:
         assert [c.status for c in out] == [diag.SKIP, diag.FAIL, diag.OK]
         out = diag.note_turned_off(checks, {'camera': False, 'detections': False})
         assert [c.status for c in out] == [diag.SKIP, diag.SKIP, diag.OK]
-        assert out[0].detail.startswith('turned off')
+        assert out[0].detail == 'turned off at launch'
+
+    def test_a_feature_turned_off_does_not_lower_the_result(self, diag):
+        # Inference is off at boot; a healthy car still reads OK, and --strict passes.
+        checks = diag.note_turned_off(
+            [
+                diag.Check('sensors', 'YOLO inference', diag.FAIL, 'not published'),
+                diag.Check('sensors', 'LakiBeam lidar', diag.OK, '30.0 Hz'),
+            ],
+            {'camera': True, 'detections': False},
+        )
+        assert checks[0].status == diag.SKIP
+        assert diag.overall(checks) == diag.OK
+        assert diag.exit_code_for(checks, strict=True) == 0
+        # Any other skip still lowers the result, as upstream.
+        other = [*checks, diag.Check('network', 'hotspot', diag.SKIP, 'nmcli unavailable')]
+        assert diag.overall(other) == diag.WARN
+        assert diag.exit_code_for(other, strict=True) == 1
 
     def test_rows_are_the_features_ids_and_sensor_labels(self, diag):
         assert set(diag.FEATURE_ROWS) == set(diag.features.SUBSYSTEMS)
