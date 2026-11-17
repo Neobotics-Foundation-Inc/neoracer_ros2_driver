@@ -217,6 +217,12 @@ racecar() {
             bash "$pkg_dir/scripts/launch_teleop.sh" "$@"
             ;;
 
+        map)
+            # SLAM mapping and localization through neoracer-autonomy.service;
+            # see scripts/neoracer_map.py and scripts/map_control.py.
+            python3 "${RACECAR_MAP_SCRIPT:-$pkg_dir/scripts/neoracer_map.py}" "$@"
+            ;;
+
         mapping)
             # On-demand SLAM. Mapping is an activity, not a daemon: run it
             # while building a map, Ctrl-C when done. Needs teleop (for /scan
@@ -1093,6 +1099,31 @@ Commands:
     teleop              Launch the full teleop stack via launch_teleop.sh wrapper
                         (timestamped ~/logs/<ts>/ + FastRTPS SHM cleanup).
                         Forwards args, e.g. `racecar teleop camera_enable:=false`.
+    map <action>        Build, save, and load maps (SLAM on top of teleop).
+                        Teleop must be running; drive with the handset as
+                        usual. Maps are in maps/ under the data root.
+                          start NAME          start mapping; /drive is held to
+                                              the mapping cap while mapping
+                                                --from SAVED    extend SAVED
+                                                --pose x,y,yaw  with --from: the
+                                                                car's pose on SAVED
+                                                --force         replace NAME (the
+                                                                old one is kept)
+                          save                save the map; waits for the files
+                          stop                stop (a mapping run is autosaved)
+                          resume              start the last run again
+                          load NAME           localize on NAME; starts from the
+                                              car's last pose on it
+                                                --pose x,y,yaw  start pose
+                                                --global        search the map
+                                                --localizer amcl|slam_toolbox
+                          recover NAME        keep an autosave as the saved map
+                          status              mode, map, localized, pose
+                          list                maps; unsaved ones marked
+                          info NAME           size, dates, poses, frames
+                          foxglove on|off     foxglove_bridge (port 8765) at the
+                                              next start or load
+                        Poses are in the map frame: meters, meters, radians.
     mapping [backend]   Start SLAM to build a map (foreground; Ctrl-C to stop).
                         Backends: slam_toolbox (default), gmapping, cartographer.
                         `racecar mapping save <name>` saves from any backend.
@@ -1196,7 +1227,7 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test profile data log calibrate lint source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile data log calibrate lint source ws cd teleop map mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
@@ -1261,6 +1292,39 @@ _racecar_complete() {
                 COMPREPLY=( $(compgen -W "all networking" -- "$cur") )
             elif [[ "${COMP_WORDS[2]}" == "networking" ]]; then
                 COMPREPLY=( $(compgen -W "--ssid= --psk= --channel= --ap-addr= --eth-static= --show --reset --help" -- "$cur") )
+            fi
+            ;;
+        map)
+            local maps_dir="${RACECAR_MAP_ROOT:-${RACECAR_DATA_DIR:-$HOME/neoracer_data}/maps}"
+            local maps=""
+            if [[ -d "$maps_dir" ]]; then
+                maps=$(cd "$maps_dir" && ls -d */ 2>/dev/null | sed 's#/$##' | grep -vx replaced)
+            fi
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "start save stop resume load recover status list info foxglove" -- "$cur") )
+            elif [[ "$prev" == "--from" ]]; then
+                COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+            elif [[ "$prev" == "--localizer" ]]; then
+                COMPREPLY=( $(compgen -W "amcl slam_toolbox" -- "$cur") )
+            else
+                case "${COMP_WORDS[2]}" in
+                    start)
+                        COMPREPLY=( $(compgen -W "--from --pose --force" -- "$cur") )
+                        ;;
+                    load)
+                        if [[ $COMP_CWORD -eq 3 ]]; then
+                            COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+                        else
+                            COMPREPLY=( $(compgen -W "--pose --global --localizer" -- "$cur") )
+                        fi
+                        ;;
+                    recover|info)
+                        COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+                        ;;
+                    foxglove)
+                        COMPREPLY=( $(compgen -W "on off" -- "$cur") )
+                        ;;
+                esac
             fi
             ;;
         mapping)
