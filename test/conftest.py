@@ -8,8 +8,15 @@ from types import ModuleType
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parent.parent / 'scripts'
+# The lab dashboards, one folder each under scripts/dashboards/.
+DASHBOARDS = ('wallfollow', 'camlabel', 'pursuit', 'eps', 'smartfollow', 'linefollow', 'webteleop')
 # Script folders searched by load_script, in order.
-SCRIPT_DIRS = (SCRIPTS, SCRIPTS / 'calibration', SCRIPTS / 'validation')
+SCRIPT_DIRS = (
+    SCRIPTS,
+    SCRIPTS / 'calibration',
+    SCRIPTS / 'validation',
+    *(SCRIPTS / 'dashboards' / name for name in DASHBOARDS),
+)
 
 
 def load_script(name: str) -> ModuleType:

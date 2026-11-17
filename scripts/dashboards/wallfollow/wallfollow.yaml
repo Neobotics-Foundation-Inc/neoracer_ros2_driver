@@ -1,0 +1,27 @@
+# NeoRacer wall-follow parameters: the shipped defaults. Save on the dashboard
+# writes this car's values to the car profile, in
+# ~/.config/racecar/dashboards/wallfollow.yaml, which loads on top of this file;
+# a driver update leaves that file alone.
+# Switch mode by editing the profile's file (Save once creates it), then press
+# Reset or Load on the dashboard. There is no UI toggle for mode.
+mode: 1               # 0 = static, 1 = dynamic
+
+speed: 0.0            # 0..1 command like the racecar library; 1 = top
+                      # speed (max_mps). Ships at 0.0: the NeoRacer mux has
+                      # no ROS deadman (the handset's mode switch is the
+                      # gate), so nothing drives until you raise it.
+kp: 0.5               # steering strength
+speed_kp: 0.0          # 0 = constant speed (slider only). Raise to enable correction.
+speed_kd: 0.0          # damper for the correction; only used when speed_kp > 0
+kd: 4.0               # damper. Raise this if the car wobbles.
+window: 10.0          # averaging window per ray, in degrees. Smooths noise.
+max_mps: 4.0          # the car's top speed in m/s; slider x this = target
+lookahead: 3.0        # meters. Distances are capped here in both modes, so an
+                      # open side reads as lookahead, not as 12 m of empty room.
+
+# static mode: mirrored side windows, error = right - left (setpoint 0).
+look_angle: 55.0      # side windows this many degrees off the nose. 90 is straight sideways.
+
+# dynamic mode: steer toward the most open heading in a front arc.
+width: 80.0           # search this many degrees left and right of the nose
+side_weight: 0.0      # score bonus (m per degree) toward the right. Negative prefers left.
