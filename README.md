@@ -127,7 +127,7 @@ sudo reboot
 After reboot, verify and start the stack:
 
 ```sh
-racecar status --quick      # devices, system, services and network, without ROS
+racecar status --quick      # host checks only, without the ROS sampling window
 racecar service status      # units enabled by setup, teleop not yet running
 racecar service start       # starts neoracer-teleop (watchdog follows)
 ```
