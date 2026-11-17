@@ -58,7 +58,7 @@ def best_nearby(
     for dth in turns:
         for dx in offsets:
             for dy in offsets:
-                cand = (pose[0] + dx, pose[1] + dy, pose[2] + dth)
+                cand = (pose[0] + float(dx), pose[1] + float(dy), pose[2] + float(dth))
                 x, y = sf.place(sample, sf.compose(cand, base_laser))
                 median = float(np.median(grid.lookup(x, y)))
                 if median < best_median:
