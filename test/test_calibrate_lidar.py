@@ -377,3 +377,26 @@ class TestMeasureLegs:
         )
         legs = cal.measure_legs(bag, (LASER_X, LASER_Y, 0.0))
         assert legs[1].problem == 'The car did not reverse.'
+
+
+class TestWriteYaw:
+    def test_the_result_shows_before_the_write(self, cal, monkeypatch):
+        # A write that fails still leaves the measured yaw on the screen.
+        log = _Log()
+
+        def fail(*a, **k):
+            raise PermissionError('read-only profile')
+
+        monkeypatch.setattr(cal, 'update_local_values', fail)
+        with pytest.raises(PermissionError):
+            cal.write_yaw([0.31, 0.25, 0.36], 0.0, log)
+        assert any('Lidar yaw 0.307 deg from 3 estimates' in line for line in log.lines)
+
+    def test_a_write_keeps_the_result_rows_together(self, cal, monkeypatch, tmp_path):
+        monkeypatch.setenv('RACECAR_CONFIG_DIR', str(tmp_path))
+        log = _Log()
+        assert cal.write_yaw([0.31, 0.25, 0.36], 0.0, log) == 0
+        rows = [line for line in log.lines if line.strip()]
+        assert rows[0].startswith('  Result   Lidar yaw 0.307 deg')
+        assert rows[1] == '           laser_yaw_deg: 0.000 -> 0.307'
+        assert rows[2].startswith('     Wrote ')
