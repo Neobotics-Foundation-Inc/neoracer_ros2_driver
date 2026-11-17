@@ -7,7 +7,7 @@ mapping can be unit-tested without a running ROS graph (see test/test_controller
 The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 - ``i qx qy qz qw ax ay az gx gy gz``   IMU   (quaternion, accel m/s^2, gyro rad/s)
 - ``o px py pz vx vy vz yaw``           odom  (position m, velocity m/s, yaw rad)
-- ``r c1 c2 ... c10``                   FlySky RC channels (SBUS counts; -1 == receiver failsafe)
+- ``r c1 c2 ... c10``                   FlySky RC channels (SBUS counts; -1 == firmware failsafe)
 - ``m x y z``                           magnetometer (Gauss)
 """
 
@@ -134,7 +134,7 @@ def parse_serial_data(line: str):
         return data, 'o'
 
     if cmd_type == 'r' and len(parts) >= 2:
-        # r c1 c2 ... cN   (FlySky RC channels, ints; -1 == receiver failsafe)
+        # r c1 c2 ... cN   (FlySky RC channels, ints; -1 == firmware failsafe)
         data['channels'] = [int(float(v)) for v in parts[1:]]
         return data, 'r'
 
@@ -208,8 +208,8 @@ def normalize_channel(raw, rc_min, rc_center, rc_max, deadband, failsafe_below=R
     """
     Map a raw RC reading (an SBUS count) to ``[-1.0, 1.0]`` about its center.
 
-    A reading below ``failsafe_below`` (the firmware's ``-1`` on receiver
-    failsafe) returns ``0.0``, so a receiver failsafe frame never commands full
+    A reading below ``failsafe_below`` (the ``-1`` the firmware sends while in
+    failsafe) returns ``0.0``, so a failsafe never commands full
     scale. The two sides of center are scaled independently so an asymmetric
     ``rc_min``/``rc_max`` still yields a clean +-1 range. Values within
     ``deadband`` of center snap to ``0.0``.
@@ -236,7 +236,7 @@ def rc_link_up(channels, count_min=RC_COUNT_MIN, count_max=RC_COUNT_MAX):
     """
     Report whether the transmitter link is up: every raw channel is an SBUS count.
 
-    The firmware sends -1 on every channel on receiver failsafe.
+    The firmware sends -1 on every channel while it is in failsafe.
     Use this, not the normalized channels, for transmitter presence: the
     failsafe mapping turns a dead channel and a stick held low into the same
     neutral value. One frame's verdict; freshness belongs to the consumer.

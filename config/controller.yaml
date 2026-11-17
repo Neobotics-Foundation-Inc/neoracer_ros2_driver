@@ -46,7 +46,7 @@ controller_node:
 
     # ================= FlySky RC -> /joy mapping =================
     # The ESP32 "r" line carries 10 RC channels as raw SBUS counts, 0 to 2047,
-    # and -1 on every channel on receiver failsafe. With the mode switch down
+    # and -1 on every channel while the firmware is in failsafe. With the switch down
     # (autonomy) a lost handset is not reported: the line repeats the last values.
     # Indices are 0-based into "r": steering 0, throttle 2, mode switch 6
     # (radio Ch7), speed switch 7 (radio Ch8), confirmed on the dev car's handset.
