@@ -16,31 +16,21 @@ if [ -z "${RACECAR_DATA_DIR:-}" ]; then
 fi
 
 _rc_autonomy_env() {
-    # Chained env for the osracer layers: underlay beneath the neoracer
-    # overlay, same order as launch_autonomy.sh. Run inside a subshell so
-    # the caller's interactive shell keeps its own environment.
-    if [[ ! -f "$HOME/osracer_ws/install/setup.bash" ]]; then
-        echo "osracer workspace not found at ~/osracer_ws" >&2
-        return 1
-    fi
+    # Humble and the neoracer overlay, as launch_autonomy.sh sources them. Run
+    # inside a subshell so the caller's interactive shell keeps its own
+    # environment.
     # shellcheck disable=SC1091
     source /opt/ros/humble/setup.bash
-    # shellcheck disable=SC1090
-    source "$HOME/osracer_ws/install/setup.bash"
     # shellcheck disable=SC1090
     [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
     systemctl is-active --quiet neoracer-teleop 2>/dev/null || \
         echo "warning: teleop service not active; /scan and /odom are missing" >&2
-    # The autonomy base ran as neoracer-autonomy.service until that unit was
-    # held; until it returns, the base is started in a terminal of its own.
-    pgrep -f launch_autonomy.sh >/dev/null 2>&1 || \
-        echo "warning: autonomy base not running (TF + bridge); start it with:" \
-             "bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh" >&2
     return 0
 }
 
 # Core stack, enabled at boot by setup_services.sh. neoracer-autonomy is not
-# here: the unit is held and setup no longer installs it.
+# here: it rides on teleop and starts on demand, and setup does not install it
+# yet.
 _RC_CORE_UNITS=(neoracer-teleop neoracer-watchdog neoracer-dashboard
                 neoracer-jupyter)
 
@@ -438,9 +428,9 @@ __RC_COMPILE_HELP__
                 local busy=""
                 systemctl is-active --quiet neoracer-teleop 2>/dev/null \
                     && busy+="neoracer-teleop "
-                # The autonomy base holds GPU memory too, and now runs as a
-                # plain process rather than a unit.
-                pgrep -f launch_autonomy.sh >/dev/null 2>&1 && busy+="autonomy "
+                # SLAM holds memory the GPU shares, whether neoracer-autonomy
+                # or `racecar launch autonomy` started it.
+                pgrep -f autonomy.launch.py >/dev/null 2>&1 && busy+="autonomy "
                 if [[ -n "$busy" ]]; then
                     echo "racecar compile: ${busy% } running; the export peaks near 3 GB." >&2
                     echo "Stop the stack first (racecar service stop), or pass --force." >&2
@@ -594,8 +584,9 @@ core units:      teleop, watchdog, dashboard, jupyter
 lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083),
                  eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
 
-neoracer-autonomy is held and no longer installed. Run the base in a terminal:
-  bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+neoracer-autonomy (SLAM on top of teleop) is not installed by setup yet.
+Run the same launch in a terminal:
+  racecar launch autonomy map:=<name>
 
 Dashboards install disabled and are started for a session:
   racecar service start camlabel
@@ -1157,7 +1148,8 @@ Commands:
                         Lab dashboards, off until started, one at a time:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
                           eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
-                        neoracer-autonomy is held; setup no longer installs it.
+                        neoracer-autonomy: SLAM on top of teleop; setup does
+                        not install it yet (racecar launch autonomy instead).
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
                           --list              show valid folders in ~/jupyter_ws
