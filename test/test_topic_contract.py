@@ -4,8 +4,9 @@ Topic contract: what the student library and the lab dashboards read and write.
 Library v0.9.0-bot (MITRacecarNeo/racecar-neo-library), the Neobotics fork
 of the library that deployed cars run until F45 resyncs it, and the seven
 NeoRacer lab dashboards (camlabel, eps, linefollow, pursuit, smartfollow,
-teleop, wallfollow) reach the car only through the topics, services, action
-and TF frames below. A
+wallfollow, webteleop; in scripts/dashboards/ since F33, so their references
+are checked like the driver's) reach the car only through the topics,
+services, action and TF frames below. A
 topic the library reads that nothing publishes does not fail: the library
 reads zeros. So every row is checked against the driver's own sources: the
 driver side exists with the message type, and the QoS on each end lets the
@@ -86,6 +87,12 @@ MUX_RC = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py
 MUX_RC_LINK = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py:273', BE)
 
 
+def _dash(name, script, line, note='', reliability=BE):
+    # A lab dashboard in scripts/dashboards/<name>/ (F33).
+    ref = f'scripts/dashboards/{name}/{script}.py:{line}' + (f' ({note})' if note else '')
+    return End(f'{DASH} {name}', ref, reliability)
+
+
 def _overview(line):
     # The 8080 server's sensor panels (F30): opened while the page asks.
     return End('8080 dashboard', f'scripts/overview.py:{line} (qos_profile_sensor_data)', BE)
@@ -94,31 +101,28 @@ def _overview(line):
 CAMERA_READERS = (
     End(LIB, 'library/real/camera_real.py:64', BE),
     _fork('camera_real.py:49 (depth 10)'),
-    _sensor(f'{DASH} camlabel', 'camlabel_dashboard/camlabel.py:62'),
-    _sensor(f'{DASH} linefollow', 'linefollow_dashboard/linefollow.py:210'),
-    _sensor(f'{DASH} pursuit', 'pursuit_dashboard/pursuit.py:91'),
-    _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:177'),
-    _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:170'),
+    _dash('camlabel', 'camlabel', 81),
+    _dash('linefollow', 'linefollow', 253),
+    _dash('pursuit', 'pursuit', 123),
+    _dash('smartfollow', 'smartfollow', 250),
+    _dash('webteleop', 'teleop', 311),
     End('inference_node', 'neoracer_ros2_driver/inference_node.py:135', BE),
     _overview(60),
 )
-ODOM_READERS = tuple(
-    _sensor(f'{DASH} {name}', f'{name}_dashboard/{name}.py:{line}')
-    for name, line in (
-        ('eps', 324),
-        ('linefollow', 211),
-        ('smartfollow', 176),
-        ('teleop', 172),
-        ('wallfollow', 116),
-    )
+ODOM_READERS = (
+    _dash('eps', 'eps', 396),
+    _dash('linefollow', 'linefollow', 254),
+    _dash('smartfollow', 'smartfollow', 249),
+    _dash('webteleop', 'teleop', 320),
+    _dash('wallfollow', 'wallfollow', 168),
 )
 SCAN_READERS = (
     End(LIB, 'library/real/lidar_real.py:36 (qos_profile_sensor_data)', BE),
     _fork('lidar_real.py:41 (qos_profile_sensor_data)'),
-    _sensor(f'{DASH} eps', 'eps_dashboard/eps.py:322'),
-    _sensor(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:175'),
-    _sensor(f'{DASH} teleop', 'teleop_dashboard/teleop.py:171'),
-    _sensor(f'{DASH} wallfollow', 'wallfollow_dashboard/wallfollow.py:115'),
+    _dash('eps', 'eps', 395),
+    _dash('smartfollow', 'smartfollow', 248),
+    _dash('webteleop', 'teleop', 319),
+    _dash('wallfollow', 'wallfollow', 167),
     _overview(61),
     End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
 )
@@ -126,14 +130,14 @@ DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
     _fork('drive_real.py:40 (depth 1)', REL),
 ) + tuple(
-    End(f'{DASH} {name}', f'{name}_dashboard/{name}.py:{line} (depth 1)', REL)
-    for name, line in (
-        ('eps', 321),
-        ('linefollow', 209),
-        ('pursuit', 90),
-        ('smartfollow', 174),
-        ('teleop', 169),
-        ('wallfollow', 114),
+    _dash(name, script, line, 'depth 1', REL)
+    for name, script, line in (
+        ('eps', 'eps', 394),
+        ('linefollow', 'linefollow', 252),
+        ('pursuit', 'pursuit', 122),
+        ('smartfollow', 'smartfollow', 247),
+        ('webteleop', 'teleop', 310),
+        ('wallfollow', 'wallfollow', 166),
     )
 )
 CONTROLLER = 'neoracer_ros2_driver/controller.py'
@@ -209,14 +213,23 @@ TABLE = (
         '/imu/fused',
         'sensor_msgs/msg/Imu',
         publishers=(End('controller_node', f'{CONTROLLER}:205', REL),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(62)),
+        subscribers=(
+            End(LIB, PHYSICS, BE),
+            _fork(FORK_PHYSICS),
+            _overview(62),
+            _dash('webteleop', 'teleop', 322, 'qos_profile_sensor_data, raw'),
+        ),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
     Row(
         '/mag',
         'sensor_msgs/msg/MagneticField',
         publishers=(End('controller_node', f'{CONTROLLER}:233', BE),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS)),
+        subscribers=(
+            End(LIB, PHYSICS, BE),
+            _fork(FORK_PHYSICS),
+            _dash('webteleop', 'teleop', 322, 'qos_profile_sensor_data, raw'),
+        ),
         evidence=(
             (CONTROLLER, "create_publisher(MagneticField, '/mag', qos_profile_sensor_data)"),
             ('config/controller.yaml', 'publish_mag: true'),
@@ -235,7 +248,10 @@ TABLE = (
         '/battery/state',
         'sensor_msgs/msg/BatteryState',
         publishers=(End('controller_node', f'{CONTROLLER}:211', REL),),
-        subscribers=(End(LIB, 'library/real/physics_real.py:78 (depth 10)', REL),),
+        subscribers=(
+            End(LIB, 'library/real/physics_real.py:78 (depth 10)', REL),
+            _dash('webteleop', 'teleop', 326, 'depth 10', REL),
+        ),
         evidence=((CONTROLLER, "create_publisher(BatteryState, '/battery/state', 10)"),),
         note='added by F07; the library subscribes RELIABLE, so /battery/state must stay RELIABLE',
     ),
@@ -268,8 +284,9 @@ TABLE = (
         subscribers=(
             End(LIB, 'library/real/vision_real.py:34', BE),
             _fork('vision_real.py:34'),
-            End(f'{DASH} pursuit', 'pursuit_dashboard/pursuit.py:92 (depth 10)', REL),
-            End(f'{DASH} smartfollow', 'smartfollow_dashboard/smartfollow.py:178 (depth 10)', REL),
+            _dash('pursuit', 'pursuit', 124, 'depth 10', REL),
+            _dash('smartfollow', 'smartfollow', 251, 'depth 10', REL),
+            _dash('webteleop', 'teleop', 316, 'qos_profile_sensor_data'),
         ),
         evidence=(
             (
@@ -392,6 +409,7 @@ TABLE = (
         publishers=(
             End(LIB, 'library/real/display_real.py:59 (depth 1)', REL),
             _fork('display_real.py:54 (depth 1)', REL),
+            _dash('webteleop', 'teleop', 327, 'depth 1', REL),
         ),
         subscribers=(End('led_matrix_node', 'neoracer_ros2_driver/led_matrix_node.py:62', REL),),
         evidence=(
