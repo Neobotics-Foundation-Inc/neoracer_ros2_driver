@@ -260,14 +260,16 @@ While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/t
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
+Lichtblick and Foxglove are apps for viewing live ROS data on a laptop, much like RViz, with no ROS install on the laptop. Lichtblick is a free, open-source fork of Foxglove Studio, maintained by BMW, and needs no account. Both are optional: nothing on the car needs them, and the bridge they connect to runs only with `foxglove:=true`.
+
 `foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the robot description, the odometry, the AMCL pose and particles, and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Client publishing is on, as upstream ships it, and foxglove_bridge 3.x does not apply its client topic list, so a client can also publish on any topic. Per-car settings go in the car profile, `params/foxglove.yaml`.
 
 To view a mapping run in Lichtblick:
 
 1. Start mapping with the bridge: `racecar launch autonomy map:=room foxglove:=true`.
-2. On a laptop on the car's network, open Lichtblick and choose "Open connection", then "Foxglove WebSocket". Lichtblick 1.22 or later is needed, because foxglove_bridge 3.x accepts only the `foxglove.sdk.v1` protocol.
-3. Enter `ws://neoracer.local:8765`, or the car's IP address in place of `neoracer.local`, and connect.
-4. In the layout menu, choose "Import layout from file" and pick `config/foxglove_layout.json` from this repository. The car keeps a copy in `~/ros2_ws/install/neoracer_ros2_driver/share/neoracer_ros2_driver/config/`.
+2. On a laptop on the car's network, open Lichtblick: the desktop app from https://github.com/Lichtblick-Suite/lichtblick/releases, or the web app at https://lichtblick-suite.github.io/lichtblick/. Lichtblick 1.22 or later is needed, because foxglove_bridge 3.x accepts only the `foxglove.sdk.v1` protocol.
+3. Choose "Open connection", then "Foxglove WebSocket". Enter `ws://neoracer.local:8765`, or the car's IP address in place of `neoracer.local`, and connect.
+4. Load the layout. A layout is a file that sets Lichtblick's panels and the topics in each; this repository's is `config/foxglove_layout.json`, and the car keeps a copy in `~/ros2_ws/install/neoracer_ros2_driver/share/neoracer_ros2_driver/config/`. In the left sidebar's Layouts tab, choose "Import layout", or open the app menu (the Lichtblick logo at the top left) and choose View, then "Import layout from file…". The web app's import needs a browser file picker that Brave, Safari and Firefox do not offer; in those, drag the file from Finder or the file manager onto the Lichtblick window instead.
 
 The layout shows a top-down 3D view of the map, the scan and the pose, following the car. It also shows a table of `/autonomy/status` and a plot of the pose.
 
