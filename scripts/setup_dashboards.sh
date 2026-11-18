@@ -69,7 +69,7 @@ changed=0
 updated=()
 
 # Render a template for this platform. @DIR@ and Environment=HOME= are required
-# anchors; a template missing either is refused.
+# anchors; a template missing either is not installed.
 render_unit() {
     local src="$1" dir="$2" token
     for token in '@DIR@' 'Environment=HOME='; do

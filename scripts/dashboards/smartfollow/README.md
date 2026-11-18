@@ -31,7 +31,7 @@ Saved tuning goes to the car profile, `~/.config/racecar/dashboards/smartfollow.
 
 ## State machine
 
-Both controllers run continuously and each keeps its own error, steering, and throttle state. An arbiter at 15 Hz decides which one reaches /drive:
+Both controllers run continuously and each keeps its own error, steering, and throttle state. At 15 Hz an arbiter passes one of them to /drive:
 
 ```
                 /scan  --->  gap follower  --+

@@ -104,38 +104,45 @@ rather than failing, and logs that it did.
 
 ## Lab dashboards
 
-Seven lab tools live in repositories of their own and are cloned into
-`scripts/dashboards/` by `scripts/setup_services.sh`, each tracking its default
-branch. The driver ships the wiring, not the code: the checkouts are gitignored,
-so a car's tuned dashboard yaml survives an update and a lab can be revised
-without a driver release.
+Seven lab tools ship in the driver, one folder each in `scripts/dashboards/`,
+and `scripts/setup_dashboards.sh` installs their units. `setup_services.sh` runs
+it, so `racecar service install` and `setup_all.sh` both install them, with no
+network.
 
 ```
 setup_services.sh
     |
     |-- core units -> /etc/systemd/system/ -> enabled at boot
     |
-    `-- scripts/dashboards/<name>_dashboard/   (git clone, default branch)
+    `-- setup_dashboards.sh
               |
-              `-- setup.sh -> renders neoracer-<name>.service.in with its own
-                              path -> /etc/systemd/system/ -> installed disabled
+              |-- dashboards/checkouts.py: old checkouts' tuning -> car profile,
+              |                            the checkouts -> dashboards/.migrated/
+              |
+              `-- scripts/dashboards/<id>/neoracer-<id>.service.in
+                      -> rendered with its folder -> /etc/systemd/system/
+                      -> installed disabled
 ```
 
 Each dashboard is a single process that subscribes to driver topics and serves
-its own web UI: camlabel (8082) on `/camera/color`, wallfollow (8081) on
-`/scan`, pursuit (8083) on `/edgetpu/inference`, eps (8084) on `/scan` and
-`/odom`, smartfollow (8085) on all four of those topics at once, linefollow
+its own web UI: wallfollow (8081) on `/scan`, camlabel (8082) on
+`/camera/color`, pursuit (8083) on `/edgetpu/inference`, eps (8084) on `/scan`
+and `/odom`, smartfollow (8085) on all four of those topics at once, linefollow
 (8086) on `/camera/color` and `/odom`, webteleop (8087) on `/camera/color`,
-`/scan`, and `/odom`. They stay off by default because each holds the camera
+`/scan`, `/odom`, `/imu/fused`, `/mag`, `/battery/state` and
+`/edgetpu/inference`. They stay off by default because each holds the camera
 or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow,
 linefollow, and webteleop all publish `/drive`, where a second publisher
 fights the mux. One at a time, started per session through
 `racecar service start <name>`.
 
-The unit is a template rather than a fixed file so the service follows the
-checkout; that is what lets the driver own the install path without vendoring
-the dashboards. `racecar service restart` acts only on enabled units, so a
-field update never brings a dashboard up on its own.
+A dashboard's tuning lives in the car profile and its logs under the data
+root, never in the tree, so a driver update keeps both. Before the dashboards
+moved in-tree, setup cloned each one's repository to
+`scripts/dashboards/<repo>_dashboard/` and the tuning lived in the checkout;
+`checkouts.py` carries a car across, as [docs/dashboards.md](dashboards.md)
+describes. `racecar service restart` acts only on enabled units, so a field
+update never brings a dashboard up on its own.
 
 ## Constraints
 

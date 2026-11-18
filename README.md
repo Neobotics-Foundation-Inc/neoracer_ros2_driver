@@ -155,7 +155,7 @@ Eight phases, all under `scripts/`:
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
 6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
 7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
-8. **`setup_services.sh`**: installs the systemd units; core stack enabled, lab dashboards cloned into `scripts/dashboards/` and left disabled
+8. **`setup_services.sh`**: installs the systemd units; core stack enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
@@ -282,17 +282,19 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
 ## Lab dashboards
 
-Seven lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
+Seven lab tools ship in the driver, one folder each in `scripts/dashboards/`, and phase 8 installs their units with `scripts/setup_dashboards.sh`:
 
-| Dashboard | Port | Repository | Purpose |
+| Dashboard | Port | Folder | Purpose |
 | --- | --- | --- | --- |
-| camlabel | 8082 | [camlabel_dashboard](https://github.com/Neobotics-Foundation-Inc/camlabel_dashboard) | capture frames and drag boxes; writes a YOLO dataset to `~/data/camlabel` |
-| wallfollow | 8081 | [wallfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/wallfollow_dashboard) | wall following on `/scan` with live PD tuning |
-| pursuit | 8083 | [pursuit_dashboard](https://github.com/Neobotics-Foundation-Inc/pursuit_dashboard) | target following on `/edgetpu/inference` |
-| eps | 8084 | [eps_dashboard](https://github.com/Neobotics-Foundation-Inc/eps_dashboard) | episodic policy search; a (1+1)-ES tunes the gap follower's gains from one success or fail press per run |
-| smartfollow | 8085 | [smartfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/smartfollow_dashboard) | wallfollow and pursuit combined; follows a detected car, falls back to wall following |
-| linefollow | 8086 | [linefollow_dashboard](https://github.com/Neobotics-Foundation-Inc/linefollow_dashboard) | line following on `/camera/color`; HSV threshold, crop band, and PD steering tuned from trackbars, with a mask view and a stability trace |
-| webteleop | 8087 | [teleop_dashboard](https://github.com/Neobotics-Foundation-Inc/teleop_dashboard) | manual driving from the browser: WASD, arrow keys, or buttons, two at once; camera, lidar, and encoder views; a command timeout drives zero when the browser goes quiet |
+| wallfollow | 8081 | `scripts/dashboards/wallfollow/` | wall following on `/scan` with live PD tuning |
+| camlabel | 8082 | `scripts/dashboards/camlabel/` | capture frames and drag boxes; writes a YOLO dataset to `datasets/camlabel` under the data root |
+| pursuit | 8083 | `scripts/dashboards/pursuit/` | target following on `/edgetpu/inference` |
+| eps | 8084 | `scripts/dashboards/eps/` | episodic policy search; a (1+1)-ES tunes the gap follower's gains from one success or fail press per run |
+| smartfollow | 8085 | `scripts/dashboards/smartfollow/` | wallfollow and pursuit combined; follows a detected car, falls back to wall following |
+| linefollow | 8086 | `scripts/dashboards/linefollow/` | line following on `/camera/color`; HSV threshold, crop area, and PD steering tuned from trackbars, with a mask view and a stability trace |
+| webteleop | 8087 | `scripts/dashboards/webteleop/` | manual driving from the browser: WASD, arrow keys, or buttons, two at once; camera, lidar, encoder, IMU, battery and compass views; a command timeout drives zero when the browser goes quiet |
+
+Save on a dashboard writes the car's tuning to the car profile, `~/.config/racecar/dashboards/<name>.yaml`, over the shipped defaults, and logs go to `dashboards/<name>/` under the data root, so a driver update keeps both. pursuit, smartfollow, and webteleop's detection overlay need detections, which are off at boot. Internals: [docs/dashboards.md](docs/dashboards.md).
 
 Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow, linefollow, and webteleop all publish `/drive`, so they are started one at a time for a session:
 
@@ -486,7 +488,7 @@ Configuration lives in `config/`, loaded by each node's launch file: `controller
 
 **No `/edgetpu/inference`.** The node is off at boot. `cat ~/logs/latest/launch_args` shows `inference_enable:=false` when teleop was launched without it; see [Object detection](#object-detection). If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
 
-**A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
+**A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never installed it: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 
 **FlySky channels are wrong.** The shipped mapping fits the FlySky handset the NeoRacer ships with. For another handset, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel`, `steering_channel` and `mode_channel` in the car profile, `~/.config/racecar/params/controller.yaml`. With the mode switch up, a handset that goes off reads `-1` on every channel within a second, which maps to neutral. With the switch down the loss is not reported: the channels repeat their last values.
 
