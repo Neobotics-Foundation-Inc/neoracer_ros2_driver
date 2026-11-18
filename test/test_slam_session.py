@@ -218,6 +218,15 @@ class TestNeoRacer:
             name, _, value = arg.partition('_enable:=')
             assert name in subsystems and value == 'false', arg
 
+    def test_the_validation_bridge_takes_no_client_messages(self, ss):
+        # foxglove_bridge 3.x does not apply client_topic_whitelist, so a
+        # session's bridge holds no capability that lets a client publish,
+        # call a service or set a parameter.
+        params = yaml.safe_load(ss.FOXGLOVE_PARAMS.read_text())['foxglove_bridge']
+        capabilities = params['ros__parameters']['capabilities']
+        held = {'clientPublish', 'parameters', 'parametersSubscribe', 'services', 'assets'}
+        assert capabilities and not set(capabilities) & held
+
     def test_teleop_unit_is_the_neoracer_unit(self, ss):
         assert ss.TELEOP_UNIT == 'neoracer-teleop'
         assert (ROOT / 'scripts' / f'{ss.TELEOP_UNIT}.service').is_file()
