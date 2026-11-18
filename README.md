@@ -260,12 +260,12 @@ While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/t
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
-`foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the odometry, the AMCL particles and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Per-car settings go in the car profile, `params/foxglove.yaml`.
+`foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the robot description, the odometry, the AMCL pose and particles, and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Client publishing is on, as upstream ships it, and foxglove_bridge 3.x does not apply its client topic list, so a client can also publish on any topic. Per-car settings go in the car profile, `params/foxglove.yaml`.
 
 To view a mapping run in Lichtblick:
 
 1. Start mapping with the bridge: `racecar launch autonomy map:=room foxglove:=true`.
-2. On a laptop on the car's network, open Lichtblick and choose "Open connection", then "Foxglove WebSocket".
+2. On a laptop on the car's network, open Lichtblick and choose "Open connection", then "Foxglove WebSocket". Lichtblick 1.22 or later is needed, because foxglove_bridge 3.x accepts only the `foxglove.sdk.v1` protocol.
 3. Enter `ws://neoracer.local:8765`, or the car's IP address in place of `neoracer.local`, and connect.
 4. In the layout menu, choose "Import layout from file" and pick `config/foxglove_layout.json` from this repository. The car keeps a copy in `~/ros2_ws/install/neoracer_ros2_driver/share/neoracer_ros2_driver/config/`.
 

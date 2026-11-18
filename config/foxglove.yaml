@@ -1,8 +1,10 @@
 # foxglove_bridge, started by autonomy.launch.py with foxglove:=true (the
-# autonomy unit's AUTONOMY_FOXGLOVE=1). View-only for Lichtblick or Foxglove:
-# the map, scan, frames, and poses; camera streams are left out because they
-# can saturate the car's 2.4 GHz access point. The one topic a client may
-# publish is /initialpose (a pose estimate tool); /drive is never accepted.
+# autonomy unit's AUTONOMY_FOXGLOVE=1), for Lichtblick or Foxglove: the map,
+# scan, frames, and poses; camera streams are left out because they can
+# saturate the car's 2.4 GHz access point. Upstream limits client publishing
+# to /initialpose, for the pose estimate tool. foxglove_bridge 3.x reads
+# client_topic_whitelist but does not apply it, so with clientPublish a client
+# can publish on any topic, /drive and /motor included.
 # Per-car overrides go in the car profile, params/foxglove.yaml.
 #
 # Every key below exists in Humble's foxglove_bridge 3.4.3, the version on the
