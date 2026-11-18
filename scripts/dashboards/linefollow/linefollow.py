@@ -393,8 +393,12 @@ class LineFollowNode(Node):
             )
 
     def _actuate(self):
+        with _lock:
+            cap = set_max_speed(_params['speed'])
         out = AckermannDriveStamped()
-        out.drive.speed = set_max_speed(self._speed_cmd)
+        # A held command never outruns the slider, so Stop also stops a car
+        # that has lost the line.
+        out.drive.speed = min(set_max_speed(self._speed_cmd), cap)
         out.drive.steering_angle = float(-self._steer_cmd)  # wire positive = left on this car
         self._pub.publish(out)
         with _lock:

@@ -167,3 +167,11 @@ def test_the_model_name_takes_the_profile_override(pp, tmp_path, car_profile_dir
 
 def test_an_unreadable_inference_config_reads_unknown(pp, tmp_path):
     assert pp.read_model_name(tmp_path / 'missing') == 'unknown'
+
+
+def test_a_slider_at_zero_stops_a_car_that_has_lost_its_target(pp, node, params):
+    node._speed_cmd, node._steer_cmd = 0.4, 0.2  # the held command
+    params['speed'] = 0.0
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0
+    assert node._pub.msgs[-1].drive.steering_angle == pytest.approx(-0.2)

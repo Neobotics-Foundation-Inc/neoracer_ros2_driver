@@ -266,6 +266,7 @@ def test_lost_rows_are_flagged(node):
 
 
 def test_actuate_negates_steering_and_caps_speed(node):
+    lf._params['speed'] = 1.0
     node._steer_cmd, node._speed_cmd = 0.4, 99.0
     node._actuate()
     msg = node._pub.msgs[-1]
@@ -304,3 +305,12 @@ def test_the_camera_is_the_jpeg_color_stream():
     shipped = yaml.safe_load(SHIPPED)
     assert shipped['camera_topic'] == '/camera/color'
     assert 'depth_topic' not in shipped
+
+
+def test_stop_stops_a_car_that_has_lost_the_line(node):
+    lf._params['speed'] = 0.4
+    feed(node, frame([(0.7, 30, BLUE, 0.0, 1.0)]))
+    feed(node, frame())  # the line is lost; the last command is held
+    lf.update_params({'speed': 0})  # the page's Stop
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0

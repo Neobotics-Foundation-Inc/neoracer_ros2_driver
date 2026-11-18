@@ -214,3 +214,49 @@ class TestTuning:
     def test_the_speed_is_capped(self, wf):
         assert wf.set_max_speed(4.0) == wf.MAX_SPEED
         assert wf.set_max_speed(-1.0) == 0.0
+
+
+class Recorder:
+    """Stands in for the /drive publisher and keeps what was published."""
+
+    def __init__(self):
+        self.msgs = []
+
+    def publish(self, msg):
+        self.msgs.append(msg)
+
+
+class TestLiveSpan:
+    @pytest.fixture
+    def node(self, wf, monkeypatch, tmp_path):
+        monkeypatch.setattr(wf, 'YAML_PATH', tmp_path / 'wallfollow.yaml')
+        monkeypatch.setattr(wf, 'LIDAR_MOUNT_YAW_DEG', 0.0)
+        wf._params.clear()
+        wf.load_params()
+        monkeypatch.setattr(wf.Node, '__init__', lambda self, name: None)
+        monkeypatch.setattr(
+            wf.WallFollowNode, 'create_publisher', lambda *a, **k: Recorder(), raising=False
+        )
+        monkeypatch.setattr(
+            wf.WallFollowNode, 'create_subscription', lambda *a, **k: None, raising=False
+        )
+        return wf.WallFollowNode()
+
+    def blind_rear_scan(self):
+        # Walls 0.6 m away all round the live span; the rear 90 degrees blank.
+        msg = make_scan(fill=0.6)
+        for i in range(len(msg.ranges)):
+            raw = math.degrees(msg.angle_min + i * msg.angle_increment)
+            if abs(raw) > 135:
+                msg.ranges[i] = float('inf')
+        return msg
+
+    def test_no_heading_is_taken_from_the_blind_rear(self, wf, node):
+        wf._params.update(mode=1, width=170.0, speed=0.2)
+        node._scan_cb(self.blind_rear_scan())
+        assert abs(wf._state['overlay']['target_deg']) <= wf.LIVE_HALF_DEG
+
+    def test_a_width_of_zero_does_not_stop_the_callback(self, wf, node):
+        wf._params.update(mode=1, width=0.0, speed=0.2)
+        node._scan_cb(self.blind_rear_scan())
+        assert node._pub.msgs

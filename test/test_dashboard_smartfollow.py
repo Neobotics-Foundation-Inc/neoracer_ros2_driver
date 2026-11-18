@@ -252,7 +252,8 @@ def test_throttle_stops_at_the_safety_area(node, params):
 # ---- arbiter ----
 
 
-def test_wall_follower_drives_when_nothing_was_ever_detected(node):
+def test_wall_follower_drives_when_nothing_was_ever_detected(node, params):
+    params['wall']['speed'] = params['car']['speed'] = 1.0
     node._wall_steer_cmd, node._wall_speed_cmd = 0.4, 0.3
     node._car_steer_cmd, node._car_speed_cmd = -0.9, 0.8
     node._actuate()
@@ -263,7 +264,8 @@ def test_wall_follower_drives_when_nothing_was_ever_detected(node):
     assert msg.drive.steering_angle == pytest.approx(-0.4)  # negated on the wire
 
 
-def test_a_fresh_target_hands_over_to_car_following(node):
+def test_a_fresh_target_hands_over_to_car_following(node, params):
+    params['wall']['speed'] = params['car']['speed'] = 1.0
     node._wall_steer_cmd, node._wall_speed_cmd = 0.4, 0.3
     node._car_steer_cmd, node._car_speed_cmd = -0.9, 0.8
     node._last_target_stamp = time.monotonic()
@@ -276,6 +278,7 @@ def test_a_fresh_target_hands_over_to_car_following(node):
 
 def test_the_wall_follower_takes_back_over_after_target_hold(node, params):
     params['target_hold'] = 0.2
+    params['wall']['speed'] = params['car']['speed'] = 1.0
     node._wall_steer_cmd, node._wall_speed_cmd = 0.4, 0.3
     node._car_steer_cmd, node._car_speed_cmd = -0.9, 0.8
     node._last_target_stamp = time.monotonic() - 0.1
@@ -288,6 +291,7 @@ def test_the_wall_follower_takes_back_over_after_target_hold(node, params):
 
 
 def test_arbiter_output_is_capped(node, params):
+    params['wall']['speed'] = 1.0
     node._wall_speed_cmd = 99.0
     node._actuate()
     assert node._pub.msgs[-1].drive.speed == sf.MAX_SPEED
@@ -337,3 +341,12 @@ def test_an_empty_block_in_the_profile_keeps_the_shipped_one(params):
     sf.load_params()
     assert sf._params['car'] == shipped_car
     assert sf._params['wall']['kp'] == 0.7
+
+
+def test_a_slider_at_zero_stops_a_held_command(node, params):
+    # The car follower holds its last command while it waits for a target.
+    params['car']['speed'] = 0.0
+    node._car_steer_cmd, node._car_speed_cmd = -0.5, 0.6
+    node._last_target_stamp = time.monotonic()
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0

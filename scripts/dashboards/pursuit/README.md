@@ -29,7 +29,7 @@ Saved tuning goes to the car profile, `~/.config/racecar/dashboards/pursuit.yaml
 
 Detections come from the driver inference node (vision_msgs/Detection2DArray on /edgetpu/inference). The inference node is off at boot, so turn detections on before starting pursuit; with it off, the camera view shows no boxes and the car never moves. Detections below score_threshold are dropped, the best-scoring max_detections remain as candidates, and the largest box is the target. The model being served and the camera frame rate show in the summary; the model is whatever model_path the driver's inference.yaml points to, with the car profile's `params/inference.yaml` on top.
 
-If no object is found the car KEEPS THE LAST ACTUATED COMMAND, speed and angle both, republished continuously. It does not stop on its own except by the safety_area brake. The speed slider at zero takes effect at the next detection, so with no target in view stop the app (Clear apps on 8080, or `racecar service stop pursuit`); `/drive` then goes to zero within the mux's 0.5 s timeout. The handset's mode switch is the physical gate.
+If no object is found the car KEEPS THE LAST ACTUATED COMMAND, speed and angle both, republished continuously. It does not stop on its own except by the safety_area brake. The held throttle never exceeds the speed slider, so the slider at zero stops the car at once, target or not. The handset's mode switch is the physical gate.
 
 ## Tuning
 

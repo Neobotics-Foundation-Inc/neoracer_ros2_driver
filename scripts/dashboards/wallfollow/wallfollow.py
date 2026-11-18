@@ -63,6 +63,9 @@ MAX_SPEED = 1.0  # hard throttle cap, same idea as drive_real.set_max_speed
 SEARCH_STEP = 2  # degrees between candidate headings (dynamic)
 HALF_CLEAR = 0.21  # meters, car half-width plus margin, inflates obstacles
 CENTER_BIAS = 0.006  # score penalty per degree off-center, stops ping-pong
+# The LakiBeam's live span is 135 degrees either side of the nose. Its rear
+# rays are blank and read as open space, so no heading is taken from there.
+LIVE_HALF_DEG = 135.0
 
 
 def lidar_mount_yaw_deg(config_dir=None):
@@ -204,6 +207,10 @@ class WallFollowNode(Node):
     def _scan_cb(self, msg):
         with _lock:
             p = dict(_params)
+        # Headings stay inside the lidar's live span, and a width of 0 or less
+        # cannot stop the callback.
+        p['width'] = max(SEARCH_STEP, min(float(p['width']), LIVE_HALF_DEG))
+        p['look_angle'] = max(0.0, min(float(p['look_angle']), LIVE_HALF_DEG))
 
         la = max(p['lookahead'], 0.1)
         if int(p['mode']) == 1:

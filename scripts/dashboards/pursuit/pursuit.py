@@ -210,8 +210,12 @@ class PursuitNode(Node):
         self._update_state(dets, target, error, area)
 
     def _actuate(self):
+        with _lock:
+            cap = max(0.0, min(1.0, float(_params['speed'])))
         out = AckermannDriveStamped()
-        out.drive.speed = float(self._speed_cmd)
+        # A held command never outruns the slider, so a slider at 0 also stops
+        # a car that has lost its target.
+        out.drive.speed = min(float(self._speed_cmd), cap)
         out.drive.steering_angle = float(-self._steer_cmd)  # wire positive = left
         self._pub.publish(out)
 

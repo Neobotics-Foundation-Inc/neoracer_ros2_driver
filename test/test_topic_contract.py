@@ -104,25 +104,25 @@ CAMERA_READERS = (
     _dash('camlabel', 'camlabel', 81),
     _dash('linefollow', 'linefollow', 255),
     _dash('pursuit', 'pursuit', 123),
-    _dash('smartfollow', 'smartfollow', 253),
+    _dash('smartfollow', 'smartfollow', 256),
     _dash('webteleop', 'teleop', 313),
     End('inference_node', 'neoracer_ros2_driver/inference_node.py:135', BE),
     _overview(60),
 )
 ODOM_READERS = (
-    _dash('eps', 'eps', 397),
+    _dash('eps', 'eps', 400),
     _dash('linefollow', 'linefollow', 256),
-    _dash('smartfollow', 'smartfollow', 252),
+    _dash('smartfollow', 'smartfollow', 255),
     _dash('webteleop', 'teleop', 322),
-    _dash('wallfollow', 'wallfollow', 170),
+    _dash('wallfollow', 'wallfollow', 173),
 )
 SCAN_READERS = (
     End(LIB, 'library/real/lidar_real.py:36 (qos_profile_sensor_data)', BE),
     _fork('lidar_real.py:41 (qos_profile_sensor_data)'),
-    _dash('eps', 'eps', 396),
-    _dash('smartfollow', 'smartfollow', 251),
+    _dash('eps', 'eps', 399),
+    _dash('smartfollow', 'smartfollow', 254),
     _dash('webteleop', 'teleop', 321),
-    _dash('wallfollow', 'wallfollow', 169),
+    _dash('wallfollow', 'wallfollow', 172),
     _overview(61),
     End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
 )
@@ -132,12 +132,12 @@ DRIVE_WRITERS = (
 ) + tuple(
     _dash(name, script, line, 'depth 1', REL)
     for name, script, line in (
-        ('eps', 'eps', 395),
+        ('eps', 'eps', 398),
         ('linefollow', 'linefollow', 254),
         ('pursuit', 'pursuit', 122),
-        ('smartfollow', 'smartfollow', 250),
+        ('smartfollow', 'smartfollow', 253),
         ('webteleop', 'teleop', 312),
-        ('wallfollow', 'wallfollow', 168),
+        ('wallfollow', 'wallfollow', 171),
     )
 )
 CONTROLLER = 'neoracer_ros2_driver/controller.py'
@@ -285,7 +285,7 @@ TABLE = (
             End(LIB, 'library/real/vision_real.py:34', BE),
             _fork('vision_real.py:34'),
             _dash('pursuit', 'pursuit', 124, 'depth 10', REL),
-            _dash('smartfollow', 'smartfollow', 254, 'depth 10', REL),
+            _dash('smartfollow', 'smartfollow', 257, 'depth 10', REL),
             _dash('webteleop', 'teleop', 318, 'qos_profile_sensor_data'),
         ),
         evidence=(

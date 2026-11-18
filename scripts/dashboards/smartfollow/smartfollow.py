@@ -77,6 +77,9 @@ MAX_SPEED = 1.0  # hard throttle cap, same idea as drive_real.set_max_speed
 SEARCH_STEP = 2  # degrees between candidate headings (wall following)
 HALF_CLEAR = 0.21  # meters, car half-width plus margin, inflates obstacles
 CENTER_BIAS = 0.006  # score penalty per degree off-center, stops ping-pong
+# The LakiBeam's live span is 135 degrees either side of the nose. Its rear
+# rays are blank and read as open space, so no heading is taken from there.
+LIVE_HALF_DEG = 135.0
 PUBLISH_RATE_HZ = 15.0  # arbiter and /drive rate
 PREVIEW_RATE_HZ = 15.0
 # The live chart is 420 px wide, so sending all 1200 rows of history on every
@@ -296,6 +299,9 @@ class SmartFollowNode(Node):
     def _scan_cb(self, msg):
         with _lock:
             p = dict(_params['wall'])
+        # Headings stay inside the lidar's live span, and a width of 0 or less
+        # cannot stop the callback.
+        p['width'] = max(SEARCH_STEP, min(float(p['width']), LIVE_HALF_DEG))
 
         la = max(p['lookahead'], 0.1)
         degs = list(range(-int(p['width']), int(p['width']) + 1, SEARCH_STEP))
@@ -468,6 +474,7 @@ class SmartFollowNode(Node):
         now = time.monotonic()
         with _lock:
             hold = float(_params['target_hold'])
+            caps = {'car': _params['car']['speed'], 'wall': _params['wall']['speed']}
         age = now - self._last_target_stamp
         car = age <= hold
 
@@ -475,6 +482,11 @@ class SmartFollowNode(Node):
             speed, steer, error = self._car_speed_cmd, self._car_steer_cmd, self._car_error
         else:
             speed, steer, error = self._wall_speed_cmd, self._wall_steer_cmd, self._wall_error
+        # A slider at 0 stops the car even while its controller holds the last
+        # command, as the car follower does between detections. The wall
+        # follower's speed loop may run above its slider, so only 0 is applied.
+        if set_max_speed(caps['car' if car else 'wall']) <= 1e-3:
+            speed = 0.0
 
         out = AckermannDriveStamped()
         out.drive.speed = set_max_speed(speed)

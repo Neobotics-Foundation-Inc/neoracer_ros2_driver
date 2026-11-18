@@ -70,6 +70,9 @@ MUTATE_SCALE = (1.0, 1.0, 0.5, 0.5)  # per-gain step weight: speed gains move ge
 SEARCH_STEP = 2  # gap follower constants, as in wallfollow
 CENTER_BIAS = 0.006
 HALF_CLEAR = 0.21
+# The LakiBeam's live span is 135 degrees either side of the nose. Its rear
+# rays are blank and read as open space, so no heading is taken from there.
+LIVE_HALF_DEG = 135.0
 
 _lock = threading.Lock()
 _cfg: dict = {}
@@ -438,6 +441,9 @@ class EpsNode(Node):
             return
         with _lock:
             p = dict(_cfg)
+        # Headings stay inside the lidar's live span, and a width of 0 or less
+        # cannot stop the callback.
+        p['width'] = max(SEARCH_STEP, min(float(p['width']), LIVE_HALF_DEG))
         g = s.armed_gains
         la = max(p['lookahead'], 0.1)
         degs = list(range(-int(p['width']), int(p['width']) + 1, SEARCH_STEP))
