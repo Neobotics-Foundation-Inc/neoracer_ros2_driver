@@ -648,7 +648,15 @@ def main(args: list[str] | None = None) -> None:
     # The executor spins in a thread; the main thread stays in Python, where the
     # signal handlers run even while the executor waits (a stopped sim clock
     # leaves it waiting in C indefinitely).
-    spinner = threading.Thread(target=executor.spin, daemon=True)
+    spun = threading.Event()
+
+    def spin() -> None:
+        try:
+            executor.spin()
+        finally:
+            spun.set()
+
+    spinner = threading.Thread(target=spin, daemon=True)
     spinner.start()
     try:
         while spinner.is_alive():
@@ -661,6 +669,13 @@ def main(args: list[str] | None = None) -> None:
         # Callbacks stop first, so no status tick lands after the final one.
         executor.shutdown(timeout_sec=1.0)
         node.shutdown()
+        # On Humble, executor.shutdown() returns before spin() does. If the
+        # interpreter exits while spin() is still in its wait, the process
+        # aborts (exit code -6). The next timer or message ends that wait.
+        # The Event replaces spinner.join(): on Python 3.10 to 3.12, the
+        # interrupted join above marks the thread as stopped while it runs.
+        if not spun.wait(timeout=1.0):
+            node.get_logger().warning('The executor thread was still running at exit.')
         node.destroy_node()
         rclpy.try_shutdown()
 
