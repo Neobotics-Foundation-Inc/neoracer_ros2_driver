@@ -669,9 +669,10 @@ def main(args: list[str] | None = None) -> None:
         # Callbacks stop first, so no status tick lands after the final one.
         executor.shutdown(timeout_sec=1.0)
         node.shutdown()
-        # On Humble, executor.shutdown() returns before spin() does. If the
-        # interpreter exits while spin() is still in its wait, the process
-        # aborts (exit code -6). The next timer or message ends that wait.
+        # On Humble, executor.shutdown() returns before spin() does. If
+        # spin()'s last wait ends while the interpreter exits, the process
+        # aborts (exit code -6). A message, such as teleop's 50 Hz /tf, ends
+        # that wait; the node's own timers may be left out of it.
         # The Event replaces spinner.join(): on Python 3.10 to 3.12, the
         # interrupted join above marks the thread as stopped while it runs.
         if not spun.wait(timeout=1.0):

@@ -7,8 +7,8 @@ import threading
 import time
 import types
 
-import pytest
 from neoracer_ros2_driver import autonomy_node as an
+import pytest
 
 
 class FakeExecutor:
@@ -72,15 +72,20 @@ def run_main(monkeypatch):
         an.rclpy, 'try_shutdown', lambda **k: nodes[-1]._note('try_shutdown'), raising=False
     )
     saved = signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)
+    timers = []
 
     def run(lag):
         FakeExecutor.lag = lag
-        threading.Timer(0.1, os.kill, (os.getpid(), signal.SIGINT)).start()
+        timers.append(threading.Timer(0.1, os.kill, (os.getpid(), signal.SIGINT)))
+        timers[-1].start()
         t0 = time.monotonic()
         an.main([])
         return nodes[-1], time.monotonic() - t0
 
     yield run
+    # A SIGINT still pending after main() fails would stop the whole pytest run.
+    for timer in timers:
+        timer.cancel()
     signal.signal(signal.SIGINT, saved[0])
     signal.signal(signal.SIGTERM, saved[1])
     if FakeExecutor.last is not None:
@@ -89,8 +94,8 @@ def run_main(monkeypatch):
 
 def test_executor_thread_ends_before_teardown(run_main):
     node, _ = run_main(lag=0.2)
-    assert [e for e, _ in node.events] == ['shutdown', 'destroy_node', 'try_shutdown']
-    assert not any(spinning for e, spinning in node.events if e != 'shutdown')
+    # The final status goes out before the wait.
+    assert node.events == [('shutdown', True), ('destroy_node', False), ('try_shutdown', False)]
     assert node.warnings == []
 
 
