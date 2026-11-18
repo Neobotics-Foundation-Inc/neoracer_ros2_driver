@@ -3,7 +3,9 @@
 from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
+import re
 import subprocess
+import time
 from types import SimpleNamespace
 
 from conftest import load_script
@@ -668,6 +670,17 @@ def test_tool_dispatch_and_completion():
     assert 'start save stop resume load recover status list info foxglove' in tool
     assert '    map <action>' in tool
     assert 'speed switch UP' in tool
+    # Completion lists the maps under the NeoRacer data root, without replaced/.
+    assert 'maps_dir="${RACECAR_MAP_ROOT:-${RACECAR_DATA_DIR:-$HOME/neoracer_data}/maps}"' in tool
+    assert "sed 's#/$##' | grep -vx replaced)" in tool
+
+
+def test_the_vendor_slam_commands_are_gone():
+    # Plan D1: racecar map replaces racecar mapping and racecar navigation.
+    tool = (Path(__file__).resolve().parent.parent / 'scripts' / 'racecar-tool.sh').read_text()
+    assert not re.search(r'^\s+(mapping|navigation)\)', tool, re.MULTILINE)
+    assert '_rc_autonomy_env' not in tool
+    assert 'osracer_slam' not in tool and 'osracer_navigation' not in tool
 
 
 def test_setup_links_the_maps_into_jupyter():
@@ -800,6 +813,24 @@ class TestSpeedSwitch:
             mc.start('hall', source='room', out=lambda _: None)
         assert systemd.actions() == []
 
+    def test_resume_mapping_reads_the_switch(self, mc, root, systemd, handset):
+        mc.write_mode_file({'AUTONOMY_MODE': 'mapping', 'AUTONOMY_MAP': 'room'})
+        handset.channels = list(SWITCH_DOWN)
+        systemd.states['neoracer-wallfollow.service'] = 'active'
+        with pytest.raises(mc.MapError, match='not UP'):
+            mc.resume(out=lambda _: None)
+        assert systemd.actions() == []
+        handset.channels = list(SWITCH_UP)
+        assert mc.resume(out=lambda _: None) == 0
+        assert systemd.actions() == ['stop', 'start']
+
+    def test_resume_localization_does_not_read_the_switch(self, mc, root, systemd, handset):
+        saved_map(root, 'room')
+        mc.write_mode_file({'AUTONOMY_MODE': 'localization', 'AUTONOMY_MAP': 'room'})
+        handset.channels = list(SWITCH_DOWN)
+        assert mc.resume(out=lambda _: None) == 0
+        assert handset.reads == 0
+
     def test_load_does_not_read_the_switch(self, mc, root, systemd, handset):
         saved_map(root, 'room')
         handset.channels = list(SWITCH_DOWN)
@@ -826,10 +857,12 @@ class FakeRosNode:
 
     def __init__(self) -> None:
         self.callbacks: dict[str, object] = {}
+        self.qos: dict[str, object] = {}
         self.destroyed: list[str] = []
 
     def create_subscription(self, msg_type, topic, callback, qos):
         self.callbacks[topic] = callback
+        self.qos[topic] = qos
         return topic
 
     def destroy_subscription(self, sub):
@@ -852,6 +885,44 @@ class TestReadRc:
         monkeypatch.setattr(rclpy, 'spin_once', spin_once)
         assert handset.real(timeout=5.0) == (SWITCH_UP, True)
         assert len(spins) == 1 and sorted(node.destroyed) == ['/rc/channels', '/rc/link']
+        # The controller publishes both best effort, so a reliable reader gets nothing.
+        from rclpy.qos import qos_profile_sensor_data
+
+        assert all(q is qos_profile_sensor_data for q in node.qos.values())
+
+    def test_waits_for_a_frame_with_a_switch_position(self, mc, handset, monkeypatch):
+        import rclpy
+
+        node = FakeRosNode()
+        # After a teleop restart: no-signal frames, then the reconnect frames
+        # (1023 everywhere, linked), then live frames.
+        frames = [(ALL_ZERO, False), (ALL_ZERO, True), (SWITCH_UP, True), (SWITCH_DOWN, True)]
+        spins: list[float] = []
+
+        def spin_once(n, timeout_sec=None):
+            channels, link = frames[min(len(spins), len(frames) - 1)]
+            spins.append(timeout_sec)
+            n.callbacks['/rc/channels'](SimpleNamespace(data=channels))
+            n.callbacks['/rc/link'](SimpleNamespace(data=link))
+
+        monkeypatch.setattr(mc, 'ros_node', lambda: nullcontext(node))
+        monkeypatch.setattr(rclpy, 'spin_once', spin_once)
+        assert handset.real(timeout=5.0) == (SWITCH_UP, True)
+        assert len(spins) == 3
+
+    def test_gives_the_latest_reading_at_the_timeout(self, mc, handset, monkeypatch):
+        import rclpy
+
+        node = FakeRosNode()
+
+        def spin_once(n, timeout_sec=None):
+            time.sleep(0.01)
+            n.callbacks['/rc/channels'](SimpleNamespace(data=ALL_ZERO))
+            n.callbacks['/rc/link'](SimpleNamespace(data=False))
+
+        monkeypatch.setattr(mc, 'ros_node', lambda: nullcontext(node))
+        monkeypatch.setattr(rclpy, 'spin_once', spin_once)
+        assert handset.real(timeout=0.2) == (ALL_ZERO, False)
 
     def test_nothing_arrives(self, mc, handset, monkeypatch):
         import rclpy

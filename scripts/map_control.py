@@ -428,7 +428,8 @@ def require_teleop() -> None:
 # switch is UP, so the driver's mapping cap does not apply to them. The only
 # limit there is the firmware's own: with the speed switch UP, the firmware
 # scales the stick speed to 15 percent, 0.9 m/s of its 6 m/s. Mapping
-# therefore starts only with the speed switch UP.
+# therefore starts or resumes only with the speed switch UP. The switch is
+# read once, before the run starts.
 #
 # The speed switch is radio Ch8, index 7 on /rc/channels. With the shipped
 # calibration (rc_min 240, rc_center 1023, rc_max 1807 in config/controller.yaml)
@@ -574,8 +575,11 @@ def read_rc(timeout: float = RC_WAIT_SEC) -> tuple[list[float] | None, bool | No
     Return the latest /rc/channels and /rc/link, each None if none arrived in time.
 
     The controller publishes both on every frame from the ESP32 (10 Hz) with
-    the sensor-data QoS, so the subscriptions use it too. The wait ends as
-    soon as both have arrived.
+    the sensor-data QoS, so the subscriptions use it too. The wait ends at the
+    first linked frame that shows a speed switch position. A frame with no
+    signal (after a teleop restart or with the handset off) and the frames
+    while the handset reconnects read 0.0, so the wait goes on through them.
+    At the timeout the latest reading is returned.
     """
     import rclpy
     from rclpy.qos import qos_profile_sensor_data
@@ -589,6 +593,15 @@ def read_rc(timeout: float = RC_WAIT_SEC) -> tuple[list[float] | None, bool | No
     def on_link(msg: Any) -> None:
         got['link'] = bool(msg.data)
 
+    def settled() -> bool:
+        channels = got['channels']
+        return (
+            got['link'] is True
+            and channels is not None
+            and len(channels) > SPEED_SWITCH_INDEX
+            and channels[SPEED_SWITCH_INDEX] != 0.0
+        )
+
     with ros_node() as node:
         subs = [
             node.create_subscription(
@@ -598,7 +611,7 @@ def read_rc(timeout: float = RC_WAIT_SEC) -> tuple[list[float] | None, bool | No
         ]
         end = time.monotonic() + timeout
         try:
-            while None in got.values() and time.monotonic() < end:
+            while not settled() and time.monotonic() < end:
                 rclpy.spin_once(node, timeout_sec=0.1)
         finally:
             for sub in subs:
@@ -747,6 +760,7 @@ def resume(out: Out = print, timeout: float = READY_TIMEOUT_SEC) -> int:
             name, localizer=values.get('AUTONOMY_LOCALIZER') or 'amcl', out=out, timeout=timeout
         )
     require_teleop()
+    require_speed_switch_up()  # NeoRacer only (plan D12)
     stop_driving_apps(out)
     _control('start')
     code = _wait_ready(values, out, timeout)

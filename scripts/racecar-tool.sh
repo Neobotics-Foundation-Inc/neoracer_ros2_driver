@@ -1005,7 +1005,9 @@ Commands:
                                                                 old one is kept)
                           save                save the map; waits for the files
                           stop                stop (a mapping run is autosaved)
-                          resume              start the last run again
+                          resume              start the last run again; a
+                                              mapping run needs the speed
+                                              switch UP
                           load NAME           localize on NAME; starts from the
                                               car's last pose on it
                                                 --pose x,y,yaw  start pose

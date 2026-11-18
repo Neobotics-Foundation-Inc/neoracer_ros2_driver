@@ -59,7 +59,10 @@ def parser() -> argparse.ArgumentParser:
 
     sub.add_parser('save', help='save the map being built; returns when the files are written')
     sub.add_parser('stop', help='stop mapping or localization (a mapping run is autosaved)')
-    sub.add_parser('resume', help='start the last mapping or localization run again')
+    sub.add_parser(
+        'resume',
+        help='start the last mapping or localization run again; mapping needs the speed switch UP',
+    )
 
     ld = sub.add_parser('load', help='localize on the saved map NAME')
     ld.add_argument('name')
