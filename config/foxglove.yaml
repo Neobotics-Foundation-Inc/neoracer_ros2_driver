@@ -36,7 +36,8 @@ foxglove_bridge:
     # Humble cannot load an empty list from a parameter file, and the bridge
     # ignores names that are not capabilities, so 'none' stands for the empty
     # list. A car profile override can set [clientPublish] again for the pose
-    # estimate tool.
+    # estimate tool. On these bridge releases that override lets a client
+    # publish on any topic again, not only /initialpose.
     capabilities: ['none']
     client_topic_whitelist: ['^/initialpose$']
     service_whitelist: ['^$']

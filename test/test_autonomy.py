@@ -438,7 +438,7 @@ def test_foxglove_layout_uses_only_bridged_topics():
     assert all(f'"{panel}"' in text for panel in panels)
 
 
-# foxglove_bridge 3.4.3's capability names (common.hpp in foxglove-sdk).
+# foxglove_bridge 3.4.3 defines these capability names in common.hpp (foxglove-sdk).
 BRIDGE_CAPABILITIES = {
     'clientPublish',
     'parameters',
@@ -448,6 +448,7 @@ BRIDGE_CAPABILITIES = {
     'assets',
     'time',
 }
+
 # The Foxglove layout reads these topics, which have no row in the topic
 # contract. Each entry names the driver sources that start their publishers on
 # the NeoRacer.

@@ -260,7 +260,7 @@ While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/t
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
-`foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the odometry, the AMCL particles and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. No client can publish through it. foxglove_bridge 3.x does not apply its client topic list, so `config/foxglove.yaml` turns client publishing off. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Per-car settings go in the car profile, `params/foxglove.yaml`.
+`foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the robot description, the odometry, the AMCL pose and particles, and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. No client can publish through it. foxglove_bridge 3.x does not apply its client topic list, so `config/foxglove.yaml` turns client publishing off. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Per-car settings go in the car profile, `params/foxglove.yaml`.
 
 To view a mapping run in Lichtblick:
 
