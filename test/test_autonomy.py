@@ -21,8 +21,8 @@ SLAM_CONFIGS = ('slam_mapping.yaml', 'slam_localization.yaml')
 # Keys upstream's Jazzy configs set that Humble's slam_toolbox (2.6.10) does not
 # declare; upstream's values match what 2.6.10 does without them.
 JAZZY_ONLY_KEYS = ('use_lifecycle_manager', 'restamp_tf', 'check_min_dist_and_heading_precisely')
-# The LakiBeam1's rated range at 70% reflectivity (Richbeam's specification), m.
-LAKIBEAM_MAX_RANGE = 25.0
+# The LakiBeam1's rated range at 10% reflectivity (Richbeam's specification), m.
+LAKIBEAM_MAX_RANGE = 15.0
 # The dev car, 2026-11-12: the LakiBeam's nearest return with the nose square
 # against a wall, m (test_frames.py).
 CAR_WALL_RANGE = 0.306
@@ -371,9 +371,11 @@ class TestLakiBeam:
         assert side / 1e3 <= min_range < CAR_WALL_RANGE
 
     @pytest.mark.parametrize('name', SLAM_CONFIGS)
-    def test_slam_toolbox_takes_every_fourth_scan(self, name):
-        # 29.7 Hz / 4 = 7.4 Hz, near upstream's 7.2 Hz RPLIDAR.
-        assert _slam_params(name)['throttle_scans'] == 4
+    def test_the_time_interval_sets_the_match_rate(self, name):
+        # 2.6.10 throttles after the transform wait, so throttle_scans saves no
+        # work; minimum_time_interval holds matching to 2 scans a second.
+        p = _slam_params(name)
+        assert p['throttle_scans'] == 1 and p['minimum_time_interval'] == 0.5
 
 
 class TestExtend:
