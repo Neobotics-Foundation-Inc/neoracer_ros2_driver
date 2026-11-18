@@ -1,8 +1,9 @@
 """
 Tests for the in-tree lab dashboards' install: setup_dashboards.sh and checkouts.py.
 
-setup_dashboards.sh runs against a temporary unit folder with sudo and
-systemctl stubbed. checkouts.py runs against a temporary dashboards folder
+setup_dashboards.sh runs against a temporary unit folder and a copy of the
+dashboards, with sudo and systemctl stubbed, so a test on a car never moves
+that car's own old checkouts. checkouts.py runs against a temporary dashboards folder
 holding checkouts built the way the old setup_services.sh cloned them, with
 the car profile and the data root in temporary folders.
 """
@@ -42,8 +43,17 @@ def co():
     return load_script('checkouts')
 
 
+def tree_copy(tmp_path):
+    """Copy the seven dashboard folders, so a test never moves a car's own checkouts."""
+    out = tmp_path / 'dashboards'
+    if not out.exists():
+        for name in TABLE:
+            shutil.copytree(DASH / name, out / name, ignore=shutil.ignore_patterns('__pycache__'))
+    return out
+
+
 def run_setup(tmp_path, units, systemctl='true', **env):
-    """Run setup_dashboards.sh with units in `units` and every car folder in tmp_path."""
+    """Run setup_dashboards.sh on a copy of the tree, with every car folder in tmp_path."""
     home = tmp_path / 'home'
     home.mkdir(exist_ok=True)
     full = {
@@ -54,6 +64,7 @@ def run_setup(tmp_path, units, systemctl='true', **env):
         'RACECAR_SYSTEMCTL': systemctl,
         'RACECAR_CONFIG_DIR': str(tmp_path / 'profile'),
         'RACECAR_DATA_DIR': str(tmp_path / 'data'),
+        'RACECAR_DASHBOARDS_DIR': str(tree_copy(tmp_path)),
         **env,
     }
     return subprocess.run(['bash', str(SETUP)], capture_output=True, text=True, env=full)
@@ -106,13 +117,35 @@ class TestSetupScript:
         units.mkdir()
         r = run_setup(tmp_path, units)
         assert r.returncode == 0, r.stdout + r.stderr
+        tree = tmp_path / 'dashboards'
         for name in TABLE:
             body = (units / f'neoracer-{name}.service').read_text()
-            assert f'WorkingDirectory={DASH / name}' in body
-            assert f'exec python3 {DASH / name}/{STEMS[name]}.py' in body
+            assert f'WorkingDirectory={tree / name}' in body
+            assert f'exec python3 {tree / name}/{STEMS[name]}.py' in body
             assert f'racecar service start {name}' in r.stdout
         again = run_setup(tmp_path, units)
         assert again.stdout.count('already up to date') == len(TABLE)
+
+    def test_an_old_checkout_moves_before_the_units_install(self, tmp_path):
+        units = tmp_path / 'units'
+        units.mkdir()
+        tree = tree_copy(tmp_path)
+        shipped = (tree / 'wallfollow' / 'wallfollow.yaml').read_text()
+        old_checkout(
+            tree,
+            'wallfollow_dashboard',
+            'wallfollow',
+            shipped,
+            shipped.replace('kp: 0.5 ', 'kp: 0.8 '),
+        )
+        r = run_setup(tmp_path, units)
+        assert r.returncode == 0, r.stdout + r.stderr
+        profile = yaml.safe_load(
+            (tmp_path / 'profile' / 'dashboards' / 'wallfollow.yaml').read_text()
+        )
+        assert profile['kp'] == 0.8
+        assert (tree / '.migrated' / 'wallfollow_dashboard').is_dir()
+        assert 'no old checkouts' in run_setup(tmp_path, units).stdout
 
     def test_a_changed_unit_is_restarted_only_if_it_runs(self, tmp_path):
         units = tmp_path / 'units'
@@ -214,6 +247,24 @@ class TestValues:
         shipped = {'kp': 0.5, 'kd': 4.0, 'camera_topic': '/camera/color', 'wall': {'speed': 0.0}}
         current = {'kp': 0.8, 'kd': 4.0, 'camera_topic': '/camera', 'wall': {'speed': 0.3}}
         assert co.tuned_values(current, shipped) == {('kp',): 0.8, ('wall', 'speed'): 0.3}
+
+    def test_a_spelled_out_mode_compares_as_its_number(self, co):
+        assert co.tuned_values({'mode': 'static'}, {'mode': 1}) == {('mode',): 0}
+        assert co.tuned_values({'mode': 'dynamic'}, {'mode': 1}) == {}
+
+    def test_changed_text_is_named(self, co):
+        shipped = {'camera_topic': '/camera/color', 'car': {'label': 'a'}, 'kp': 1}
+        current = {'camera_topic': '/camera', 'car': {'label': 'a'}, 'kp': 2}
+        assert co.changed_text(current, shipped) == ['camera_topic']
+
+    def test_a_small_number_reads_back_as_a_number(self, co):
+        out, _ = co.apply_values('sigma_min: 0.05\n', {('sigma_min',): 1e-05})
+        assert yaml.safe_load(out)['sigma_min'] == 1e-05
+
+    def test_keys_deeper_than_one_block_are_left_alone(self, co):
+        text = 'a:\n  b:\n    kp: 1\n  kp: 2\n'
+        out, missing = co.apply_values(text, {('a', 'kp'): 5})
+        assert out == 'a:\n  b:\n    kp: 1\n  kp: 5\n' and missing == []
 
     def test_apply_values_keeps_comments_and_blocks(self, co):
         text = (
@@ -361,12 +412,58 @@ class TestMigrate:
         assert (home / 'data' / 'camlabel' / 'classes.txt').read_text() == 'cone\n'
         assert (data / 'datasets' / 'camlabel' / 'classes.txt').read_text() == 'car\n'
 
-    def test_a_checkout_that_cannot_be_read_stays_in_place(self, co, dash, data):
+    def test_an_unreadable_yaml_is_reported_and_the_checkout_still_moves(self, co, dash, data):
         old_checkout(dash, 'pursuit_dashboard', 'pursuit', 'speed: [unclosed\n', history=False)
         lines, ok = co.migrate(dash, NOW, home=dash.parent)
-        assert not ok
-        assert (dash / 'pursuit_dashboard').is_dir()
-        assert any('left in place' in ln for ln in lines)
+        assert ok, lines
+        assert any('cannot be read' in ln for ln in lines)
+        moved = dash / '.migrated' / 'pursuit_dashboard' / 'pursuit.yaml'
+        assert moved.read_text() == 'speed: [unclosed\n'
+
+    def test_tuning_committed_on_the_car_still_counts(
+        self, co, dash, data, car_profile_dir, tmp_path
+    ):
+        # The old setup fast-forwarded the checkouts, so a car that committed
+        # its yaml kept a local commit on top of the upstream branch.
+        shipped = (dash / 'eps' / 'eps.yaml').read_text()
+        origin = tmp_path / 'origin'
+        origin.mkdir()
+        (origin / 'eps.yaml').write_text(shipped)
+        git(origin, 'init', '-q')
+        git(origin, 'add', '.')
+        git(origin, 'commit', '-q', '-m', 'upstream')
+        git(dash, 'clone', '-q', str(origin), 'eps_dashboard')
+        checkout = dash / 'eps_dashboard'
+        (checkout / 'eps.yaml').write_text(shipped.replace('  kp: 2.0', '  kp: 2.6'))
+        git(checkout, 'commit', '-q', '-am', 'tuned on the car')
+        lines, ok = co.migrate(dash, NOW, home=dash.parent)
+        assert ok, lines
+        saved = yaml.safe_load((car_profile_dir / 'dashboards' / 'eps.yaml').read_text())
+        assert saved['nominal']['kp'] == 2.6
+
+    def test_text_values_are_reported_not_copied(self, co, dash, data, car_profile_dir):
+        shipped = (dash / 'wallfollow' / 'wallfollow.yaml').read_text()
+        edited = shipped.replace('mode: 1 ', 'mode: static ') + 'camera_topic: /camera\n'
+        old_checkout(dash, 'wallfollow_dashboard', 'wallfollow', shipped, edited)
+        lines, _ = co.migrate(dash, NOW, home=dash.parent)
+        saved = yaml.safe_load((car_profile_dir / 'dashboards' / 'wallfollow.yaml').read_text())
+        assert saved['mode'] == 0
+        assert any('text values not copied' in ln and 'camera_topic' in ln for ln in lines)
+
+    def test_the_eps_ledger_stays_when_the_profile_kept_its_own_tuning(
+        self, co, dash, data, car_profile_dir
+    ):
+        checkout = old_checkout(
+            dash, 'eps_dashboard', 'eps', (dash / 'eps' / 'eps.yaml').read_text()
+        )
+        (checkout / 'ledger.jsonl').write_text('{"ep": 1}\n')
+        profile = car_profile_dir / 'dashboards' / 'eps.yaml'
+        profile.parent.mkdir(parents=True)
+        profile.write_text('nominal:\n  kp: 9.0\n')
+        lines, _ = co.migrate(dash, NOW, home=dash.parent)
+        assert not (data / 'dashboards' / 'eps' / 'ledger.jsonl').exists()
+        assert (dash / '.migrated' / 'eps_dashboard' / 'ledger.jsonl').is_file()
+        assert any('stays with the old checkout' in ln for ln in lines)
 
     def test_a_second_set_aside_does_not_overwrite_the_first(self, co, dash, data):
         (dash / '.migrated' / 'eps_dashboard').mkdir(parents=True)

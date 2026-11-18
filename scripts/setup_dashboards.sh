@@ -27,12 +27,14 @@
 #
 # Set RACECAR_DASHBOARDS=0 to skip entirely.
 #
-# Test hooks: RACECAR_SYSTEMD_DIR, RACECAR_SYSTEMCTL, RACECAR_SUDO.
+# Test hooks: RACECAR_SYSTEMD_DIR, RACECAR_SYSTEMCTL, RACECAR_SUDO, and
+# RACECAR_DASHBOARDS_DIR (a copy of scripts/dashboards/, so a test never moves
+# a car's own checkouts).
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_DIR="$(dirname "$SCRIPT_DIR")"
-DASH_DIR="$SCRIPT_DIR/dashboards"
+DASH_DIR="${RACECAR_DASHBOARDS_DIR:-$SCRIPT_DIR/dashboards}"
 SYSTEMD_DIR="${RACECAR_SYSTEMD_DIR:-/etc/systemd/system}"
 SUDO="${RACECAR_SUDO-sudo}"
 SYSTEMCTL="$SUDO ${RACECAR_SYSTEMCTL:-systemctl}"
@@ -124,7 +126,7 @@ echo "==> Old dashboard checkouts"
 # The driver's Python package is imported from this tree, so the move works
 # before the workspace is built. It runs as the car user: the car profile and
 # the data root are theirs.
-if ! PYTHONPATH="$PKG_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$DASH_DIR/checkouts.py" "$DASH_DIR"; then
+if ! PYTHONPATH="$PKG_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$SCRIPT_DIR/dashboards/checkouts.py" "$DASH_DIR"; then
     failed+=("old checkouts")
 fi
 

@@ -134,19 +134,24 @@ Before it installs the units, `setup_dashboards.sh` runs
 1. Copies the values the car tuned into the car profile's
    `dashboards/<name>.yaml`, written over the new shipped defaults so new
    keys and comments come along. A tuned value is a number that differs from
-   the checkout's committed yaml (`git show HEAD:<name>.yaml`), or from the
-   new defaults when the checkout has no git history. Text values such as
-   topics are not copied. A profile file that already exists is left alone,
-   and the output says so.
+   the yaml the checkout last took from its repository: the merge base with
+   its upstream branch, so a commit made on the car still counts as tuning,
+   or the new defaults when the checkout has no git history. A spelled-out
+   wallfollow `mode` counts as its number. Text values such as topics are
+   named in the output, not copied. A profile file that already exists is
+   left alone, and the output says so; so is a yaml that cannot be read.
 2. Moves `logs/*.csv`, and eps's `ledger*.jsonl` and `.init_set`, to
    `dashboards/<name>/` under the data root, never over a file already there.
+   eps's ledger stays with the checkout when the profile already had its
+   own eps.yaml, because the ledger's gains are relative to the old
+   starting point.
 3. Moves the checkout to `scripts/dashboards/.migrated/`.
 
 It also moves camlabel's dataset from `~/data/camlabel/`, where the old
 camlabel kept it and where the installer's erase list reaches, to
 `datasets/camlabel/` under the data root, but only while the data root holds
 no dataset: two datasets are never merged, because their image numbers would
-collide. Nothing is deleted, a checkout that cannot be read is left in place
+collide. Nothing is deleted, a checkout that cannot be moved is left in place
 and reported, and a second run finds nothing to move. The old units have the
 same `neoracer-<id>` names, so the new units replace them and keep their
 enable state.

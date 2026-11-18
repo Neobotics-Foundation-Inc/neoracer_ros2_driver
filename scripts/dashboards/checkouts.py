@@ -11,10 +11,14 @@ units. For every old checkout it:
 
 - copies the values the car tuned into the car profile's
   dashboards/<name>.yaml, on top of the in-tree defaults. A tuned value is a
-  number that differs from the checkout's committed yaml. A profile file that
-  already exists is left as it is.
+  number that differs from the yaml the checkout last took from its
+  repository (the merge base with its upstream branch, so a commit made on
+  the car still counts as tuning). A profile file that already exists is left
+  as it is, and text values such as topics are reported, not copied.
 - moves the checkout's logs (logs/*.csv), and eps's ledger, to
   dashboards/<name>/ under the data root, never over a file already there.
+  eps's ledger stays with the checkout when its tuning was not copied, since
+  the ledger's gains are relative to that tuning.
 - moves the checkout to scripts/dashboards/.migrated/.
 
 It also moves camlabel's dataset from ~/data/camlabel to datasets/camlabel
@@ -55,23 +59,33 @@ DASHBOARDS = {
 EPS_FILES = ('ledger.jsonl', 'ledger_*.jsonl', '.init_set')
 
 
+# wallfollow's mode may be spelled out in an older yaml; its loader reads
+# 'dynamic' as 1 and anything else as 0.
+MODE_WORDS = {'static': 0, 'dynamic': 1}
+
+
 def _number(v: Any) -> bool:
     return isinstance(v, (int, float))
 
 
-def flat_numbers(data: Any) -> dict[tuple[str, ...], Any]:
-    """Return the numbers and booleans of a yaml mapping, one level of blocks deep."""
+def flatten(data: Any) -> dict[tuple[str, ...], Any]:
+    """Return the scalars of a yaml mapping by key, one level of blocks deep."""
     out: dict[tuple[str, ...], Any] = {}
     if not isinstance(data, dict):
         return out
     for k, v in data.items():
         if isinstance(v, dict):
             for k2, v2 in v.items():
-                if _number(v2):
+                if not isinstance(v2, (dict, list)):
                     out[(str(k), str(k2))] = v2
-        elif _number(v):
-            out[(str(k),)] = v
+        elif not isinstance(v, list):
+            out[(str(k),)] = MODE_WORDS.get(v, v) if k == 'mode' else v
     return out
+
+
+def flat_numbers(data: Any) -> dict[tuple[str, ...], Any]:
+    """Return the numbers and booleans of a yaml mapping, one level of blocks deep."""
+    return {k: v for k, v in flatten(data).items() if _number(v)}
 
 
 def tuned_values(current: Any, shipped: Any) -> dict[tuple[str, ...], Any]:
@@ -80,8 +94,19 @@ def tuned_values(current: Any, shipped: Any) -> dict[tuple[str, ...], Any]:
     return {k: v for k, v in flat_numbers(current).items() if base.get(k) != v}
 
 
+def changed_text(current: Any, shipped: Any) -> list[str]:
+    """Return the dotted names of the text values in `current` that differ from `shipped`."""
+    base = flatten(shipped)
+    return sorted(
+        '.'.join(k)
+        for k, v in flatten(current).items()
+        if not _number(v) and v is not None and base.get(k) != v
+    )
+
+
 def _scalar(v: Any) -> str:
-    return 'true' if v is True else 'false' if v is False else str(v)
+    """Return a yaml scalar that reads back as the same number or boolean."""
+    return yaml.safe_dump(v, default_flow_style=True).splitlines()[0]
 
 
 def apply_values(text: str, values: dict[tuple[str, ...], Any]) -> tuple[str, list[str]]:
@@ -94,6 +119,7 @@ def apply_values(text: str, values: dict[tuple[str, ...], Any]) -> tuple[str, li
     """
     scalar = re.compile(r'^([ \t]*)([A-Za-z_]\w*):([ \t]*)([^#\s][^#]*?)?([ \t]*#.*)?$')
     out, block, done = [], None, set()
+    child = None  # the indent of the current block's own keys
     for raw in text.splitlines(keepends=True):
         line = raw.rstrip('\n')
         m = scalar.match(line)
@@ -103,7 +129,13 @@ def apply_values(text: str, values: dict[tuple[str, ...], Any]) -> tuple[str, li
         indent, key, gap, value, tail = m.groups()
         if not indent:
             block = key if value is None else None
-        path = (block, key) if indent and block else (key,)
+            child = None
+            path: tuple[str, ...] | None = (key,)
+        elif block is not None and child in (None, indent):
+            child = indent
+            path = (block, key)
+        else:
+            path = None  # deeper than one level of blocks
         if value is not None and path in values:
             out.append(f'{indent}{key}:{gap}{_scalar(values[path])}{tail or ""}\n')
             done.add(path)
@@ -113,11 +145,10 @@ def apply_values(text: str, values: dict[tuple[str, ...], Any]) -> tuple[str, li
     return ''.join(out), missing
 
 
-def _committed_yaml(checkout: Path, name: str) -> str | None:
-    """Return the checkout's committed <name>.yaml, or None without git history."""
+def _git(checkout: Path, *args: str) -> str | None:
     try:
         res = subprocess.run(
-            ['git', '-C', str(checkout), 'show', f'HEAD:{name}.yaml'],
+            ['git', '-C', str(checkout), *args],
             capture_output=True,
             text=True,
             timeout=10,
@@ -126,6 +157,18 @@ def _committed_yaml(checkout: Path, name: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return res.stdout if res.returncode == 0 else None
+
+
+def _committed_yaml(checkout: Path, name: str) -> str | None:
+    """
+    Return the <name>.yaml the checkout last took from its repository.
+
+    That is the yaml at the merge base with the upstream branch, so tuning
+    the car committed in the checkout still reads as tuning; HEAD when there
+    is no upstream; None without git history.
+    """
+    base = (_git(checkout, 'merge-base', 'HEAD', '@{u}') or '').strip() or 'HEAD'
+    return _git(checkout, 'show', f'{base}:{name}.yaml')
 
 
 def migrate_tuning(dash_dir: Path, ident: str, checkout: Path, now: datetime) -> list[str]:
@@ -140,15 +183,23 @@ def migrate_tuning(dash_dir: Path, ident: str, checkout: Path, now: datetime) ->
     defaults = (dash_dir / ident / f'{name}.yaml').read_text()
     committed = _committed_yaml(checkout, name)
     baseline = committed if committed is not None else defaults
-    tuned = tuned_values(yaml.safe_load(old.read_text()), yaml.safe_load(baseline))
+    try:
+        current, shipped = yaml.safe_load(old.read_text()), yaml.safe_load(baseline)
+    except yaml.YAMLError as e:
+        return [f'{ident}: {repo}/{name}.yaml cannot be read, so its tuning was not copied: {e}']
+    lines = []
+    if committed is None:
+        lines.append(f'{ident}: {repo} has no git history; compared with the shipped defaults')
+    text_changes = changed_text(current, shipped)
+    if text_changes:
+        lines.append(f'{ident}: text values not copied, check them: {", ".join(text_changes)}')
+    tuned = tuned_values(current, shipped)
     if not tuned:
-        return [f'{ident}: no tuned values in {repo}']
+        return [*lines, f'{ident}: no tuned values in {repo}']
     text, missing = apply_values(defaults, tuned)
     car_profile.write_text(profile, text, now)
     kept = sorted('.'.join(k) for k in tuned if '.'.join(k) not in missing)
-    lines = [f'{ident}: tuned values {", ".join(kept)} -> {profile}']
-    if committed is None:
-        lines.append(f'{ident}: {repo} has no git history; compared with the shipped defaults')
+    lines.insert(0, f'{ident}: tuned values {", ".join(kept)} -> {profile}')
     if missing:
         lines.append(f'{ident}: not in the new {name}.yaml, so not copied: {", ".join(missing)}')
     return lines
@@ -169,14 +220,22 @@ def _move_files(files: list[Path], dest: Path, ident: str) -> list[str]:
     return lines
 
 
-def migrate_logs(ident: str, checkout: Path) -> list[str]:
-    """Move an old checkout's logs, and eps's ledger, under the data root."""
+def migrate_logs(ident: str, checkout: Path, with_ledger: bool = True) -> list[str]:
+    """Move an old checkout's logs, and eps's ledger when asked, under the data root."""
     _, name = DASHBOARDS[ident]
     files = sorted((checkout / 'logs').glob('*.csv'))
-    if ident == 'eps':
-        files += sorted(f for pattern in EPS_FILES for f in checkout.glob(pattern))
+    ledger = sorted(f for pattern in EPS_FILES for f in checkout.glob(pattern))
+    lines = []
+    if ident == 'eps' and ledger:
+        if with_ledger:
+            files += ledger
+        else:
+            lines.append(
+                'eps: the car profile already had eps.yaml, so the ledger, whose gains are '
+                'relative to the old starting point, stays with the old checkout'
+            )
     dest = data_root.current()[0] / 'dashboards' / name
-    return _move_files(files, dest, ident) if files else []
+    return (_move_files(files, dest, ident) if files else []) + lines
 
 
 def _has_files(path: Path) -> bool:
@@ -229,8 +288,9 @@ def migrate(
         if not checkout.is_dir():
             continue
         try:
+            had_profile = car_profile.dashboard_settings(DASHBOARDS[ident][1]).exists()
             lines += migrate_tuning(dash_dir, ident, checkout, now)
-            lines += migrate_logs(ident, checkout)
+            lines += migrate_logs(ident, checkout, with_ledger=not had_profile)
             lines.append(set_aside(dash_dir, checkout, now))
         except Exception as e:
             # One checkout that cannot be moved never stops the others, or
