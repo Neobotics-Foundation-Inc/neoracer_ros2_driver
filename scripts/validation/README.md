@@ -118,5 +118,5 @@ pose shows as a second, shifted copy of the walls in red.
 A session uses about 120 MB for a 5 minute run, most of it the LakiBeam's
 `/scan` at about 0.34 MB/s, plus about 7 MB per timed save (upstream's
 figure). The session script warns below 10 GB free or above 80% used, lists the
-largest folders under `~/logs`, the sessions, and the maps, and refuses to
-start below 3 GB.
+largest folders under `~/logs`, the sessions, and the maps, and does not
+start with less than 3 GB free.

@@ -260,6 +260,8 @@ While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/t
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
+`scripts/validation/` holds test tools for this launch. `slam_session.py` runs a whole mapping or localization session from one terminal and writes a report under `~/neoracer_data/slam_eval/sessions/`, and its `replay` runs a session's bag through slam_toolbox or AMCL with changed settings, for tuning the SLAM and AMCL configs offline. See `scripts/validation/README.md`.
+
 ## Web dashboard
 
 With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
