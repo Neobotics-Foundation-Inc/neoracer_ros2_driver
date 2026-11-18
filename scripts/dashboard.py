@@ -776,7 +776,9 @@ def apply_features(
     Restart teleop with `values`; a running autonomy run is stopped first and resumed after.
 
     Stopping it first lets a localization run start again from the car's last
-    pose rather than from where that run began.
+    pose rather than from where that run began. The run stays stopped when a
+    driving app started meanwhile: the apps page turns on what an app needs
+    while the app opens, and `racecar map resume` would close that app again.
     """
     features.write(values)
     resume = unit_states([AUTONOMY_UNIT], run)[AUTONOMY_UNIT] in ('active', 'activating')
@@ -790,6 +792,11 @@ def apply_features(
     message = describe(values)
     if resume:
         sleep(TELEOP_SETTLE_SEC)
+        driving = [a for a in APPS if a['exclusive']]
+        states = unit_states([a['unit'] for a in driving], run)
+        opened = [a['name'] for a in driving if states[a['unit']] in ('active', 'activating')]
+        if opened:
+            return f'{message} Autonomy stays stopped, because {opened[0]} is open.'
         code, line = map_tool('resume', run=run)
         message += f' {line}' if code == 0 else f' Autonomy did not resume: {line}'
     return message
@@ -969,9 +976,13 @@ def _monitor_loop() -> None:
 
             rates: dict[str, dict[str, Any]] = {}
             warming = _sampler is not None and _sampler.warming()
+            # A topic whose node was launched off reads Off, as its card does.
+            off = {c['topic'] for c in node_cards.values() if c['status'] == 'off'}
             for topic in RATE_TOPICS:
                 hz = _measure_hz(topic)
-                if warming and hz is None:
+                if topic in off and hz is None:
+                    rates[topic] = {'hz': None, 'stale': False, 'off': True}
+                elif warming and hz is None:
                     rates[topic] = {'hz': None, 'stale': False, 'warming': True}
                 else:
                     rates[topic] = {'hz': hz, 'stale': hz is None or hz < 0.5}

@@ -274,7 +274,7 @@ Autonomy commands enter through the same mux as other `/drive` commands, so the 
 
 With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
-- **Apps**: JupyterLab and the map viewer, then the seven lab dashboards. A tile opens its app in a new tab and starts its service when it is stopped. Six of the lab dashboards publish `/drive`, so opening one of them stops the other five. Clear apps stops every lab dashboard.
+- **Apps**: JupyterLab and the map viewer, then the seven lab dashboards. A tile opens its app in a new tab and starts its service when it is stopped. Six of the lab dashboards publish `/drive`, so opening one of them stops the other five, and it also stops a mapping or localization run after the page asks (a mapping run is saved first). Clear apps stops every lab dashboard.
 - **Features**: the camera, detections and autonomy. Turning the camera or detections on or off restarts teleop. Camera Label and Line Follow need the camera, Pure Pursuit and Smart Follow need detections, and the page offers to turn them on.
 - **System status**: the battery, each node's state and topic rate, the junction temperature, throttling, the data root, the autonomy service, and the tail of `~/logs/latest/watchdog.log`.
 - **System Health** (`/health`): the camera, lidar, IMU and encoder panels, the Jetson's load, temperatures and power, and the battery history.

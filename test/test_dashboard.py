@@ -710,6 +710,18 @@ class TestApplyFeatures:
         assert run.tool == ['stop', 'resume'] and restart > 0
         assert message.endswith('resume done')
 
+    def test_a_driving_app_opened_meanwhile_keeps_autonomy_stopped(self, dashboard, tool):
+        # The apps page turns detections on while Pure Pursuit opens; a resume
+        # would stop Pure Pursuit again (racecar map resume stops driving apps).
+        run = tool({TELEOP: 'active', AUTONOMY: 'active'})
+
+        def sleep(_sec):
+            run.states['neoracer-pursuit'] = 'active'
+
+        message = dashboard.apply_features({'camera': True, 'detections': True}, run, sleep=sleep)
+        assert run.tool == ['stop']
+        assert message.endswith('Autonomy stays stopped, because Pure Pursuit is open.')
+
     def test_a_failed_stop_leaves_teleop_alone(self, dashboard, tool):
         run = tool({TELEOP: 'active', AUTONOMY: 'active'}, codes={'stop': 1})
         message = dashboard.apply_features(dashboard.features.DEFAULTS, run)
@@ -721,6 +733,10 @@ class TestApplyFeatures:
         run.fail, run.stderr = 'restart', NO_SUDOERS
         message = dashboard.apply_features(dashboard.features.DEFAULTS, run)
         assert message == f'No permission to restart {TELEOP}. Run: racecar service install'
+
+    def test_the_map_tool_is_neoracer_map(self, dashboard):
+        # scripts/neoracer_map.py comes with F25 (Names and specs).
+        assert Path(dashboard.MAP_TOOL[-1]).name == 'neoracer_map.py'
 
     def test_autonomy_actions(self, dashboard, tool):
         run = tool({AUTONOMY: 'active'})
@@ -745,6 +761,12 @@ class TestFeatureEndpoint:
             False,
             'Another change is running.',
         )
+
+    def test_a_topic_launched_off_reads_off_in_the_rates(self, dashboard):
+        html = dashboard._load_dashboard_html()
+        assert "if (r.off) return '<span class=\"nr-badge off\">Off</span>';" in html
+        source = Path(dashboard.__file__).read_text()
+        assert "rates[topic] = {'hz': None, 'stale': False, 'off': True}" in source
 
     def test_page_has_features(self, dashboard):
         html = dashboard._load_dashboard_html()
