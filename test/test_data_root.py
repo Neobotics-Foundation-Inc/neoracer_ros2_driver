@@ -71,7 +71,7 @@ def test_boot_service_writes_both_files(monkeypatch, tmp_path, capsys):
 
 
 def test_units_and_shells_get_the_variable():
-    for unit in ('teleop', 'dashboard', 'jupyter', 'watchdog', 'autonomy'):
+    for unit in ('teleop', 'dashboard', 'jupyter', 'watchdog', 'mapview', 'autonomy'):
         text = (SCRIPTS / f'neoracer-{unit}.service').read_text()
         assert 'EnvironmentFile=-/run/racecar/environment' in text, unit
         assert 'After=neoracer-data.service' in text, unit
