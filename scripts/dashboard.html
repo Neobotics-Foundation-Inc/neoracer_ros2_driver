@@ -138,6 +138,10 @@
 'use strict';
 const POLL_MS = 3000;
 const MISSES = 2;                     // missed polls before the page says it lost the car
+// Every car ships with this host name, so the title shows the name only once
+// a car is renamed and the name tells it apart.
+const DEFAULT_HOST = 'neoracer';
+const shownHost = (name) => (name && name.toLowerCase() !== DEFAULT_HOST ? name : '');
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const icon = (name) => `<svg class="nr-icon" aria-hidden="true"><use href="/ui/icons.svg#${esc(name)}"/></svg>`;
@@ -407,7 +411,7 @@ function update(refresh) {
     .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then((data) => {
       apps = data.apps || [];
-      $('host').textContent = data.host || '';
+      $('host').textContent = shownHost(data.host);
       renderApps();
       renderFeatures(data.features);
       renderBasic(data);

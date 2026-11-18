@@ -787,6 +787,11 @@ class TestFeatureEndpoint:
         assert title in html
         assert 'missed two requests in a row' in html
 
+    def test_the_title_hides_the_default_host_name(self, dashboard):
+        html = dashboard._load_dashboard_html()
+        assert "const DEFAULT_HOST = 'neoracer';" in html
+        assert "$('host').textContent = shownHost(data.host);" in html
+
     def test_the_badge_names_the_parts_behind_it(self, dashboard):
         html = dashboard._load_dashboard_html()
         assert 'Every part under System status is running or turned off.' in html
