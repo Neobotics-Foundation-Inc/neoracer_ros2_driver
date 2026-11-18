@@ -381,7 +381,7 @@ async function post(url, body) {
   } catch (err) { return { ok: false, message: String(err) }; }
 }
 function report(r) { flash(r.message || (r.ok ? 'done' : 'failed'), r.ok ? 'info' : 'bad'); }
-// A flash message shows for FLASH_MS over the standing banner (throttled, hot, mapping cap).
+// A flash message shows for FLASH_MS over the standing banner (over-current, hot, mapping cap).
 const FLASH_MS = 4000;
 let flashMsg = null;
 function flash(text, kind) { flashMsg = { text, kind, until: Date.now() + FLASH_MS }; showBanner(); }
@@ -390,8 +390,9 @@ function showBanner() {
   let msg = null;
   if (flashMsg && Date.now() < flashMsg.until) msg = flashMsg;
   else if (lostContact) msg = { text: 'Lost contact with the car.', kind: 'bad' };
-  else if (sys.throttled_now && sys.throttled_now.length) msg = { text: `Pi throttled now: ${sys.throttled_now.join(', ')}. This run is not valid.`, kind: 'bad' };
-  else if (sys.temp_c != null && sys.temp_c >= 78) msg = { text: `Pi is hot (${sys.temp_c.toFixed(0)} C).`, kind: 'warn' };
+  // The Jetson's over-current counters rose during this run (the supply sagged under load).
+  else if (sys.throttled_this_run && sys.throttled_this_run.length) msg = { text: 'Over-current throttling during this run. Check the battery and its connector. This run is not valid.', kind: 'bad' };
+  else if (sys.temp_c != null && sys.hot_c != null && sys.temp_c >= sys.hot_c) msg = { text: `Jetson is hot (${sys.temp_c.toFixed(0)} C).`, kind: 'warn' };
   else if (s.mode === 'mapping') msg = { text: 'Speed limited for mapping. Turn gently to prevent map blur.', kind: 'warn' };
   b.textContent = msg ? msg.text : '';
   b.className = msg ? `show ${msg.kind}` : '';

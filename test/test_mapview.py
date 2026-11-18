@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 from conftest import load_script
 import cv2
@@ -26,6 +27,11 @@ def mv():
     load_script('map_control')
     load_script('webui')
     return load_script('mapview')
+
+
+@pytest.fixture
+def page(mv):
+    return (Path(mv.__file__).parent / 'mapview.html').read_text()
 
 
 def write_map(folder: Path, name: str, pixels: np.ndarray, origin=(-1.0, -2.0, 0.0)) -> Path:
@@ -142,6 +148,77 @@ def test_cpu_meter_reads_busy_share(mv, monkeypatch):
     samples = iter([(100, 400), (160, 500)])  # (busy, total) jiffies
     monkeypatch.setattr(mv.sysinfo, 'read_cpu_times', lambda: next(samples))
     assert mv.CpuMeter().read() == pytest.approx(60.0)
+
+
+class TestJetsonReadings:
+    """The host line from the Jetson readers in scripts/sysinfo.py."""
+
+    @staticmethod
+    def counters(hwmon: Path, **counts: int) -> None:
+        # The SoC's over-current event counters, as the Orin's hwmon shows them.
+        hwmon.mkdir(exist_ok=True)
+        (hwmon / 'name').write_text('soctherm_oc\n')
+        for name, count in counts.items():
+            (hwmon / f'{name}_event_cnt').write_text(f'{count}\n')
+
+    @pytest.fixture
+    def sys_dir(self, mv, tmp_path, monkeypatch):
+        real = mv.sysinfo.read_throttled
+        monkeypatch.setattr(mv.sysinfo, 'read_throttled', lambda: real(tmp_path))
+        monkeypatch.setattr(mv.sysinfo, 'read_soc_temp', lambda: 62.5)
+        return tmp_path
+
+    def test_reports_over_current_during_the_run_only(self, mv, sys_dir):
+        hwmon = sys_dir / 'hwmon3'
+        self.counters(hwmon, oc1=2, oc2=0)
+        host = mv.HostReadings()
+        first = host.read()
+        # oc1 fired before the run: the flags show it, the run does not.
+        assert first['throttled'] == '0x1' and first['throttled_this_run'] == []
+        assert first['temp_c'] == 62.5 and first['hot_c'] == mv.HOT_C
+        self.counters(hwmon, oc1=3)
+        during = host.read()['throttled_this_run']
+        assert len(during) == 1 and 'oc1' in during[0]
+        host.restart()
+        assert host.read()['throttled_this_run'] == []
+        self.counters(hwmon, oc2=1)
+        during = host.read()['throttled_this_run']
+        assert len(during) == 1 and 'oc2' in during[0]
+
+    def test_no_counters_reads_none(self, mv, sys_dir):
+        reading = mv.HostReadings().read()
+        assert reading['throttled'] is None and reading['throttled_this_run'] == []
+
+    def test_hot_is_the_health_page_limit(self, mv):
+        assert mv.HOT_C == load_script('diagnose').SOC_FAIL_C
+        health = (ROOT / 'scripts' / 'health.html').read_text()
+        found = re.search(r'TEMP_HOT_C = (\d+)', health)
+        assert found is not None and float(found.group(1)) == mv.HOT_C
+
+    def test_the_page_warns_from_the_jetson_readings(self, page):
+        assert 'sys.temp_c >= sys.hot_c' in page and 'sys.throttled_this_run' in page
+        assert 'Pi ' not in page and '>= 78' not in page
+
+    def test_a_new_session_restarts_the_trail_and_the_run(self, mv):
+        restarts = []
+        viewer = SimpleNamespace(
+            _lock=threading.Lock(),
+            status={},
+            _session='',
+            trail=mv.Trail(),
+            _host=SimpleNamespace(restart=lambda: restarts.append(1)),
+        )
+
+        def status(session):
+            values = [SimpleNamespace(key='session', value=session)]
+            return SimpleNamespace(values=values, level=0, message='')
+
+        mv.Viewer._on_status(viewer, status('a'))
+        trail_id = viewer.trail.id
+        mv.Viewer._on_status(viewer, status('a'))
+        assert restarts == [1] and viewer.trail.id == trail_id
+        mv.Viewer._on_status(viewer, status('b'))
+        assert restarts == [1, 1] and viewer.trail.id == trail_id + 1
 
 
 class TestActions:
@@ -323,10 +400,6 @@ class TestHttp:
 
 class TestNeoRacerPage:
     """The page in the NeoRacer look, and the NeoRacer's outline on the map."""
-
-    @pytest.fixture
-    def page(self, mv):
-        return (Path(mv.__file__).parent / 'mapview.html').read_text()
 
     def test_has_no_upstream_brand(self, page):
         lower = page.lower()

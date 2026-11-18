@@ -60,6 +60,9 @@ FIND_TIMEOUT_SEC = 5.0
 # Same spread as the start pose of `racecar map load` (config/autonomy.yaml,
 # start_spread_xy_m and start_spread_yaw_deg).
 SET_POSE_SD = (0.25, 10.0)
+# The junction temperature the System Health page and `racecar status` call hot
+# (scripts/diagnose.py, SOC_FAIL_C). The Orin's own throttling starts near 95 C.
+HOT_C = 85.0
 ACTIONS = ('start', 'save', 'stop', 'load', 'recover')
 
 
@@ -305,9 +308,42 @@ class CpuMeter:
     def read(self) -> float | None:
         now = sysinfo.read_cpu_times()  # (busy, total)
         last, self._last = self._last, now
-        if now is None or last is None or now[1] <= last[1]:
-            return None
-        return round(100.0 * (now[0] - last[0]) / (now[1] - last[1]), 1)
+        return sysinfo.cpu_load_pct(last, now)
+
+
+class HostReadings:
+    """
+    The page's host line: CPU busy share, junction temperature, over-current.
+
+    The Jetson's over-current counters only grow until reboot, so a count
+    shows past events too. The page reports the events of this run only: the
+    counters that rose after the first reading since restart(). The viewer
+    restarts it when a browser connects and when a new autonomy session
+    begins.
+    """
+
+    def __init__(self) -> None:
+        self._cpu = CpuMeter()
+        self._before: list[str] | None = None
+
+    def restart(self) -> None:
+        """Take the next reading as the start of a run."""
+        self._before = None
+
+    def read(self) -> dict[str, Any]:
+        flags, names = sysinfo.read_throttled()
+        before = self._before
+        if before is None:
+            before = self._before = names
+        # Each name carries its counter's event count, so a name that is not
+        # in the first reading is an event since then.
+        return {
+            'throttled': None if flags is None else f'0x{flags:x}',
+            'throttled_this_run': [n for n in names if n not in before],
+            'temp_c': sysinfo.read_soc_temp(),
+            'hot_c': HOT_C,
+            'cpu': self._cpu.read(),
+        }
 
 
 # -- ROS --
@@ -342,7 +378,7 @@ class Viewer:
         self.map_gz = b''
         self.map_version = 0
         self.sys: dict[str, Any] = {}
-        self._cpu = CpuMeter()
+        self._host = HostReadings()
         self._laser = laser_mount(mc.current_frames())
         threading.Thread(target=self._watch, daemon=True).start()
 
@@ -385,6 +421,7 @@ class Viewer:
         ]
         self._publisher = n.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
         self._client = n.create_client(Trigger, '/autonomy/global_localization')
+        self._host.restart()
         self.active = True
 
     def _close(self) -> None:
@@ -408,13 +445,7 @@ class Viewer:
                     self._close()
                 active = self.active
             if active:
-                flags, names = sysinfo.read_throttled()
-                info = {
-                    'throttled': None if flags is None else f'0x{flags:x}',
-                    'throttled_now': [n for n in names if 'occurred' not in n],
-                    'temp_c': sysinfo.read_soc_temp(),
-                    'cpu': self._cpu.read(),
-                }
+                info = self._host.read()
                 with self._lock:
                     self.sys = info
 
@@ -426,6 +457,7 @@ class Viewer:
             if session != self._session:
                 self._session = session
                 self.trail.restart()
+                self._host.restart()
 
     def _on_pose(self, msg: Any) -> None:
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
