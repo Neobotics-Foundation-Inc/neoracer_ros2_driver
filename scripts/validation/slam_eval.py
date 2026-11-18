@@ -6,13 +6,17 @@ slam_session.py in this folder runs a whole test session with these; the
 subcommands below stay for single measurements.
 
     slam_eval.py save NAME                 # write the mapping run to <map root>/NAME/
-    slam_eval.py load [--seconds N]        # CPU per node, temperature, throttling; Ctrl-C ends
+    slam_eval.py load [--seconds N]        # CPU per node, the Jetson's load; Ctrl-C ends
     slam_eval.py mark LABEL [--tag T]      # pose in the map frame with the car stopped on a mark
     slam_eval.py report [--taped FILE]     # mark repeatability and distances against a tape
     slam_eval.py quality MAP               # occupied, free, and unknown cells of a saved map
 
 Records go to slam_eval/ under the data root: one CSV per `load` run and marks.csv for
 `mark`. A taped file has one line per pair of marks, `A B meters`.
+
+`load` reads the Jetson through sysinfo.py: CPU, GPU, the junction
+temperature, the board's power, memory, swap, and the SoC's over-current
+throttling. A run with swap in use or throttling is to be discarded.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from datetime import datetime
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -41,17 +46,19 @@ import sysinfo  # noqa: E402
 EVAL_DIR = data_root.current()[0] / 'slam_eval'
 MARKS_FILE = 'marks.csv'
 # Label -> substring of /proc/<pid>/cmdline. Python nodes run as python3, so
-# match the executable path, not the process name.
+# match the executable path, not the process name. The driver installs its
+# nodes under lib/neoracer_ros2_driver/; the controller is the ESP32 bridge,
+# which also publishes /imu/fused.
 PROCESSES = {
-    'pit_node': '/pit_node',
+    'controller': 'lib/neoracer_ros2_driver/controller',
     'slam_toolbox': 'slam_toolbox_node',
     'amcl': 'nav2_amcl/amcl',
     'map_server': 'nav2_map_server/map_server',
     'lifecycle_manager': 'nav2_lifecycle_manager/lifecycle_manager',
-    'realsense': 'realsense2_camera_node',
-    'imu_fusion': '/imu_fusion_node',
-    'edgetpu': '/edgetpu_node',
-    'lidar': 'sllidar_node',
+    'autonomy_node': 'lib/neoracer_ros2_driver/autonomy_node',
+    'camera': 'lib/neoracer_ros2_driver/camera',
+    'inference': 'lib/neoracer_ros2_driver/inference_node',
+    'lidar': 'lakibeam1_scan_node',
     'dashboard': 'dashboard.py',
     'foxglove_bridge': 'foxglove_bridge',
 }
@@ -59,6 +66,14 @@ CLK_TCK = os.sysconf('SC_CLK_TCK')
 MARK_SECONDS = 2.0
 # pgm values written by map_saver_cli in trinary mode.
 PGM_OCCUPIED, PGM_FREE = 0, 254
+MEMINFO = Path('/proc/meminfo')
+# The INA3221 rail that carries the whole board's input power.
+BOARD_RAIL = 'VDD_IN'
+# load.csv columns before the per-process ones.
+LOAD_COLUMNS = (
+    't_s', 'cpu_busy_pct', 'temp_c', 'throttled', 'arm_mhz',
+    'gpu_pct', 'power_mw', 'mem_used_mib', 'mem_avail_mib', 'swap_used_mib',
+)  # fmt: skip
 
 
 # --- save ---------------------------------------------------------------------
@@ -166,10 +181,19 @@ def tick_delta(before: dict[int, int], after: dict[int, int]) -> int:
 class Sample:
     t: float
     cpu_busy: float  # percent of all cores
-    temp_c: float | None
-    throttled: int | None
-    arm_mhz: int | None
+    temp_c: float | None  # the junction temperature, tj-thermal
+    throttled: int | None  # bit k-1: over-current alarm k fired since recording began
+    arm_mhz: int | None  # CPU 0's clock
     per_process: dict[str, float]  # percent of one core
+    gpu_pct: float | None = None
+    power_mw: int | None = None  # the board's input, BOARD_RAIL
+    mem_used_mib: int | None = None
+    mem_avail_mib: int | None = None
+    swap_used_mib: int | None = None  # rounded up, so any swap in use reads at least 1
+
+
+def _mean_max(label: str, values: list[float], unit: str = '') -> str:
+    return f'{label:18s} {sum(values) / len(values):6.1f}  {max(values):6.1f}{unit}'
 
 
 def summarize(samples: list[Sample]) -> list[str]:
@@ -183,23 +207,91 @@ def summarize(samples: list[Sample]) -> list[str]:
         lines.append(f'{label:18s} {sum(values) / len(values):6.1f}  {max(values):6.1f}')
     busy = [s.cpu_busy for s in samples]
     lines.append(f'All cores busy     {sum(busy) / len(busy):6.1f}  {max(busy):6.1f}')
+    gpu = [s.gpu_pct for s in samples if s.gpu_pct is not None]
+    if gpu:
+        lines.append(_mean_max('GPU load', gpu))
     temps = [s.temp_c for s in samples if s.temp_c is not None]
     if temps:
         lines.append(f'SoC temperature    {sum(temps) / len(temps):6.1f}  {max(temps):6.1f} C')
+    power = [s.power_mw / 1e3 for s in samples if s.power_mw is not None]
+    if power:
+        lines.append(_mean_max('Board power', power, ' W'))
+    used = [float(s.mem_used_mib) for s in samples if s.mem_used_mib is not None]
+    if used:
+        lines.append(_mean_max('Memory used', used, ' MiB'))
+    avail = [s.mem_avail_mib for s in samples if s.mem_avail_mib is not None]
+    if avail:
+        lines.append(f'Memory available   min {min(avail)} MiB')
     flags = {s.throttled for s in samples if s.throttled}
     clocks = [s.arm_mhz for s in samples if s.arm_mhz]
     if clocks:
         lines.append(f'ARM clock          min {min(clocks)} MHz')
-    lines.append(
-        'Throttled: ' + ', '.join(f'0x{f:x}' for f in sorted(flags)) + '. Discard this run.'
-        if flags
-        else 'Throttled: 0x0 for the whole run.'
-    )
+    swap = [s.swap_used_mib for s in samples if s.swap_used_mib is not None]
+    if not swap:
+        lines.append('Swap in use: not read.')
+    elif max(swap):
+        lines.append(f'Swap in use: up to {max(swap)} MiB. Discard this run.')
+    else:
+        lines.append('Swap in use: none for the whole run.')
+    if flags:
+        lines.append(
+            'Throttled: '
+            + ', '.join(f'0x{f:x}' for f in sorted(flags))
+            + ' (over-current alarms during the run). Discard this run.'
+        )
+    elif all(s.throttled is None for s in samples):
+        lines.append('Throttled: not read (no over-current counters).')
+    else:
+        lines.append('Throttled: 0x0 for the whole run.')
     return lines
 
 
+def parse_swap_used(text: str) -> int | None:
+    """Return swap in use in MiB from /proc/meminfo text, rounded up; None without the fields."""
+    kb = {}
+    for key in ('SwapTotal', 'SwapFree'):
+        m = re.search(rf'^{key}:\s+(\d+) kB', text, re.MULTILINE)
+        if not m:
+            return None
+        kb[key] = int(m.group(1))
+    return -(-(kb['SwapTotal'] - kb['SwapFree']) // 1024)
+
+
+def read_oc_counts(root: Path = sysinfo.HWMON_DIR) -> dict[int, int] | None:
+    """Return {alarm k: events since boot} from the SoC's over-current counters, or None."""
+    hwmon = sysinfo.oc_hwmon_dir(root)
+    if hwmon is None:
+        return None
+    counts = {}
+    for counter in sorted(hwmon.glob('oc*_event_cnt')):
+        m = re.fullmatch(r'oc(\d+)_event_cnt', counter.name)
+        if m is None:
+            continue
+        try:
+            counts[int(m.group(1))] = int(counter.read_text().strip())
+        except (OSError, ValueError):
+            continue
+    return counts
+
+
+def throttle_flags(start: dict[int, int] | None, now: dict[int, int] | None) -> int | None:
+    """
+    Return bit k-1 set for each over-current alarm k whose count grew since `start`.
+
+    The counters only grow until a reboot, so events from before the run are
+    left out. None when either reading is missing.
+    """
+    if start is None or now is None:
+        return None
+    flags = 0
+    for k, count in now.items():
+        if count > start.get(k, 0):
+            flags |= 1 << (k - 1)
+    return flags
+
+
 class LoadRecorder:
-    """CPU per node, all-core busy, temperature, throttling, and ARM clock, one sample per call."""
+    """CPU per node and the Jetson's load, memory, and throttling, one sample per call."""
 
     def __init__(self) -> None:
         self.samples: list[Sample] = []
@@ -207,6 +299,7 @@ class LoadRecorder:
             label: read_ticks(pids) for label, pids in find_processes(read_cmdlines()).items()
         }
         self._cpu = sysinfo.read_cpu_times()
+        self._oc_start = read_oc_counts()
         self._start = self._last = time.monotonic()
 
     def sample(self) -> Sample:
@@ -224,13 +317,24 @@ class LoadRecorder:
         if cpu and self._cpu and cpu[1] > self._cpu[1]:
             busy = (cpu[0] - self._cpu[0]) / (cpu[1] - self._cpu[1]) * 100.0
         self._cpu, self._last = cpu, now
+        try:
+            meminfo = MEMINFO.read_text()
+        except OSError:
+            meminfo = ''
+        memory = sysinfo.parse_meminfo(meminfo)
+        gpu = sysinfo.read_gpu()
         s = Sample(
             now - self._start,
             busy,
             sysinfo.read_soc_temp(),
-            sysinfo.read_throttled()[0],
+            throttle_flags(self._oc_start, read_oc_counts()),
             sysinfo.read_arm_clock()[0],
             per,
+            gpu_pct=None if gpu is None else gpu['load_pct'],
+            power_mw=sysinfo.read_power_rails().get(BOARD_RAIL, {}).get('mw'),
+            mem_used_mib=None if memory is None else memory['used'],
+            mem_avail_mib=None if memory is None else memory['available'],
+            swap_used_mib=parse_swap_used(meminfo),
         )
         self.samples.append(s)
         return s
@@ -239,10 +343,11 @@ class LoadRecorder:
         labels = sorted({k for s in self.samples for k in s.per_process})
         with path.open('w', newline='') as f:
             w = csv.writer(f)
-            w.writerow(['t_s', 'cpu_busy_pct', 'temp_c', 'throttled', 'arm_mhz', *labels])
+            w.writerow([*LOAD_COLUMNS, *labels])
             for s in self.samples:
                 w.writerow(
                     [f'{s.t:.1f}', f'{s.cpu_busy:.1f}', s.temp_c, s.throttled, s.arm_mhz]
+                    + [s.gpu_pct, s.power_mw, s.mem_used_mib, s.mem_avail_mib, s.swap_used_mib]
                     + [f'{s.per_process.get(k, 0.0):.1f}' for k in labels]
                 )
 
@@ -466,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('save', help='save the mapping run under the map root')
     p.add_argument('name')
-    p = sub.add_parser('load', help='record CPU, temperature, and throttling')
+    p = sub.add_parser('load', help='record CPU, GPU, temperature, power, memory, and throttling')
     p.add_argument('--seconds', type=float)
     p = sub.add_parser('mark', help='record the pose at a mark on the floor')
     p.add_argument('label')

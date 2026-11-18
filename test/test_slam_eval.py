@@ -1,9 +1,13 @@
 """Unit tests for scripts/slam_eval.py (no ROS graph, no /proc of the car)."""
 
 import math
+from pathlib import Path
+import re
 
 from conftest import load_script
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope='module')
@@ -18,12 +22,14 @@ class TestLoad:
 
     def test_find_processes(self, ev):
         cmdlines = {
-            1: '/usr/bin/python3 /ws/install/lib/racecar_neo_ros2_driver/pit_node --ros-args',
-            2: '/opt/ros/jazzy/lib/slam_toolbox/async_slam_toolbox_node --ros-args',
-            3: '/opt/ros/jazzy/lib/nav2_amcl/amcl --ros-args',
-            4: '/usr/bin/python3 ros2 launch racecar_neo_ros2_driver pit.launch.py',
+            1: '/usr/bin/python3 /ws/install/neoracer_ros2_driver/lib/neoracer_ros2_driver/'
+            'controller --ros-args',
+            2: '/opt/ros/humble/lib/slam_toolbox/async_slam_toolbox_node --ros-args',
+            3: '/opt/ros/humble/lib/nav2_amcl/amcl --ros-args',
+            4: '/usr/bin/python3 /opt/ros/humble/bin/ros2 launch neoracer_ros2_driver '
+            'controller.launch.py',
         }
-        assert ev.find_processes(cmdlines) == {'pit_node': [1], 'slam_toolbox': [2], 'amcl': [3]}
+        assert ev.find_processes(cmdlines) == {'controller': [1], 'slam_toolbox': [2], 'amcl': [3]}
 
     def test_an_exited_process_counts_nothing(self, ev):
         assert ev.tick_delta({1: 100, 2: 500}, {1: 130}) == 30
@@ -85,3 +91,78 @@ class TestMarks:
 
 def test_cell_counts(ev):
     assert ev.cell_counts([0, 254, 205, 0, 254, 254]) == (2, 3, 1)
+
+
+class TestJetsonLoad:
+    """The NeoRacer's load readings: sysinfo.py's Jetson readers, swap, and throttling."""
+
+    def test_processes_are_the_neoracer_executables(self, ev):
+        setup = (ROOT / 'setup.py').read_text()
+        scripts = set(re.findall(r"'(\w+) = neoracer_ros2_driver\.", setup))
+        for label, needle in ev.PROCESSES.items():
+            if needle.startswith('lib/neoracer_ros2_driver/'):
+                assert needle.removeprefix('lib/neoracer_ros2_driver/') in scripts, label
+        lidar = (ROOT / 'launch' / 'lidar.launch.py').read_text()
+        assert f"executable='{ev.PROCESSES['lidar']}'" in lidar
+
+    def test_swap_in_use_rounds_up(self, ev):
+        assert ev.parse_swap_used('SwapTotal: 3901440 kB\nSwapFree: 3901440 kB\n') == 0
+        assert ev.parse_swap_used('SwapTotal: 3901440 kB\nSwapFree: 3900940 kB\n') == 1
+        assert ev.parse_swap_used('SwapTotal: 0 kB\nSwapFree: 0 kB\n') == 0
+        assert ev.parse_swap_used('MemTotal: 7803236 kB\n') is None
+
+    def test_over_current_counters(self, ev, tmp_path):
+        oc = tmp_path / 'hwmon4'
+        oc.mkdir()
+        (oc / 'name').write_text('soctherm_oc\n')
+        for k, n in ((1, 0), (2, 5), (3, 0)):
+            (oc / f'oc{k}_event_cnt').write_text(f'{n}\n')
+        assert ev.read_oc_counts(tmp_path) == {1: 0, 2: 5, 3: 0}
+        assert ev.read_oc_counts(tmp_path / 'none') is None
+
+    def test_only_alarms_raised_during_the_run_count(self, ev):
+        start = {1: 0, 2: 5, 3: 0}
+        assert ev.throttle_flags(start, start) == 0
+        assert ev.throttle_flags(start, {1: 2, 2: 6, 3: 0}) == 0b011
+        assert ev.throttle_flags(None, start) is None and ev.throttle_flags(start, None) is None
+
+    def test_recorder_reads_the_jetson(self, ev, tmp_path, monkeypatch):
+        meminfo = tmp_path / 'meminfo'
+        meminfo.write_text(
+            'MemTotal:  7803236 kB\nMemAvailable:  4840448 kB\n'
+            'SwapTotal:  3901440 kB\nSwapFree:  3891200 kB\n'
+        )
+        counts = iter([{1: 0, 2: 5}, {1: 1, 2: 5}])
+        monkeypatch.setattr(ev, 'MEMINFO', meminfo)
+        monkeypatch.setattr(ev, 'read_cmdlines', dict)
+        monkeypatch.setattr(ev, 'read_oc_counts', lambda: next(counts))
+        monkeypatch.setattr(ev.sysinfo, 'read_cpu_times', lambda: (100, 1000))
+        monkeypatch.setattr(ev.sysinfo, 'read_soc_temp', lambda: 51.2)
+        monkeypatch.setattr(ev.sysinfo, 'read_arm_clock', lambda: (1344, 1728))
+        monkeypatch.setattr(ev.sysinfo, 'read_gpu', lambda: {'load_pct': 23.0})
+        rails = {'VDD_IN': {'mv': 5072, 'ma': 1320, 'mw': 6695}}
+        monkeypatch.setattr(ev.sysinfo, 'read_power_rails', lambda: rails)
+        s = ev.LoadRecorder().sample()
+        assert (s.temp_c, s.arm_mhz, s.gpu_pct, s.power_mw) == (51.2, 1344, 23.0, 6695)
+        assert (s.mem_used_mib, s.mem_avail_mib, s.swap_used_mib) == (2893, 4727, 10)
+        assert s.throttled == 0b001
+
+    def test_summary_flags_swap_and_gives_the_jetson_readings(self, ev):
+        jetson = {'gpu_pct': 20.0, 'power_mw': 6695, 'mem_used_mib': 2900, 'mem_avail_mib': 4700}
+        samples = [
+            ev.Sample(0.0, 50.0, 51.0, 0, 1344, {}, **jetson, swap_used_mib=0),
+            ev.Sample(1.0, 60.0, 52.0, 0, 1344, {}, **jetson, swap_used_mib=12),
+        ]
+        text = '\n'.join(ev.summarize(samples))
+        assert 'GPU load' in text and 'Board power           6.7     6.7 W' in text
+        assert 'Memory used' in text and 'Memory available   min 4700 MiB' in text
+        assert 'Swap in use: up to 12 MiB. Discard this run.' in text
+        assert 'Throttled: 0x0 for the whole run.' in text
+
+    def test_summary_of_a_clean_jetson_run(self, ev):
+        text = '\n'.join(ev.summarize([ev.Sample(0.0, 50.0, 51.0, 0, 1344, {}, swap_used_mib=0)]))
+        assert 'Swap in use: none for the whole run.' in text and 'Discard' not in text
+
+    def test_summary_without_counters_says_so(self, ev):
+        text = '\n'.join(ev.summarize([ev.Sample(0.0, 50.0, None, None, None, {})]))
+        assert 'Throttled: not read' in text and 'Swap in use: not read.' in text

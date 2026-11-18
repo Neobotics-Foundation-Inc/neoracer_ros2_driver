@@ -58,6 +58,7 @@ sys.path.insert(0, str(HERE.parent))
 
 import scan_fit  # noqa: E402, I100
 import slam_eval  # noqa: E402
+import sysinfo  # noqa: E402
 
 SESSIONS = slam_eval.EVAL_DIR / 'sessions'
 TELEOP_UNIT = 'neoracer-teleop'
@@ -226,23 +227,31 @@ def loop_lines(text: str) -> list[str]:
 
 
 def read_load_csv(path: Path) -> list[slam_eval.Sample]:
-    fixed = {'t_s', 'cpu_busy_pct', 'temp_c', 'throttled', 'arm_mhz'}
+    fixed = set(slam_eval.LOAD_COLUMNS)
 
-    def num(v: str) -> float | None:
-        return None if v in ('', 'None') else float(v)
+    def num(v: str | None) -> float | None:
+        return None if v in (None, '', 'None') else float(v)
+
+    def whole(v: str | None) -> int | None:
+        n = num(v)
+        return None if n is None else int(n)
 
     samples = []
     with path.open() as f:
         for r in csv.DictReader(f):
-            throttled, arm = num(r['throttled']), num(r['arm_mhz'])
             samples.append(
                 slam_eval.Sample(
                     float(r['t_s']),
                     float(r['cpu_busy_pct']),
                     num(r['temp_c']),
-                    None if throttled is None else int(throttled),
-                    None if arm is None else int(arm),
+                    whole(r['throttled']),
+                    whole(r['arm_mhz']),
                     {k: float(v) for k, v in r.items() if k not in fixed},
+                    gpu_pct=num(r.get('gpu_pct')),
+                    power_mw=whole(r.get('power_mw')),
+                    mem_used_mib=whole(r.get('mem_used_mib')),
+                    mem_avail_mib=whole(r.get('mem_avail_mib')),
+                    swap_used_mib=whole(r.get('swap_used_mib')),
                 )
             )
     return samples
@@ -674,7 +683,11 @@ class Session:
             parts.append(f'cpu {s.cpu_busy:3.0f}%')
             if s.temp_c is not None:
                 parts.append(f'{s.temp_c:.1f}C')
-            parts.append('THROTTLED' if s.throttled else 'ok')
+            # A run with swap in use or throttling is discarded, so both show here.
+            alarms = ['THROTTLED'] if s.throttled else []
+            if s.swap_used_mib:
+                alarms.append(f'SWAP {s.swap_used_mib} MiB')
+            parts.append(' '.join(alarms) or 'ok')
         if self.map_size:
             parts.append(f'map {self.map_size}')
         if self.mode == 'localization' and self.status_rows:
@@ -740,6 +753,7 @@ class Session:
             pose=self.pose or None,
             camera=self.camera,
             inference=self.inference,
+            power_mode=sysinfo.read_power_mode()[0],
             started=f'{datetime.now():%Y-%m-%d %H:%M:%S}',
             git=self.git_state(),
             disk_start=disk_line()[1],
@@ -911,7 +925,8 @@ def analyze(session: Path) -> Path:
     )
     lines.append(f"Stops: {meta.get('stops')}")
 
-    lines += ['', '## Load', '', '```']
+    power_mode = meta.get('power_mode') or 'not read'
+    lines += ['', '## Load', '', f'Jetson power mode {power_mode}.', '```']
     load = session / 'load.csv'
     lines += slam_eval.summarize(read_load_csv(load)) if load.exists() else ['No load record.']
     lines.append('```')

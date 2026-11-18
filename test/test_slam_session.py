@@ -255,6 +255,30 @@ class TestNeoRacer:
         names = [n for n, _ in ss.replay_specs('amcl', tmp_path / 'o.yaml')]
         assert sorted(managed) == sorted(n for n in names if n != 'lifecycle_manager')
 
+    def test_load_csv_keeps_the_jetson_readings(self, ss, tmp_path):
+        ev = load_script('slam_eval')
+        rec = object.__new__(ev.LoadRecorder)
+        jetson = {'gpu_pct': 23.0, 'power_mw': 6695, 'mem_used_mib': 2893, 'mem_avail_mib': 4727}
+        sample = ev.Sample(1.0, 40.0, 51.5, 1, 1344, {'amcl': 5.0}, **jetson, swap_used_mib=3)
+        rec.samples = [sample]
+        rec.write_csv(tmp_path / 'load.csv')
+        assert ss.read_load_csv(tmp_path / 'load.csv') == rec.samples
+
+    def test_report_gives_the_power_mode_and_the_discard(self, ss, tmp_path, monkeypatch):
+        monkeypatch.setenv('RACECAR_MAP_ROOT', str(tmp_path / 'maps'))
+        session = tmp_path / 'session'
+        session.mkdir()
+        (session / 'session.yaml').write_text(
+            yaml.safe_dump({'mode': 'localization', 'map': 'room', 'power_mode': '25W', 'git': {}})
+        )
+        ev = load_script('slam_eval')
+        rec = object.__new__(ev.LoadRecorder)
+        rec.samples = [ev.Sample(0.0, 40.0, 51.5, 0, 1344, {}, swap_used_mib=3)]
+        rec.write_csv(session / 'load.csv')
+        report = ss.analyze(session).read_text()
+        assert 'Jetson power mode 25W.' in report
+        assert 'Swap in use: up to 3 MiB. Discard this run.' in report
+
     def test_slam_replays_add_no_lifecycle_manager_section(self, ss, tmp_path):
         for kind in ('mapping', 'slam_toolbox'):
             assert list(ss.replay_overrides(kind, {}, tmp_path / 'room', (0, 0, 0))) == [

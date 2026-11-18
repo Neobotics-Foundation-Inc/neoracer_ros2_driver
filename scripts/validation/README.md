@@ -49,6 +49,15 @@ Each session folder in `~/neoracer_data/slam_eval/sessions/` holds `session.yaml
 `stalls.csv`, `bag/`, `logs/`, `report.md`, and `map.png`. A mapping run's map
 goes to `~/neoracer_data/maps/NAME/`. `~/neoracer_data` is the data root;
 `racecar data` prints it.
+
+`load.csv` has one sample a second: CPU per node (one core is 100), all cores
+busy, GPU load, the junction temperature, the board's input power (`VDD_IN`),
+memory used and available, swap in use, CPU 0's clock, and the SoC's
+over-current alarms raised since the session started. The report's Load
+section summarizes them with the Jetson power mode and says to discard the run
+when swap was in use or an alarm fired. The status line shows `THROTTLED` and
+`SWAP` as they happen.
+
 Taped distances between marks go in `~/neoracer_data/slam_eval/taped.txt`, one pair per
 line: `A B 2.35`. A line `point X Y` gives the point on the car the tape was
 measured from, in `base_link` meters (default 0 0, the floor under the rear
