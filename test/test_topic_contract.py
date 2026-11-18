@@ -88,6 +88,11 @@ MUX_RC = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py
 MUX_RC_LINK = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py:273', BE)
 
 
+def _viewer(line, qos, reliability=REL, durability=VOL):
+    # The map viewer on 8088 (F26): subscribed only while a browser polls it.
+    return End('map viewer', f'scripts/mapview.py:{line} ({qos})', reliability, durability)
+
+
 def _overview(line):
     # The 8080 server's sensor panels (F30): opened while the page asks.
     return End('8080 dashboard', f'scripts/overview.py:{line} (qos_profile_sensor_data)', BE)
@@ -125,6 +130,7 @@ SCAN_READERS = (
     End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
     End('slam_toolbox', 'launch/autonomy.launch.py (sensor data QoS)', BE),
     End('AMCL', 'launch/autonomy.launch.py localizer:=amcl (sensor data QoS)', BE),
+    _viewer(424, 'qos_profile_sensor_data', BE),
 )
 DRIVE_WRITERS = (
     End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
@@ -312,6 +318,7 @@ TABLE = (
         subscribers=(
             End(LIB, 'library/real/slam_real.py:45 (latched)', REL, TL),
             End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:75 (latched)', REL, TL),
+            _viewer(421, 'latched', REL, TL),
         ),
         evidence=(
             (AUTONOMY_NODE, "create_publisher(DiagnosticStatus, '/autonomy/status', latched)"),
@@ -327,7 +334,10 @@ TABLE = (
         '/autonomy/pose',
         'geometry_msgs/msg/PoseWithCovarianceStamped',
         publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:208', REL),),
-        subscribers=(End(LIB, 'library/real/slam_real.py:54 (depth 10)', REL),),
+        subscribers=(
+            End(LIB, 'library/real/slam_real.py:54 (depth 10)', REL),
+            _viewer(422, 'depth 10'),
+        ),
         evidence=(
             (AUTONOMY_NODE, "create_publisher(PoseWithCovarianceStamped, '/autonomy/pose', 10)"),
         ),
@@ -345,6 +355,7 @@ TABLE = (
             End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),
             _fork('slam_real.py:52 (latched)', REL, TL),
             End('autonomy_node', f'{AUTONOMY_NODE}:201 (latched, localization)', REL, TL),
+            _viewer(423, 'latched', REL, TL),
         ),
         evidence=(SLAM_NODE, SLAM_LOCALIZER, MAP_SERVER, ('config/amcl.yaml', 'topic_name: map')),
         note=f'{SLAM}; slam_toolbox and map_server publish it latched, as upstream',
@@ -368,7 +379,7 @@ TABLE = (
         '/autonomy/global_localization',
         'std_srvs/srv/Trigger',
         publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:217 (server)', REL),),
-        subscribers=(End('map viewer', 'upstream scripts/mapview.py:378 (client)', REL),),
+        subscribers=(_viewer(427, 'client'),),
         evidence=(
             (
                 AUTONOMY_NODE,
@@ -377,7 +388,7 @@ TABLE = (
             ),
         ),
         kind='service',
-        note='added by F23; called by the map viewer (F26) and the SLAM validation (F41)',
+        note='added by F23; called by the map viewer (Find me) and the SLAM validation (F41)',
     ),
     # -- written by the library and the dashboards --
     Row(
