@@ -40,4 +40,4 @@ ledger.jsonl is the session record, one row per label with the full learner stat
 
 ## Safety
 
-The NeoRacer mux forwards /drive with no software deadman; the handset's mode switch is the physical gate, and the ESP32 follows /drive only with it down. The car drives only while an episode is RUNNING, every other phase publishes zeros, speed_max caps the staircase, and proposals are clamped to 0.5x..2x of the starting gains.
+The NeoRacer mux forwards /drive with no software deadman; the handset's mode switch is the physical gate: with the handset on, the ESP32 follows /drive only with the switch down. With the handset off or out of range it follows /drive too, so keep the handset on and flip the switch up to stop the car. The car drives only while an episode is RUNNING, every other phase publishes zeros, speed_max caps the staircase, and proposals are clamped to 0.5x..2x of the starting gains.

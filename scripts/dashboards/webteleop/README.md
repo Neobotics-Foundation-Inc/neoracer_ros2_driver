@@ -115,7 +115,7 @@ needed.
 
 ## Safety
 
-The NeoRacer mux forwards /drive with no software deadman. The handset's mode switch is the physical gate: the ESP32 follows /drive only with it down. The shipped yaml has speed at 0.0, so the buttons steer but the car cannot move until the slider is raised. The speed command is hard capped at 1.0 either way in code, and the service drives zero after `cmd_timeout` without a command.
+The NeoRacer mux forwards /drive with no software deadman. The handset's mode switch is the physical gate: with the handset on, the ESP32 follows /drive only with the switch down. With the handset off or out of range it follows /drive too, so keep the handset on and flip the switch up to stop the car. The shipped yaml has speed at 0.0, so the buttons steer but the car cannot move until the slider is raised. The speed command is hard capped at 1.0 either way in code, and the service drives zero after `cmd_timeout` without a command.
 
 ## Car specifics
 

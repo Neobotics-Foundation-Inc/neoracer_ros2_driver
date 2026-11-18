@@ -6,8 +6,9 @@ Before the lab dashboards moved into the driver, setup_services.sh cloned each
 one's repository to scripts/dashboards/<repo>_dashboard/, and each dashboard
 saved its tuning into its own yaml in that checkout. Now each one ships in
 scripts/dashboards/<id>/, its tuning lives in the car profile and its logs
-under the data root. setup_dashboards.sh runs this before it installs the
-units. For every old checkout it:
+under the data root. setup_dashboards.sh runs this once every unit has
+installed, so no unit is left pointing at a moved checkout. For every old
+checkout it:
 
 - copies the values the car tuned into the car profile's
   dashboards/<name>.yaml, on top of the in-tree defaults. A tuned value is a

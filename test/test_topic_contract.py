@@ -102,27 +102,27 @@ CAMERA_READERS = (
     End(LIB, 'library/real/camera_real.py:64', BE),
     _fork('camera_real.py:49 (depth 10)'),
     _dash('camlabel', 'camlabel', 81),
-    _dash('linefollow', 'linefollow', 253),
+    _dash('linefollow', 'linefollow', 255),
     _dash('pursuit', 'pursuit', 123),
-    _dash('smartfollow', 'smartfollow', 250),
-    _dash('webteleop', 'teleop', 311),
+    _dash('smartfollow', 'smartfollow', 253),
+    _dash('webteleop', 'teleop', 313),
     End('inference_node', 'neoracer_ros2_driver/inference_node.py:135', BE),
     _overview(60),
 )
 ODOM_READERS = (
-    _dash('eps', 'eps', 396),
-    _dash('linefollow', 'linefollow', 254),
-    _dash('smartfollow', 'smartfollow', 249),
-    _dash('webteleop', 'teleop', 320),
-    _dash('wallfollow', 'wallfollow', 168),
+    _dash('eps', 'eps', 397),
+    _dash('linefollow', 'linefollow', 256),
+    _dash('smartfollow', 'smartfollow', 252),
+    _dash('webteleop', 'teleop', 322),
+    _dash('wallfollow', 'wallfollow', 170),
 )
 SCAN_READERS = (
     End(LIB, 'library/real/lidar_real.py:36 (qos_profile_sensor_data)', BE),
     _fork('lidar_real.py:41 (qos_profile_sensor_data)'),
-    _dash('eps', 'eps', 395),
-    _dash('smartfollow', 'smartfollow', 248),
-    _dash('webteleop', 'teleop', 319),
-    _dash('wallfollow', 'wallfollow', 167),
+    _dash('eps', 'eps', 396),
+    _dash('smartfollow', 'smartfollow', 251),
+    _dash('webteleop', 'teleop', 321),
+    _dash('wallfollow', 'wallfollow', 169),
     _overview(61),
     End('autonomy_node', f'{AUTONOMY_NODE}:188 (raw)', BE),
 )
@@ -132,12 +132,12 @@ DRIVE_WRITERS = (
 ) + tuple(
     _dash(name, script, line, 'depth 1', REL)
     for name, script, line in (
-        ('eps', 'eps', 394),
-        ('linefollow', 'linefollow', 252),
+        ('eps', 'eps', 395),
+        ('linefollow', 'linefollow', 254),
         ('pursuit', 'pursuit', 122),
-        ('smartfollow', 'smartfollow', 247),
-        ('webteleop', 'teleop', 310),
-        ('wallfollow', 'wallfollow', 166),
+        ('smartfollow', 'smartfollow', 250),
+        ('webteleop', 'teleop', 312),
+        ('wallfollow', 'wallfollow', 168),
     )
 )
 CONTROLLER = 'neoracer_ros2_driver/controller.py'
@@ -217,7 +217,7 @@ TABLE = (
             End(LIB, PHYSICS, BE),
             _fork(FORK_PHYSICS),
             _overview(62),
-            _dash('webteleop', 'teleop', 322, 'qos_profile_sensor_data, raw'),
+            _dash('webteleop', 'teleop', 324, 'qos_profile_sensor_data, raw'),
         ),
         evidence=((CONTROLLER, "create_publisher(Imu, '/imu/fused', 10)"),),
     ),
@@ -228,7 +228,7 @@ TABLE = (
         subscribers=(
             End(LIB, PHYSICS, BE),
             _fork(FORK_PHYSICS),
-            _dash('webteleop', 'teleop', 322, 'qos_profile_sensor_data, raw'),
+            _dash('webteleop', 'teleop', 324, 'qos_profile_sensor_data, raw'),
         ),
         evidence=(
             (CONTROLLER, "create_publisher(MagneticField, '/mag', qos_profile_sensor_data)"),
@@ -250,7 +250,7 @@ TABLE = (
         publishers=(End('controller_node', f'{CONTROLLER}:211', REL),),
         subscribers=(
             End(LIB, 'library/real/physics_real.py:78 (depth 10)', REL),
-            _dash('webteleop', 'teleop', 326, 'depth 10', REL),
+            _dash('webteleop', 'teleop', 328, 'depth 10', REL),
         ),
         evidence=((CONTROLLER, "create_publisher(BatteryState, '/battery/state', 10)"),),
         note='added by F07; the library subscribes RELIABLE, so /battery/state must stay RELIABLE',
@@ -285,8 +285,8 @@ TABLE = (
             End(LIB, 'library/real/vision_real.py:34', BE),
             _fork('vision_real.py:34'),
             _dash('pursuit', 'pursuit', 124, 'depth 10', REL),
-            _dash('smartfollow', 'smartfollow', 251, 'depth 10', REL),
-            _dash('webteleop', 'teleop', 316, 'qos_profile_sensor_data'),
+            _dash('smartfollow', 'smartfollow', 254, 'depth 10', REL),
+            _dash('webteleop', 'teleop', 318, 'qos_profile_sensor_data'),
         ),
         evidence=(
             (
@@ -409,7 +409,7 @@ TABLE = (
         publishers=(
             End(LIB, 'library/real/display_real.py:59 (depth 1)', REL),
             _fork('display_real.py:54 (depth 1)', REL),
-            _dash('webteleop', 'teleop', 327, 'depth 1', REL),
+            _dash('webteleop', 'teleop', 329, 'depth 1', REL),
         ),
         subscribers=(End('led_matrix_node', 'neoracer_ros2_driver/led_matrix_node.py:62', REL),),
         evidence=(
@@ -877,10 +877,14 @@ def _repo_line_refs():
     ids=lambda v: v if isinstance(v, (str, int)) else getattr(v, 'name', getattr(v, 'who', '')),
 )
 def test_line_references_point_at_the_topic(row, end, path, line):
-    # The referenced line, or one of the two after it (a call split over
-    # lines), names the topic, the message type or the node.
+    # The referenced line names the topic, the message type or the node. A
+    # call split over lines opens on the referenced line, and the two after
+    # it count; a reference one line early no longer passes on its neighbour.
+    lines = (ROOT / path).read_text().splitlines()
     first, last = line - 1, line + 2
-    window = ' '.join((ROOT / path).read_text().splitlines()[first:last])
+    window = lines[first]
+    if window.rstrip().endswith('('):
+        window = ' '.join(lines[first:last])
     needles = {row.name, row.msg_type.rsplit('/', 1)[-1], end.who.split()[0]}
     assert any(n in window for n in needles), f'{path}:{line} for {row.name} ({end.who})'
 

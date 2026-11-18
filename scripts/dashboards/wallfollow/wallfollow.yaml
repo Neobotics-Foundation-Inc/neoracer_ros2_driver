@@ -15,7 +15,10 @@ speed_kp: 0.0          # 0 = constant speed (slider only). Raise to enable corre
 speed_kd: 0.0          # damper for the correction; only used when speed_kp > 0
 kd: 4.0               # damper. Raise this if the car wobbles.
 window: 10.0          # averaging window per ray, in degrees. Smooths noise.
-max_mps: 4.0          # the car's top speed in m/s; slider x this = target
+max_mps: 4.0          # m/s the speed loop reads slider 1.0 as; slider x this
+                      # = target. Upstream's value: the NeoRacer's /drive 1.0
+                      # is 6.0 m/s (max_speed_mps in controller.yaml). Unused
+                      # while speed_kp and speed_kd are 0.
 lookahead: 3.0        # meters. Distances are capped here in both modes, so an
                       # open side reads as lookahead, not as 12 m of empty room.
 

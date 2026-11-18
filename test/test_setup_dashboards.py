@@ -126,7 +126,7 @@ class TestSetupScript:
         again = run_setup(tmp_path, units)
         assert again.stdout.count('already up to date') == len(TABLE)
 
-    def test_an_old_checkout_moves_before_the_units_install(self, tmp_path):
+    def test_an_old_checkout_moves_once_the_units_install(self, tmp_path):
         units = tmp_path / 'units'
         units.mkdir()
         tree = tree_copy(tmp_path)
@@ -146,6 +146,23 @@ class TestSetupScript:
         assert profile['kp'] == 0.8
         assert (tree / '.migrated' / 'wallfollow_dashboard').is_dir()
         assert 'no old checkouts' in run_setup(tmp_path, units).stdout
+
+    def test_a_failed_install_leaves_the_old_checkouts_in_place(self, tmp_path):
+        # An old unit still runs its checkout, so the checkout moves only once
+        # every unit has installed.
+        units = tmp_path / 'units'
+        units.mkdir()
+        tree = tree_copy(tmp_path)
+        shipped = (tree / 'wallfollow' / 'wallfollow.yaml').read_text()
+        old_checkout(tree, 'wallfollow_dashboard', 'wallfollow', shipped)
+        sudo = tmp_path / 'sudo'
+        sudo.write_text('#!/bin/bash\n[[ "$1" == install ]] && exit 1\nexec "$@"\n')
+        sudo.chmod(0o755)
+        r = run_setup(tmp_path, units, RACECAR_SUDO=str(sudo))
+        assert r.returncode == 1
+        assert 'left in place' in r.stdout and 'Dashboards installed' not in r.stdout
+        assert (tree / 'wallfollow_dashboard' / 'wallfollow.yaml').read_text() == shipped
+        assert not (tree / '.migrated').exists()
 
     def test_a_changed_unit_is_restarted_only_if_it_runs(self, tmp_path):
         units = tmp_path / 'units'

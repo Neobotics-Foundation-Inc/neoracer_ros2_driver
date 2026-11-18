@@ -52,7 +52,8 @@ convention, positive right, and positive on `/drive` turns the NeoRacer left
 (REP-103, verified on the car). Speed on `/drive` is capped at 1.0 in every
 dashboard. The NeoRacer mux forwards `/drive` with no software deadman; the
 handset's mode switch is the physical gate, and every shipped yaml has its
-speed at 0.0.
+speed at 0.0. With the handset off or out of range the ESP32 follows `/drive`
+too, so the handset stays on while a dashboard drives.
 
 Three threads share the state: the ROS executor, the HTTP request threads, and
 the main thread in `serve_forever`. Everything shared sits behind one `_lock`,
@@ -128,8 +129,11 @@ that checkout. The in-tree folders have other names, so a driver update
 checkouts and their tuning as they are; they stay gitignored and outside the
 lint.
 
-Before it installs the units, `setup_dashboards.sh` runs
-`scripts/dashboards/checkouts.py`, which for each old checkout:
+Once every unit has installed, `setup_dashboards.sh` runs
+`scripts/dashboards/checkouts.py`. The units go first, so no unit is left
+pointing at a checkout that has moved: when an install fails, the old
+checkouts stay where they are, and the old units still run them, until the
+next run. For each old checkout, `checkouts.py`:
 
 1. Copies the values the car tuned into the car profile's
    `dashboards/<name>.yaml`, written over the new shipped defaults so new
@@ -187,7 +191,7 @@ browser buttons/keys ─▶ POST /cmd ─▶ _cmd ─┐                       �
   acceleration, angular velocity, and field) and the state. The
   magnetometer's axes have not been checked on a car yet, so the compass
   heading is to be confirmed.
-- `/battery/state` arrives at 1 Hz. The NeoRacer has no current sensor and
+- `/battery/state` arrives at about 0.5 Hz (`build_battery_state` in `controller.py`). The NeoRacer has no current sensor and
   publishes current as NaN; `battery_reading` turns it into None, because
   JSON cannot carry NaN and the page would stop updating.
 - POST /text records text for the 8x8 dot matrix, and `_actuate` sends it on
@@ -226,7 +230,11 @@ Follow a colored line with the camera; HSV thresholds tuned in the page.
 /odom ─▶ _odom_cb ─▶ measured speed ─▶ _state ─▶ GET /state
 ```
 
-- With no contour in the crop area the last command is held.
+- With no contour in the crop area the last command is held, speed
+  included. The page's Stop sets the speed slider to 0, which takes effect
+  only when the line is back in view; to stop a car that has lost the line,
+  stop the app (Clear apps on 8080, or `racecar service stop linefollow`),
+  and `/drive` goes to zero within the mux's 0.5 s timeout.
 - The mask preview shows the whole frame, not only the crop area: a threshold can
   only be judged against everything the camera sees.
 - The offset chart's axis is fixed at -1 to 1, so a small wobble looks small.
@@ -277,7 +285,8 @@ switch in the page, since they read the tune panel differently).
   dashboard.
 - pursuit chases the largest confident detection with PD steering and a
   throttle that brakes toward `safety_area`, and keeps its last command when
-  the target is lost.
+  the target is lost, speed included: a lowered speed slider takes effect at
+  the next detection.
 - eps learns the dynamic gap follower's four gains with a (1+1) evolution
   strategy from one Success or Fail press per run; its ledger resumes a
   session after a restart.

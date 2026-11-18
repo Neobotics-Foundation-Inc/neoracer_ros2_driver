@@ -95,7 +95,7 @@ The detections come from the driver's inference node, which is off at boot, so t
 
 ## Safety
 
-The NeoRacer mux forwards /drive with no software deadman. The handset's mode switch is the physical gate: the ESP32 follows /drive only with it down. The shipped yaml has both speeds at 0.0, so the car cannot drive until a slider is raised. The speed command is hard capped at 1.0 in code.
+The NeoRacer mux forwards /drive with no software deadman. The handset's mode switch is the physical gate: with the handset on, the ESP32 follows /drive only with the switch down. With the handset off or out of range it follows /drive too, so keep the handset on and flip the switch up to stop the car. The shipped yaml has both speeds at 0.0, so the car cannot drive until a slider is raised. The speed command is hard capped at 1.0 in code.
 
 Two throttle caps means two ways to move: raising `car.speed` alone gives a car that chases but will not wall follow, and raising `wall.speed` alone gives the reverse. Raise both to run the full behavior.
 

@@ -22,8 +22,10 @@ speed_max: 1.0       # hard cap; instructor sets this for the venue
 duration_slack: 1.05  # a pass slower than best lap x this scores as slow (rejected)
 
 # The plant: gap follower settings, fixed for the whole session.
-max_mps: 4.0          # the car's top speed in m/s; staircase speed x this
-                      # is the target the speed loop chases via odometry
+max_mps: 4.0          # m/s the speed loop reads speed 1.0 as; staircase speed
+                      # x this is the target it chases via odometry.
+                      # Upstream's value: the NeoRacer's /drive 1.0 is 6.0 m/s
+                      # (max_speed_mps in controller.yaml).
 width: 70.0           # search this many degrees left and right of the nose
 side_weight: 0.0      # score bonus (m per degree) toward the right
 lookahead: 10.0        # meters; distances cap here

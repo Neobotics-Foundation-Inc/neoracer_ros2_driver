@@ -7,17 +7,20 @@
 # docs/dashboards.md.
 #
 # Usage:
-#   setup_dashboards.sh                move old checkouts aside, then render
-#                                      and install the units
+#   setup_dashboards.sh                render and install the units, then
+#                                      move old checkouts aside
 #
 # setup_services.sh runs this, so `racecar service install` and setup_all.sh
 # both install the dashboards.
 #
 # A car set up before the dashboards moved in-tree has a checkout of each
 # one's repository at scripts/dashboards/<repo>_dashboard/, with the car's
-# tuning in it. dashboards/checkouts.py copies that tuning into the car
-# profile, moves the logs and camlabel's dataset under the data root, and
-# moves the checkout to scripts/dashboards/.migrated/. Nothing is deleted.
+# tuning in it. Once every unit has installed, dashboards/checkouts.py copies
+# that tuning into the car profile, moves the logs and camlabel's dataset under
+# the data root, and moves the checkout to scripts/dashboards/.migrated/.
+# Nothing is deleted. The units go first, so no unit is left pointing at a
+# checkout that has moved: when an install fails, the old checkouts and the
+# units that run them stay as they are until the next run.
 #
 # A first install leaves a unit stopped and disabled. Six of the dashboards
 # publish /drive and fight the mux if a second one runs, so enabling is per
@@ -122,18 +125,24 @@ install_unit() {
     rm -f "$rendered"
 }
 
-echo "==> Old dashboard checkouts"
-# The driver's Python package is imported from this tree, so the move works
-# before the workspace is built. It runs as the car user: the car profile and
-# the data root are theirs.
-if ! PYTHONPATH="$PKG_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$SCRIPT_DIR/dashboards/checkouts.py" "$DASH_DIR"; then
-    failed+=("old checkouts")
-fi
-
 echo "==> Rendering and installing units"
 for name in "${DASHBOARDS[@]}"; do
     install_unit "$name" || true
 done
+
+echo "==> Old dashboard checkouts"
+if [[ ${#failed[@]} -gt 0 ]]; then
+    # An old unit may still run its checkout, so the checkouts stay where
+    # they are until every unit has installed.
+    echo "  left in place: not every unit installed"
+else
+    # The driver's Python package is imported from this tree, so the move
+    # works before the workspace is built. It runs as the car user: the car
+    # profile and the data root are theirs.
+    if ! PYTHONPATH="$PKG_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$SCRIPT_DIR/dashboards/checkouts.py" "$DASH_DIR"; then
+        failed+=("old checkouts")
+    fi
+fi
 
 if [[ $changed -eq 1 ]]; then
     # Not fatal: aborting here would skip the summary of the car's state.
@@ -144,21 +153,23 @@ if [[ $changed -eq 1 ]]; then
         failed+=("daemon-reload")
     fi
     # A dashboard running from an old checkout or an old unit picks up the
-    # new one; try-restart leaves a stopped unit stopped.
+    # new one, with the tuning copied above; try-restart leaves a stopped
+    # unit stopped.
     for unit in "${updated[@]}"; do
         $SYSTEMCTL try-restart "$unit" 2>/dev/null || true
     done
 fi
 
-echo
-echo "Dashboards installed. A new one is stopped and disabled. One driving dashboard at a time:"
-for name in "${DASHBOARDS[@]}"; do
-    src="$DASH_DIR/$name/neoracer-$name.service.in"
-    [[ -f "$src" ]] || continue
-    port="$(sed -n 's/.*(port \([0-9]*\)).*/\1/p' "$src" | head -1)"
-    printf '  racecar service start %-12s http://%s:%s\n' \
-        "$name" "$(hostname).local" "${port:-?}"
-done
+if [[ ${#failed[@]} -eq 0 ]]; then
+    echo
+    echo "Dashboards installed. A new one is stopped and disabled. One driving dashboard at a time:"
+    for name in "${DASHBOARDS[@]}"; do
+        src="$DASH_DIR/$name/neoracer-$name.service.in"
+        port="$(sed -n 's/.*(port \([0-9]*\)).*/\1/p' "$src" | head -1)"
+        printf '  racecar service start %-12s http://%s:%s\n' \
+            "$name" "$(hostname).local" "${port:-?}"
+    done
+fi
 
 if [[ ${#failed[@]} -gt 0 ]]; then
     echo

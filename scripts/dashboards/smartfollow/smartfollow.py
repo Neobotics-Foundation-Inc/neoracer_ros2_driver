@@ -21,7 +21,9 @@ to the pursuit controller, otherwise the wall follower drives. The hold
 bridges dropped detection frames so the state does not flicker.
 
 CAUTION: the NeoRacer mux forwards /drive with no ROS deadman. The handset's
-mode switch is the physical gate: the ESP32 follows /drive only with it down.
+mode switch is the physical gate: with the handset on, the ESP32 follows
+/drive only with the switch down. With the handset off or out of range it
+follows /drive too, so keep the handset on and flip the switch up to stop.
 The shipped yaml has both speeds at 0.0 so the car cannot drive until a
 slider is raised.
 
