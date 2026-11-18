@@ -186,3 +186,11 @@ def test_more_room_on_the_right_steers_right_on_the_wire(eps, node, cfg):
     assert node._steer > 0.0  # student convention: positive is right
     node._actuate()
     assert node._pub.msgs[-1].drive.steering_angle == pytest.approx(-node._steer)
+
+
+def test_an_empty_block_in_the_profile_keeps_the_shipped_one(eps, cfg):
+    eps.YAML_PATH.parent.mkdir(parents=True)
+    eps.YAML_PATH.write_text('nominal:\nspeed_max: 0.5\n')
+    eps.load_cfg()
+    assert eps._cfg['nominal'] == cfg['nominal']
+    assert eps._cfg['speed_max'] == 0.5

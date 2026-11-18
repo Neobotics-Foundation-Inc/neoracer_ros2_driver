@@ -172,8 +172,9 @@ def load_params():
             for k, v in (yaml.safe_load(YAML_PATH.read_text()) or {}).items():
                 # The wall and car blocks merge key by key, so a car file
                 # that names one value keeps the shipped others.
-                if isinstance(v, dict) and isinstance(_params.get(k), dict):
-                    _params[k] = {**_params[k], **v}
+                if isinstance(_params.get(k), dict):
+                    # A block left empty in the car file keeps the shipped one.
+                    _params[k] = {**_params[k], **(v if isinstance(v, dict) else {})}
                 else:
                     _params[k] = v
         _params.setdefault('target_hold', 0.7)

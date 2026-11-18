@@ -82,8 +82,9 @@ def load_cfg():
             for k, v in (yaml.safe_load(YAML_PATH.read_text()) or {}).items():
                 # The nominal block merges key by key, so a car file that
                 # names one gain keeps the shipped others.
-                if isinstance(v, dict) and isinstance(_cfg.get(k), dict):
-                    _cfg[k] = {**_cfg[k], **v}
+                if isinstance(_cfg.get(k), dict):
+                    # A block left empty in the car file keeps the shipped one.
+                    _cfg[k] = {**_cfg[k], **(v if isinstance(v, dict) else {})}
                 else:
                     _cfg[k] = v
         _cfg.setdefault('max_mps', 4.0)  # older yaml files lack this key

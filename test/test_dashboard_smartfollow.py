@@ -328,3 +328,12 @@ def test_the_model_name_takes_the_profile_override(tmp_path, car_profile_dir):
         'inference_node:\n  ros__parameters:\n    model_path: cars.engine\n'
     )
     assert sf.read_model_name(tmp_path) == 'cars.engine'
+
+
+def test_an_empty_block_in_the_profile_keeps_the_shipped_one(params):
+    shipped_car = dict(sf._params['car'])
+    sf.YAML_PATH.parent.mkdir(parents=True)
+    sf.YAML_PATH.write_text('car:\nwall:\n  kp: 0.7\n')
+    sf.load_params()
+    assert sf._params['car'] == shipped_car
+    assert sf._params['wall']['kp'] == 0.7
