@@ -25,26 +25,30 @@ slam_toolbox:
     mode: mapping
 
     debug_logging: false
-    # The LakiBeam scans at 29.7 Hz; every 4th scan is 7.4 Hz, the rate of
-    # upstream's RPLIDAR (7.2 Hz). minimum_time_interval below still limits
-    # scan matching to 2 scans a second.
-    throttle_scans: 4
+    # Upstream's value. 2.6.10 checks throttle_scans after each scan has
+    # waited for its transform and been posed, so a higher value saves no
+    # work; minimum_time_interval below limits scan matching to 2 scans a
+    # second at the LakiBeam's 29.7 Hz.
+    throttle_scans: 1
     transform_publish_period: 0.05    # map -> odom at 20 Hz; it changes with each scan match (about 2 Hz)
     map_update_interval: 5.0
     resolution: 0.05
     # The dev car shows no self-returns: driving it (2026-11-17), no scan had
     # a return under 0.33 m. 0.12 m is the nearest edge of the car's
     # outline from the lidar (config/frames.yaml), so a nearer return is the
-    # car itself. The LakiBeam1 is rated to 25 m at 70% reflectivity (15 m at
-    # 10%); it reports no return as inf, which slam_toolbox skips.
+    # car itself. The LakiBeam1 is rated to 15 m at 10% reflectivity (25 m at
+    # 70%), so every surface within 15 m returns. slam_toolbox marks a longer
+    # reading as free space up to 15 m and does not match it. The LakiBeam
+    # reports no return as inf, which slam_toolbox skips.
     min_laser_range: 0.12
-    max_laser_range: 25.0
+    max_laser_range: 15.0
     minimum_time_interval: 0.5
     # A scan waits up to transform_timeout for odom -> base_link, which the
-    # controller stamps at each serial frame's arrival, not ahead of it. On the
-    # dev car (2026-11-17) a scan waited at most 26 ms, less than the 34 ms
-    # between scans, so the one-scan queue dropped none. map -> odom is
-    # stamped this far ahead of its scan.
+    # controller stamps at each serial frame's arrival, not ahead of it. In a
+    # recording on the dev car (2026-11-17) every scan arrived before its
+    # transform, which came at most 26 ms later. slam_toolbox holds one
+    # waiting scan, and a scan that arrives during a scan match replaces it.
+    # map -> odom is stamped this far ahead of its scan.
     transform_timeout: 0.2
     tf_buffer_duration: 30.0
     stack_size_to_use: 40000000       # serializing large maps needs the larger stack
