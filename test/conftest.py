@@ -15,6 +15,7 @@ SCRIPT_DIRS = (
     SCRIPTS,
     SCRIPTS / 'calibration',
     SCRIPTS / 'validation',
+    SCRIPTS / 'dashboards',
     *(SCRIPTS / 'dashboards' / name for name in DASHBOARDS),
 )
 

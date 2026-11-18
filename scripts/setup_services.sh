@@ -14,27 +14,26 @@
 # not installed, and an existing install is retired below. SLAM and Nav2 still
 # run on demand through `racecar mapping` / `racecar navigation`.
 #
-# Lab dashboards, cloned into scripts/dashboards/ and installed disabled:
-#   neoracer-camlabel.service    - image capture and labeling (port 8082)
+# Lab dashboards, shipped in scripts/dashboards/ and installed disabled by
+# setup_dashboards.sh:
 #   neoracer-wallfollow.service  - wall following (port 8081)
+#   neoracer-camlabel.service    - image capture and labeling (port 8082)
 #   neoracer-pursuit.service     - target following (port 8083)
 #   neoracer-eps.service         - episodic policy search (port 8084)
 #   neoracer-smartfollow.service - wall and car following (port 8085)
 #   neoracer-linefollow.service  - line following (port 8086)
 #   neoracer-webteleop.service   - manual driving from a browser (port 8087)
 #
-# Each dashboard is a repository of its own; its setup.sh writes the unit
-# pointing at the checkout here. A dashboard holds the GPU or the camera for
-# its whole run and only one lab is used at a time, so none of them start on
-# boot: `racecar service start camlabel` turns one on for a session.
+# A dashboard holds the GPU or the camera for its whole run and only one lab
+# is used at a time, so none of them start on boot:
+# `racecar service start camlabel` turns one on for a session. Their tuning
+# lives in the car profile, so setup never touches it.
 #
-# Idempotent: re-runs update only what changed, keep a car's tuned dashboard
-# yaml, and never change a service's enable state after the first install.
+# Idempotent: re-runs update only what changed and never change a service's
+# enable state after the first install.
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARDS_DIR="$SCRIPT_DIR/dashboards"
-GITHUB_ORG=https://github.com/Neobotics-Foundation-Inc
 
 SERVICES=(
     neoracer-data.service
@@ -49,16 +48,6 @@ SERVICES=(
 # work resumes by moving the name back into SERVICES.
 HELD=(
     neoracer-autonomy.service
-)
-
-DASHBOARDS=(
-    camlabel:camlabel_dashboard
-    wallfollow:wallfollow_dashboard
-    pursuit:pursuit_dashboard
-    eps:eps_dashboard
-    smartfollow:smartfollow_dashboard
-    linefollow:linefollow_dashboard
-    webteleop:teleop_dashboard
 )
 
 echo "Core services:"
@@ -124,45 +113,15 @@ for svc in "${SERVICES[@]}"; do
     fi
 done
 
-# Bring one dashboard checkout to the tip of its default branch, then hand off
-# to its own setup.sh, which renders the unit against this path and leaves a
-# first install stopped and disabled.
-#
-# A fast-forward is used rather than a reset: a car's tuned wallfollow.yaml,
-# pursuit.yaml, eps.yaml, smartfollow.yaml, linefollow.yaml, or teleop.yaml
-# lives in the checkout, and discarding it on every setup run would cost the
-# tuning the lab was built around. A checkout that cannot fast-forward is
-# reported and left alone.
-sync_dashboard() {
-    local name="$1" repo="$2" dir="$DASHBOARDS_DIR/$2"
-    if [[ ! -d "$dir/.git" ]]; then
-        if ! git clone -q "$GITHUB_ORG/$repo.git" "$dir" 2>/dev/null; then
-            echo "  $name: clone failed; skipped (needs internet)" >&2
-            return 1
-        fi
-        echo "  $name: cloned"
-    elif ! git -C "$dir" fetch -q origin 2>/dev/null; then
-        echo "  $name: fetch failed; using the checkout already here" >&2
-    elif git -C "$dir" merge --ff-only -q '@{u}' 2>/dev/null; then
-        echo "  $name: at origin tip"
-    else
-        echo "  $name: local commits or edits block a fast-forward; left as is" >&2
-    fi
-    bash "$dir/setup.sh" || { echo "  $name: setup.sh failed" >&2; return 1; }
-}
-
+# The lab dashboards ship in this tree; setup_dashboards.sh installs their
+# units (no network needed) and moves the checkouts an older setup cloned
+# here out of the way, keeping their tuning.
 echo
 echo "Lab dashboards:"
-mkdir -p "$DASHBOARDS_DIR"
-dash_failed=0
-for entry in "${DASHBOARDS[@]}"; do
-    sync_dashboard "${entry%%:*}" "${entry#*:}" || dash_failed=1
-done
-
-if [[ $dash_failed -eq 1 ]]; then
+if ! bash "$SCRIPT_DIR/setup_dashboards.sh"; then
     echo
     echo "One or more dashboards did not install. The core stack is unaffected;"
-    echo "re-run 'racecar service install' once the car has internet."
+    echo "re-run 'racecar service install' once the problem is resolved."
 fi
 
 # RACECAR_DATA_DIR for login shells (SSH) from the path neoracer-data.service writes.
