@@ -724,10 +724,16 @@ def feature_list(
     states: dict[str, str],
     wanted: dict[str, bool],
     running: dict[str, bool],
-    busy: bool,
+    restarting: bool,
     last: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """Return one tile per feature with its state: active, activating, or inactive."""
+    """
+    Return one tile per feature with its state: active, activating, or inactive.
+
+    `restarting` is true while a camera or detections change from the apps
+    page restarts teleop. Starting or stopping autonomy leaves teleop running,
+    so the camera and detections keep their own state meanwhile.
+    """
     teleop = states.get(TELEOP_UNIT, 'unknown')
     out = []
     for item in FEATURES:
@@ -737,7 +743,7 @@ def feature_list(
             continue
         on = teleop == 'active' and running[item['id']]
         pending = (
-            busy
+            restarting
             or teleop in ('activating', 'reloading')
             or (teleop == 'active' and running[item['id']] != wanted[item['id']])
         )
@@ -820,13 +826,15 @@ class FeatureJob:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.busy = False
+        self.teleop = False
         self.message = ''
 
-    def start(self, label: str, work: Callable[[], str]) -> bool:
+    def start(self, label: str, work: Callable[[], str], teleop: bool = False) -> bool:
+        """Start `work` unless a job runs; `teleop` marks a job that restarts teleop."""
         with self._lock:
             if self.busy:
                 return False
-            self.busy, self.message = True, label
+            self.busy, self.teleop, self.message = True, teleop, label
         threading.Thread(target=self._run, args=(work,), daemon=True).start()
         return True
 
@@ -842,7 +850,11 @@ class FeatureJob:
 
     def state(self) -> dict[str, Any]:
         with self._lock:
-            return {'busy': self.busy, 'message': self.message}
+            return {
+                'busy': self.busy,
+                'teleop': self.busy and self.teleop,
+                'message': self.message,
+            }
 
 
 _features_job = FeatureJob()
@@ -854,7 +866,7 @@ def features_view() -> dict[str, Any]:
         unit_states([TELEOP_UNIT, AUTONOMY_UNIT]),
         features.read(),
         features.running(),
-        job['busy'],
+        job['teleop'],
         last_run(),
     )
     return {'items': items, 'job': job}
@@ -874,7 +886,7 @@ def change_feature(name: str, on: bool, action: str = '') -> tuple[bool, str]:
             return False, str(exc)
         label = 'Restarting teleop...'
         work = lambda: apply_features(values)  # noqa: E731
-    if not _features_job.start(label, work):
+    if not _features_job.start(label, work, teleop=name != 'autonomy'):
         return False, 'Another change is running.'
     return True, label
 

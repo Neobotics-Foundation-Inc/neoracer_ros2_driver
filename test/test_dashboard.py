@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 import threading
+import time
 from types import SimpleNamespace
 
 from conftest import load_script
@@ -762,6 +763,38 @@ class TestFeatureEndpoint:
             'Another change is running.',
         )
 
+    def test_only_a_teleop_restart_marks_camera_and_detections(
+        self, dashboard, monkeypatch, tmp_path
+    ):
+        # Starting or stopping autonomy leaves teleop running, so the camera
+        # and detections tiles keep their state; a camera change restarts teleop.
+        gate = threading.Event()
+        monkeypatch.setattr(dashboard, '_features_job', dashboard.FeatureJob())
+        monkeypatch.setattr(dashboard, 'autonomy_action', lambda action: gate.wait(5) and 'done')
+        monkeypatch.setattr(dashboard, 'apply_features', lambda values: gate.wait(5) and 'done')
+        monkeypatch.setattr(dashboard, 'unit_states', lambda units: dict.fromkeys(units, 'active'))
+        monkeypatch.setattr(dashboard, 'last_run', lambda: {})
+        monkeypatch.setattr(dashboard.features, 'state_file', lambda: tmp_path / 'f.conf')
+        defaults = dict(dashboard.features.DEFAULTS)
+        monkeypatch.setattr(dashboard.features, 'running', lambda: defaults)
+
+        def tiles():
+            return [i['state'] for i in dashboard.features_view()['items'][:2]]
+
+        def finish():
+            gate.set()
+            deadline = time.monotonic() + 5
+            while dashboard._features_job.state()['busy'] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            gate.clear()
+
+        assert dashboard.change_feature('autonomy', True, 'resume')[0]
+        assert tiles() == ['active', 'inactive']
+        finish()
+        assert dashboard.change_feature('camera', False)[0]
+        assert tiles() == ['activating', 'activating']
+        finish()
+
     def test_a_topic_launched_off_reads_off_in_the_rates(self, dashboard):
         html = dashboard._load_dashboard_html()
         assert "if (r.off) return '<span class=\"nr-badge off\">Off</span>';" in html
@@ -777,6 +810,7 @@ class TestFeatureEndpoint:
     def test_camera_and_detections_read_restarting_while_teleop_restarts(self, dashboard):
         html = dashboard._load_dashboard_html()
         assert "const RESTARTING = ['starting', 'Restarting', 'Restarting'];" in html
+        assert "state === 'activating' && item.restarts ? RESTARTING : APP_STATE[state]" in html
         assert "restarts: f.id !== 'autonomy'" in html
 
     @pytest.mark.parametrize(('page', 'seconds'), [('dashboard.html', 3), ('health.html', 2)])
@@ -785,17 +819,19 @@ class TestFeatureEndpoint:
         assert f'const POLL_MS = {seconds}000;' in html and 'const MISSES = 2;' in html
         title = f'id="live" title="The page asks the car for its status every {seconds} seconds'
         assert title in html
-        assert 'missed two requests in a row' in html
+        assert 'It reads No answer after two requests in a row fail.' in html
 
     def test_the_title_hides_the_default_host_name(self, dashboard):
         html = dashboard._load_dashboard_html()
         assert "const DEFAULT_HOST = 'neoracer';" in html
+        assert 'name.toLowerCase() !== DEFAULT_HOST' in html
         assert "$('host').textContent = shownHost(data.host);" in html
 
     def test_the_badge_names_the_parts_behind_it(self, dashboard):
         html = dashboard._load_dashboard_html()
-        assert 'Every part under System status is running or turned off.' in html
-        assert 'Open System status below for details.' in html
+        assert 'Every box under System status, except Autonomy, is running or turned off.' in html
+        assert "${named('Fault', faults)}${named('Check', checks)}Open System status" in html
+        assert "n.status !== 'off' && !faults.includes(n)" in html
 
 
 class TestDrivingAppsAndAutonomy:

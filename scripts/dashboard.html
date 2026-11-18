@@ -67,7 +67,7 @@
   <h1 class="nr-title">Apps <span class="thin" id="host"></span></h1>
   <div class="nr-meta">
     <span class="nr-badge off" id="overall">Loading</span>
-    <span class="nr-live wait" id="live" title="The page asks the car for its status every 3 seconds, and the square blinks at each answer. No answer means the car missed two requests in a row, so the page may be out of date."><i></i><span>Waiting</span></span>
+    <span class="nr-live wait" id="live" title="The page asks the car for its status every 3 seconds. The square blinks at each answer. It reads No answer after two requests in a row fail. The page may then be out of date."><i></i><span>Waiting</span></span>
     <a class="nr-btn small" href="/health">System Health</a>
     <div class="nr-seg" role="group" aria-label="Theme">
       <button type="button" data-theme-pick="dark">Dark</button>
@@ -374,19 +374,20 @@ function renderAdvanced(data) {
 }
 
 // The bar's badge: Fault only for a real fault, Check for anything else not running.
-// Its hover text names the parts behind the badge.
+// It counts the nodes and the health boxes, not the Autonomy box. Its hover
+// text names the parts behind a Fault and a Check.
 function renderOverall(data) {
   const nodes = Object.values(data.nodes || {}), health = Object.values(data.system_health || {});
   const faults = health.filter((h) => h.status === 'dead');
-  const checks = [...nodes, ...health].filter((n) => n.status !== 'healthy' && n.status !== 'off');
+  const checks = [...nodes, ...health].filter((n) => n.status !== 'healthy' && n.status !== 'off' && !faults.includes(n));
   const kind = faults.length ? 'err' : checks.length ? 'warn' : 'ok';
   const el = $('overall');
   el.className = `nr-badge ${kind}`;
   el.textContent = kind === 'ok' ? 'System OK' : 'Check system';
-  const names = (kind === 'err' ? faults : checks).map((n) => n.label).join(', ');
+  const named = (word, parts) => (parts.length ? `${word}: ${parts.map((n) => n.label).join(', ')}. ` : '');
   el.title = kind === 'ok'
-    ? 'Every part under System status is running or turned off.'
-    : `${kind === 'err' ? 'Fault' : 'Check'}: ${names}. Open System status below for details.`;
+    ? 'Every box under System status, except Autonomy, is running or turned off.'
+    : `${named('Fault', faults)}${named('Check', checks)}Open System status below for details.`;
 }
 
 function setView(view) {
