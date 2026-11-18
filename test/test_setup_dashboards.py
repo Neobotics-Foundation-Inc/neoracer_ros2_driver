@@ -211,7 +211,11 @@ class TestTreeAndLint:
         assert "'scripts/dashboards/*_dashboard'" in pyproject
 
     def test_no_dashboard_page_names_a_licensed_font_or_upstream(self):
-        for page in DASH.glob('*/*.html'):
+        # Only the seven tracked folders. A car that has not run the install yet
+        # still holds its old checkouts, and their pages name the licensed fonts.
+        pages = [p for name in TABLE for p in (DASH / name).glob('*.html')]
+        assert len(pages) == len(TABLE)
+        for page in pages:
             text = page.read_text()
             for word in ('Kernel', 'Barlow', 'Akzidenz', 'RACECAR Neo', '--rcn-', 'override.js'):
                 assert word not in text, f'{page.name}: {word}'
