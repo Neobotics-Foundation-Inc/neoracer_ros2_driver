@@ -273,11 +273,14 @@ class TestNeoRacer:
         )
         ev = load_script('slam_eval')
         rec = object.__new__(ev.LoadRecorder)
-        rec.samples = [ev.Sample(0.0, 40.0, 51.5, 0, 1344, {}, swap_used_mib=3)]
+        rec.samples = [
+            ev.Sample(0.0, 40.0, 51.5, 0, 1344, {}, swap_used_mib=0),
+            ev.Sample(1.0, 40.0, 51.5, 0, 1344, {}, swap_used_mib=3),
+        ]
         rec.write_csv(session / 'load.csv')
         report = ss.analyze(session).read_text()
         assert 'Jetson power mode 25W.' in report
-        assert 'Swap in use: up to 3 MiB. Discard this run.' in report
+        assert 'Swap in use: 0 MiB at the start, up to 3 MiB. Discard this run.' in report
 
     def test_a_session_needs_the_mcap_plugin(self, ss, tmp_path, monkeypatch, capsys):
         import argparse
@@ -289,6 +292,32 @@ class TestNeoRacer:
         assert ss.Session(args).preflight() is False
         assert 'ros-humble-rosbag2-storage-mcap' in capsys.readouterr().out
         assert ss.bag_argv(tmp_path / 'bag')[5:7] == ['--storage', 'mcap']
+
+    def test_localize_starts_at_the_maps_start_pose(self, ss, tmp_path, monkeypatch):
+        import argparse
+
+        monkeypatch.setenv('RACECAR_MAP_ROOT', str(tmp_path / 'maps'))
+        monkeypatch.setattr(ss, 'disk_line', lambda path=None: ('ok', '50 GB free'))
+        monkeypatch.setattr(ss.neoracer_log, 'storage_installed', lambda storage: True)
+        monkeypatch.setattr(ss.Session, 'teleop_service_active', staticmethod(lambda: True))
+        room = tmp_path / 'maps' / 'room'
+        room.mkdir(parents=True)
+        (room / 'room.yaml').write_text('image: room.pgm\n')
+        (room / 'meta.yaml').write_text('start_pose: {x: -0.12, y: 0.03, yaw: 1.5}\n')
+        args = argparse.Namespace(
+            cmd='localize', map='room', localizer='amcl', pose='', camera='on', inference='off'
+        )
+        session = ss.Session(args)
+        assert session.preflight() is True
+        assert session.pose == '-0.12,0.03,1.5'
+        assert 'pose:=-0.12,0.03,1.5' in ss.autonomy_argv(
+            'localization', 'room', 'amcl', session.pose
+        )
+        given = argparse.Namespace(**{**vars(args), 'pose': '1,2,0'})
+        session = ss.Session(given)
+        assert session.preflight() is True and session.pose == '1,2,0'
+        (room / 'meta.yaml').unlink()
+        assert ss.start_mark_pose(room / 'room') == ''
 
     def test_slam_replays_add_no_lifecycle_manager_section(self, ss, tmp_path):
         for kind in ('mapping', 'slam_toolbox'):

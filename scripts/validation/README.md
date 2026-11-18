@@ -26,13 +26,19 @@ One terminal runs the whole session. You drive by hand with the handset, mode
 switch UP (manual). In a mapping session `throttle_node` applies the mapping
 caps to the Jetson's commands while `/autonomy/status` reports mapping, but
 with the mode switch UP the ESP32 drives from the sticks and the caps do not
-apply, so keep the speed switch UP (slow) while mapping. Saves go through
+apply. Keep the speed switch UP (slow) in every session, because the firmware
+caps the sticks at 15 percent only then. Saves go through
 `/autonomy/save_map`. The script stops the teleop service
 (sudo may ask for a password), starts teleop with inference off, the autonomy
 launch, `foxglove_bridge` with `foxglove_validation.yaml`, an MCAP bag, and the
 load recorder, then prints the Lichtblick address (`ws://<car>:8765`). On
 Humble the MCAP plugin is the package `ros-humble-rosbag2-storage-mcap`, which
 `scripts/setup_ros2.sh` installs; without it the session does not start.
+A localization session starts the localizer at the map's start pose from its
+`meta.yaml`, the pose where the map was begun, unless `--pose` gives another.
+The ESP32 keeps its odometry pose through the session's teleop restart, so the
+map origin is the mapping run's odometry origin and not the start mark. Give a
+pose that starts with a minus sign as `--pose=-0.1,0.2,1.5`.
 
 Keys while driving, read without Enter:
 
@@ -57,8 +63,9 @@ busy, GPU load, the junction temperature, the board's input power (`VDD_IN`),
 memory used and available, swap in use, CPU 0's clock, and the SoC's
 over-current alarms raised since the session started. The report's Load
 section summarizes them with the Jetson power mode and says to discard the run
-when swap was in use or an alarm fired. The status line shows `THROTTLED` and
-`SWAP` as they happen.
+when swap in use grew during the run or an alarm fired. Swap already in use at
+the start, such as pages a build pushed out, is reported and not counted. The
+status line shows `THROTTLED` and `SWAP` as they happen.
 
 Taped distances between marks go in `~/neoracer_data/slam_eval/taped.txt`, one pair per
 line: `A B 2.35`. A line `point X Y` gives the point on the car the tape was

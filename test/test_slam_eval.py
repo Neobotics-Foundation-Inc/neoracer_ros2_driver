@@ -156,12 +156,18 @@ class TestJetsonLoad:
         text = '\n'.join(ev.summarize(samples))
         assert 'GPU load' in text and 'Board power           6.7     6.7 W' in text
         assert 'Memory used' in text and 'Memory available   min 4700 MiB' in text
-        assert 'Swap in use: up to 12 MiB. Discard this run.' in text
+        assert 'Swap in use: 0 MiB at the start, up to 12 MiB. Discard this run.' in text
         assert 'Throttled: 0x0 for the whole run.' in text
 
     def test_summary_of_a_clean_jetson_run(self, ev):
         text = '\n'.join(ev.summarize([ev.Sample(0.0, 50.0, 51.0, 0, 1344, {}, swap_used_mib=0)]))
         assert 'Swap in use: none for the whole run.' in text and 'Discard' not in text
+
+    def test_swap_from_before_the_run_does_not_count(self, ev):
+        samples = [ev.Sample(float(t), 50.0, 51.0, 0, 1344, {}, swap_used_mib=40) for t in (0, 1)]
+        text = '\n'.join(ev.summarize(samples))
+        assert 'Swap in use: 40 MiB from before the run, no more during it.' in text
+        assert 'Discard' not in text
 
     def test_summary_without_counters_says_so(self, ev):
         text = '\n'.join(ev.summarize([ev.Sample(0.0, 50.0, None, None, None, {})]))
