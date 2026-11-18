@@ -212,6 +212,10 @@ class PursuitNode(Node):
     def _actuate(self):
         with _lock:
             cap = max(0.0, min(1.0, float(_params['speed'])))
+        if cap <= 1e-3:
+            # A slider at 0 also drops the held throttle, so a slider raised
+            # again with no target in view leaves the car still until one is seen.
+            self._speed_cmd = 0.0
         out = AckermannDriveStamped()
         # A held command never outruns the slider, so a slider at 0 also stops
         # a car that has lost its target.

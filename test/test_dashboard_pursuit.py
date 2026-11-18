@@ -175,3 +175,19 @@ def test_a_slider_at_zero_stops_a_car_that_has_lost_its_target(pp, node, params)
     node._actuate()
     assert node._pub.msgs[-1].drive.speed == 0.0
     assert node._pub.msgs[-1].drive.steering_angle == pytest.approx(-0.2)
+
+
+def test_a_slider_raised_after_stop_keeps_zero_with_no_target(pp, node, params):
+    node._speed_cmd, node._steer_cmd = 0.4, 0.2  # the held command
+    params['speed'] = 0.0
+    node._actuate()
+    params['speed'] = 0.4  # the slider raised with no target in view
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0
+
+
+def test_a_lowered_slider_caps_a_held_command(pp, node, params):
+    node._speed_cmd, node._steer_cmd = 0.4, 0.2  # the held command
+    params['speed'] = 0.1
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == pytest.approx(0.1)

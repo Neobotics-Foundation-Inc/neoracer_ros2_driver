@@ -300,7 +300,7 @@ class SmartFollowNode(Node):
         with _lock:
             p = dict(_params['wall'])
         # Headings stay inside the lidar's live span, and a width of 0 or less
-        # cannot stop the callback.
+        # does not raise in the callback.
         p['width'] = max(SEARCH_STEP, min(float(p['width']), LIVE_HALF_DEG))
 
         la = max(p['lookahead'], 0.1)
@@ -474,7 +474,13 @@ class SmartFollowNode(Node):
         now = time.monotonic()
         with _lock:
             hold = float(_params['target_hold'])
-            caps = {'car': _params['car']['speed'], 'wall': _params['wall']['speed']}
+            caps = {g: set_max_speed(_params[g]['speed']) for g in ('car', 'wall')}
+        # A slider at 0 also drops its controller's held throttle, so a slider
+        # raised again leaves the car still until a fresh target or scan.
+        if caps['car'] <= 1e-3:
+            self._car_speed_cmd = 0.0
+        if caps['wall'] <= 1e-3:
+            self._wall_speed_cmd = 0.0
         age = now - self._last_target_stamp
         car = age <= hold
 
@@ -482,11 +488,11 @@ class SmartFollowNode(Node):
             speed, steer, error = self._car_speed_cmd, self._car_steer_cmd, self._car_error
         else:
             speed, steer, error = self._wall_speed_cmd, self._wall_steer_cmd, self._wall_error
-        # A slider at 0 stops the car even while its controller holds the last
-        # command, as the car follower does between detections. The wall
-        # follower's speed loop may run above its slider, so only 0 is applied.
-        if set_max_speed(caps['car' if car else 'wall']) <= 1e-3:
-            speed = 0.0
+        # The car follower's held command never exceeds its slider, as on the
+        # pursuit dashboard. The wall follower's speed loop may run above its
+        # slider by design, so the wall slider applies here only at 0.
+        if car:
+            speed = min(speed, caps['car'])
 
         out = AckermannDriveStamped()
         out.drive.speed = set_max_speed(speed)

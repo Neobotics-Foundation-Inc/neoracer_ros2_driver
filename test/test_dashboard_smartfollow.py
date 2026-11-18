@@ -350,3 +350,46 @@ def test_a_slider_at_zero_stops_a_held_command(node, params):
     node._last_target_stamp = time.monotonic()
     node._actuate()
     assert node._pub.msgs[-1].drive.speed == 0.0
+
+
+def test_a_lowered_car_slider_caps_a_held_command(node, params):
+    params['car']['speed'] = 0.2
+    node._car_steer_cmd, node._car_speed_cmd = -0.5, 0.6
+    node._last_target_stamp = time.monotonic()
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == pytest.approx(0.2)
+
+
+def test_a_wall_slider_at_zero_stops_a_held_wall_command(node, params):
+    # With no scans arriving the wall follower holds its last command.
+    params['wall']['speed'] = 0.0
+    node._wall_steer_cmd, node._wall_speed_cmd = 0.4, 0.5
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0
+
+
+def blind_rear_scan():
+    """Walls 0.6 m away all round the live span, with the rear 90 degrees blank."""
+    return make_scan(lambda deg: float('inf') if abs(deg) > 135 else 0.6)
+
+
+def test_no_wall_heading_is_taken_from_the_blind_rear(node, params):
+    params['wall']['width'] = 170.0
+    node._scan_cb(blind_rear_scan())
+    assert abs(sf._state['overlay']['target_deg']) <= sf.LIVE_HALF_DEG
+
+
+def test_a_wall_width_of_zero_does_not_stop_the_scan_callback(node, params):
+    params['wall']['width'] = 0.0
+    node._scan_cb(blind_rear_scan())
+    assert sf._state['overlay']['width'] == sf.SEARCH_STEP
+
+
+def test_a_car_slider_raised_after_stop_keeps_zero_until_a_new_detection(node, params):
+    params['car']['speed'] = 0.0
+    node._car_steer_cmd, node._car_speed_cmd = -0.5, 0.6
+    node._last_target_stamp = time.monotonic()
+    node._actuate()
+    params['car']['speed'] = 0.6  # the slider raised before a new detection
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0

@@ -194,3 +194,29 @@ def test_an_empty_block_in_the_profile_keeps_the_shipped_one(eps, cfg):
     eps.load_cfg()
     assert eps._cfg['nominal'] == cfg['nominal']
     assert eps._cfg['speed_max'] == 0.5
+
+
+def blind_rear_scan():
+    """Walls 0.6 m away all round the live span, with the rear 90 degrees blank."""
+    msg = corridor_scan(left=0.6, right=0.6)
+    for i in range(len(msg.ranges)):
+        if abs(math.degrees(msg.angle_min + i * msg.angle_increment)) > 135:
+            msg.ranges[i] = float('inf')
+    return msg
+
+
+def test_no_heading_is_taken_from_the_blind_rear(eps, node, cfg):
+    eps._cfg['width'] = 170.0
+    node.session.arm(cfg)
+    node.session.go()
+    node._scan_cb(blind_rear_scan())
+    # Every live heading is 0.6 m deep, so a heading next to the nose wins.
+    assert abs(node._telemetry['error']) < 0.05
+
+
+def test_a_width_of_zero_does_not_stop_the_scan_callback(eps, node, cfg):
+    eps._cfg['width'] = 0.0
+    node.session.arm(cfg)
+    node.session.go()
+    node._scan_cb(blind_rear_scan())
+    assert node._speed > 0.0

@@ -395,6 +395,10 @@ class LineFollowNode(Node):
     def _actuate(self):
         with _lock:
             cap = set_max_speed(_params['speed'])
+        if cap <= 1e-3:
+            # Stop also drops the held throttle, so a slider raised again while
+            # the line is still lost leaves the car still until the line is back.
+            self._speed_cmd = 0.0
         out = AckermannDriveStamped()
         # A held command never outruns the slider, so Stop also stops a car
         # that has lost the line.

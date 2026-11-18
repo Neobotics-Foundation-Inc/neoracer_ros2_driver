@@ -260,3 +260,23 @@ class TestLiveSpan:
         wf._params.update(mode=1, width=0.0, speed=0.2)
         node._scan_cb(self.blind_rear_scan())
         assert node._pub.msgs
+
+    def lopsided_scan(self):
+        # The left wall is 0.6 m away and the right one 1.2 m; the rear is blank.
+        msg = make_scan()
+        for i in range(len(msg.ranges)):
+            raw = math.degrees(msg.angle_min + i * msg.angle_increment)
+            msg.ranges[i] = float('inf') if abs(raw) > 135 else (0.6 if raw > 0 else 1.2)
+        return msg
+
+    def test_a_static_look_angle_past_the_live_span_still_sees_the_walls(self, wf, node):
+        wf._params.update(mode=0, look_angle=150.0, speed=0.2)
+        node._scan_cb(self.lopsided_scan())
+        overlay = wf._state['overlay']
+        assert overlay['look_angle'] == wf.LIVE_HALF_DEG
+        assert overlay['error'] > 0  # more room on the right steers right
+
+    def test_a_negative_static_look_angle_never_steers_at_the_near_wall(self, wf, node):
+        wf._params.update(mode=0, look_angle=-55.0, speed=0.2)
+        node._scan_cb(self.lopsided_scan())
+        assert wf._state['overlay']['error'] >= 0

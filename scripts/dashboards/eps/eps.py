@@ -442,7 +442,7 @@ class EpsNode(Node):
         with _lock:
             p = dict(_cfg)
         # Headings stay inside the lidar's live span, and a width of 0 or less
-        # cannot stop the callback.
+        # does not raise in the callback.
         p['width'] = max(SEARCH_STEP, min(float(p['width']), LIVE_HALF_DEG))
         g = s.armed_gains
         la = max(p['lookahead'], 0.1)

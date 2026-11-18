@@ -314,3 +314,23 @@ def test_stop_stops_a_car_that_has_lost_the_line(node):
     lf.update_params({'speed': 0})  # the page's Stop
     node._actuate()
     assert node._pub.msgs[-1].drive.speed == 0.0
+
+
+def test_a_slider_raised_after_stop_keeps_zero_while_the_line_is_lost(node):
+    lf._params['speed'] = 0.4
+    feed(node, frame([(0.7, 30, BLUE, 0.0, 1.0)]))
+    feed(node, frame())  # the line is lost; the last command is held
+    lf.update_params({'speed': 0})  # the page's Stop
+    node._actuate()
+    lf.update_params({'speed': 0.4})  # the slider raised with the line still lost
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == 0.0
+
+
+def test_a_lowered_slider_caps_a_held_command(node):
+    lf._params['speed'] = 0.4
+    feed(node, frame([(0.7, 30, BLUE, 0.0, 1.0)]))
+    feed(node, frame())  # the line is lost; the last command is held
+    lf.update_params({'speed': 0.1})
+    node._actuate()
+    assert node._pub.msgs[-1].drive.speed == pytest.approx(0.1)

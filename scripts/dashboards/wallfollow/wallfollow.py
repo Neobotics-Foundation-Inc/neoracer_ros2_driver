@@ -208,7 +208,7 @@ class WallFollowNode(Node):
         with _lock:
             p = dict(_params)
         # Headings stay inside the lidar's live span, and a width of 0 or less
-        # cannot stop the callback.
+        # does not raise in the callback.
         p['width'] = max(SEARCH_STEP, min(float(p['width']), LIVE_HALF_DEG))
         p['look_angle'] = max(0.0, min(float(p['look_angle']), LIVE_HALF_DEG))
 

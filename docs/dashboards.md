@@ -232,7 +232,8 @@ Follow a colored line with the camera; HSV thresholds tuned in the page.
 
 - With no contour in the crop area the last command is held, speed
   included, but never above the speed slider, so the page's Stop also stops
-  a car that has lost the line.
+  a car that has lost the line. Stop also drops the held throttle, so a
+  slider raised again leaves the car still until the line is back.
 - The mask preview shows the whole frame, not only the crop area: a threshold can
   only be judged against everything the camera sees.
 - The offset chart's axis is fixed at -1 to 1, so a small wobble looks small.
@@ -284,7 +285,8 @@ switch in the page, since they read the tune panel differently).
 - pursuit chases the largest confident detection with PD steering and a
   throttle that brakes toward `safety_area`, and keeps its last command when
   the target is lost, never above the speed slider, so a slider at 0 stops
-  the car at once.
+  the car at once. A slider at 0 also drops the held throttle, so a slider
+  raised again leaves the car still until a target is seen.
 - eps learns the dynamic gap follower's four gains with a (1+1) evolution
   strategy from one Success or Fail press per run; its ledger resumes a
   session after a restart.

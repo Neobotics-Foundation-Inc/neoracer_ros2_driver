@@ -120,7 +120,7 @@ needed.
 
 The NeoRacer mux forwards /drive with no software deadman. The handset's mode switch is the physical gate: with the handset on, the ESP32 follows /drive only with the switch down. With the handset off or out of range it follows /drive too, so keep the handset on and flip the switch up to stop the car. The shipped yaml has speed at 0.0, so the car cannot drive until the slider is raised. The speed command is hard capped at 1.0 in code. STOP in the top bar puts the slider back to 0.
 
-A lost line holds the last command, throttle included. The held throttle never exceeds the slider, so Stop also stops a car that has lost the line. On a track where the line can end, keep `speed` low or be ready on the handset.
+A lost line holds the last command, throttle included. The held throttle never exceeds the slider, so Stop also stops a car that has lost the line. Stop also drops the held throttle, so a slider raised again leaves the car still until the line is back in view. On a track where the line can end, keep `speed` low or be ready on the handset.
 
 ## Car specifics
 
