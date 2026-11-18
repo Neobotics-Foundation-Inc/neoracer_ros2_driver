@@ -198,10 +198,10 @@ class ControllerNode(Node):
         )
 
         # ===== SET UP PUBLISHERS =====
-        # /imu/fused and /odom are RELIABLE: the EKF (robot_localization) and the
-        # complementary filter subscribe reliable, and a reliable publisher
-        # still satisfies every BEST_EFFORT subscriber (student library,
-        # dashboard, rviz).
+        # /imu/fused and /odom are RELIABLE. A reliable publisher satisfies
+        # RELIABLE subscribers and every BEST_EFFORT subscriber (student
+        # library, dashboard, rviz). The vendor EKF, which subscribed
+        # reliable, left the driver with plan D1.
         self.imu_pub = self.create_publisher(Imu, '/imu/fused', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
