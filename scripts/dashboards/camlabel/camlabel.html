@@ -11,7 +11,9 @@
 <style>
   /* This page only. The shared pieces are in /ui/neoracer.css. */
   .step { display: inline-grid; place-items: center; width: 26px; height: 26px; background: var(--nr-red); color: var(--nr-ink-on-red); font: 700 14px/1 var(--nr-font-title); flex: none; }
+  /* A numbered step replaces the title's red dash. */
   .stepped { display: flex; align-items: center; gap: 12px; }
+  .stepped::before { display: none; }
   canvas.frame { width: 100%; height: auto; display: block; aspect-ratio: 4 / 3; }
   #lab { cursor: crosshair; touch-action: none; }
   label.field { display: grid; gap: 6px; font-weight: 700; font-size: 13px; }

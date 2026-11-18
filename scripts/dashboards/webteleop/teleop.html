@@ -26,8 +26,9 @@
   #state, #battery { font-family: var(--nr-font-title); font-size: 22px; font-weight: 700; letter-spacing: 0.04em; text-align: center; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 700px) { .pair { grid-template-columns: 1fr; } }
-  .compass { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: center; }
-  @media (max-width: 700px) { .compass { grid-template-columns: 1fr; } }
+  /* The dial over its chart: a third of the page is too narrow for both side by side. */
+  .compass { display: grid; gap: 16px; }
+  .compass .nr-view { width: 200px; justify-self: center; }
   #compass { width: 200px; height: 200px; }
   .pad { display: grid; grid-template-columns: repeat(3, 84px); grid-template-rows: repeat(3, 84px); gap: 8px; justify-content: center; touch-action: none; user-select: none; -webkit-user-select: none; }
   .pad button { font: 700 28px/1 var(--nr-font-title); border-radius: var(--nr-radius-card); border: 1px solid var(--nr-glass-edge); background: var(--nr-glass-card); color: var(--nr-ink); cursor: pointer; touch-action: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
