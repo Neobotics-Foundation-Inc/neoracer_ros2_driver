@@ -89,8 +89,8 @@ def _usb_enumerated(link, device, hint):
     assert vid_pid and _lsusb_match(vid_pid), f'{device}: not on the USB bus. {hint}'
     known = _udev_ids(link)
     if vid_pid not in known:
-        # The dev car's base board (303a:4001) and LED matrix (1209:4001) get
-        # their links from another rules file, not from ours.
+        # A device whose id our rules lack gets its link from another rules
+        # file on the car, so the test warns and does not fail.
         warnings.warn(
             f'{device}: {vid_pid} is not in scripts/udev/99-racecar.rules '
             f'({", ".join(known)}); another rules file names /dev/{link}.',
