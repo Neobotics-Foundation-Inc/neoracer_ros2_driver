@@ -265,7 +265,7 @@ Autonomy commands enter through the same mux as other `/drive` commands, so the 
 To view a mapping run in Lichtblick:
 
 1. Start mapping with the bridge: `racecar launch autonomy map:=room foxglove:=true`.
-2. On a laptop on the car's network, open Lichtblick and choose "Open connection", then "Foxglove WebSocket".
+2. On a laptop on the car's network, open Lichtblick and choose "Open connection", then "Foxglove WebSocket". Lichtblick 1.22 or later is needed, because foxglove_bridge 3.x accepts only the `foxglove.sdk.v1` protocol.
 3. Enter `ws://neoracer.local:8765`, or the car's IP address in place of `neoracer.local`, and connect.
 4. In the layout menu, choose "Import layout from file" and pick `config/foxglove_layout.json` from this repository. The car keeps a copy in `~/ros2_ws/install/neoracer_ros2_driver/share/neoracer_ros2_driver/config/`.
 

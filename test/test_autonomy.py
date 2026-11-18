@@ -448,8 +448,9 @@ BRIDGE_CAPABILITIES = {
     'assets',
     'time',
 }
-# Topics the Foxglove layout reads that the topic contract has no row for, with
-# the driver sources that start their publishers on the NeoRacer.
+# The Foxglove layout reads these topics, which have no row in the topic
+# contract. Each entry names the driver sources that start their publishers on
+# the NeoRacer.
 LAYOUT_TOPICS_OUTSIDE_THE_CONTRACT = {
     # AMCL publishes its particles in localization with localizer:=amcl.
     '/particle_cloud': (contract.AMCL_NODE,),
