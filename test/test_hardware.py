@@ -67,6 +67,37 @@ def _udev_ids(link):
     return sorted(ids)
 
 
+def _device_usb_id(link):
+    """Return the vendor:product behind /dev/`link`, read from udev, or None."""
+    try:
+        out = subprocess.run(
+            ['udevadm', 'info', '-q', 'property', '-n', f'/dev/{link}'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    props = dict(line.split('=', 1) for line in out.splitlines() if '=' in line)
+    vid, pid = props.get('ID_VENDOR_ID'), props.get('ID_MODEL_ID')
+    return f'{vid}:{pid}'.lower() if vid and pid else None
+
+
+def _usb_enumerated(link, device, hint):
+    """Fail unless /dev/`link`'s device is on the USB bus; warn if our rules lack its id."""
+    vid_pid = _device_usb_id(link)
+    assert vid_pid and _lsusb_match(vid_pid), f'{device}: not on the USB bus. {hint}'
+    known = _udev_ids(link)
+    if vid_pid not in known:
+        # The dev car's base board (303a:4001) and LED matrix (1209:4001) get
+        # their links from another rules file, not from ours.
+        warnings.warn(
+            f'{device}: {vid_pid} is not in scripts/udev/99-racecar.rules '
+            f'({", ".join(known)}); another rules file names /dev/{link}.',
+            stacklevel=2,
+        )
+
+
 def _params(node, name):
     """Return the ros__parameters of `node` in config/<name>.yaml."""
     import yaml
@@ -181,10 +212,10 @@ class TestESP32Board:
         )
 
     def test_usb_enumerated(self):
-        ids = _udev_ids(Path(self.LINK).name)
-        assert any(_lsusb_match(i) for i in ids), (
-            f'{self.DEVICE}: not on the USB bus (none of {", ".join(ids)}). The USB cable is '
-            'unplugged or the board has no power.'
+        _usb_enumerated(
+            Path(self.LINK).name,
+            self.DEVICE,
+            'The USB cable is unplugged or the board has no power.',
         )
 
     @pytest.mark.parametrize('topic', ESP32_STREAMS)
@@ -239,11 +270,7 @@ class TestWebcam:
         )
 
     def test_usb_enumerated(self):
-        ids = _udev_ids(Path(self.LINK).name)
-        assert any(_lsusb_match(i) for i in ids), (
-            f'{self.DEVICE}: not on the USB bus (none of {", ".join(ids)}). The USB cable is '
-            'unplugged.'
-        )
+        _usb_enumerated(Path(self.LINK).name, self.DEVICE, 'The USB cable is unplugged.')
 
     def test_color_stream(self, ros):
         check = _stream(ros, '/camera/color', self.DEVICE)
