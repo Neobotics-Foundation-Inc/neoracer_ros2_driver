@@ -32,16 +32,16 @@ diagnose = load_script('diagnose')
 ROOT = Path(__file__).resolve().parent.parent
 UDEV_RULES = ROOT / 'scripts' / 'udev' / '99-racecar.rules'
 
-# Each stream with racecar status's nominal rate and floor. /rc/link comes
-# from the same ESP32 `r` frame as /rc/channels, so it takes that rate.
+# STREAMS gives each stream racecar status's nominal rate and floor. /rc/link
+# comes from the same ESP32 `r` frame as /rc/channels, so it takes that rate.
 STREAMS = {spec.topic: spec for spec in diagnose.SENSOR_TOPICS}
 STREAMS['/rc/link'] = dataclasses.replace(
     STREAMS['/rc/channels'], topic='/rc/link', label='FlySky link'
 )
 
-# The ESP32's telemetry streams: the `s` frame (/imu/fused, /odom,
-# /encoder/speed), `m` (/mag) and `b` (/battery/voltage). The `r` frame's
-# streams are TestFlySky's.
+# ESP32_STREAMS lists the ESP32's telemetry streams: the `s` frame
+# (/imu/fused, /odom, /encoder/speed), `m` (/mag) and `b` (/battery/voltage).
+# TestFlySky reads the `r` frame's streams.
 ESP32_STREAMS = sorted(diagnose.BOARD_TOPICS - {'/rc/channels', '/joy'})
 SAMPLED = (*ESP32_STREAMS, '/rc/channels', '/rc/link', '/scan', '/camera/color')
 
@@ -159,8 +159,8 @@ class TestLakiBeam:
         ]
         assert hits, (
             f'{self.DEVICE}: all {len(scan.ranges)} ranges on /scan are out of range, so the '
-            'lidar is blind. A sagging battery, a laser turned off in the web panel or a '
-            'covered window does this; see docs/lidar_scan_health.md.'
+            'lidar is blind. A sagging battery, a covered window or a scan window changed in '
+            'the web panel does this; see docs/lidar_scan_health.md.'
         )
 
 
@@ -268,7 +268,7 @@ class TestWebcam:
         if img.shape[:2] != want:
             warnings.warn(
                 f'{self.DEVICE}: {img.shape[1]}x{img.shape[0]} frames, '
-                f'config/camera.yaml asks for {want[1]}x{want[0]}',
+                f'config/camera.yaml sets {want[1]}x{want[0]}',
                 stacklevel=2,
             )
 
@@ -283,6 +283,14 @@ class TestJetsonGPU:
     DEVICE = 'Jetson GPU'
     CUDA_ROOT = Path('/usr/local/cuda')
     SETUP_HINT = 'Run racecar setup ml.'
+
+    @pytest.fixture(autouse=True)
+    def _no_autoinstall(self, monkeypatch):
+        # Ultralytics pip-installs a missing requirement unless
+        # YOLO_AUTOINSTALL is off. PyPI has no TensorRT wheel for the Orin
+        # (scripts/setup_ml.sh), so these tests report a missing package and
+        # install nothing.
+        monkeypatch.setenv('YOLO_AUTOINSTALL', 'False')
 
     def test_cuda_toolkit_present(self):
         # scripts/setup_ml.sh reads the CUDA version from this file.
@@ -308,7 +316,8 @@ class TestJetsonGPU:
     def test_ultralytics_importable(self):
         _import_or_fail('ultralytics', self.DEVICE, self.SETUP_HINT)
 
-    # Frames timed after the warmup frame, as upstream times the Coral.
+    # The test times TIMED_FRAMES frames after the warmup frame, as upstream
+    # times the Coral.
     TIMED_FRAMES = 10
 
     def test_engine_within_latency_budget(self):
@@ -322,6 +331,9 @@ class TestJetsonGPU:
         )
         if running.returncode == 0:
             pytest.skip('inference_node is running; cannot test in isolation')
+        # A car without the TensorRT bindings fails here, before Ultralytics
+        # loads the engine.
+        _import_or_fail('tensorrt', self.DEVICE, self.SETUP_HINT)
 
         from neoracer_ros2_driver import inference_lib as il
 
@@ -331,7 +343,7 @@ class TestJetsonGPU:
             f'{self.DEVICE}: {cfg["model_path"]}, the model_path of config/inference.yaml, '
             'is not in models/.'
         )
-        # The camera's frame size, which the node sees, with the node's options.
+        # The test feeds a frame of the camera's size with the node's options.
         cam = _params('camera_node', 'camera')
         frame = np.zeros((cam['image_height'], cam['image_width'], 3), dtype=np.uint8)
         options = {
@@ -355,8 +367,8 @@ class TestJetsonGPU:
         except Exception as e:  # noqa: BLE001 - torch and TensorRT raise broadly
             pytest.fail(
                 f'{self.DEVICE}: {Path(model).name} does not run on this car ({e}). '
-                'inference_node falls back to the .pt at about 2.4x the latency; rebuild '
-                'the engine here (models/README.md).',
+                'inference_node falls back to the .pt at about 2.4x the latency. Rebuild '
+                'the engine on this car with racecar compile (models/README.md).',
                 pytrace=False,
             )
 
@@ -367,7 +379,10 @@ class TestJetsonGPU:
 
         # The engine has to clear inference.yaml's max_rate_hz ceiling, one
         # frame per 1 / max_rate_hz: 66.7 ms at 15 Hz. The README measures
-        # 20.9 ms with teleop running.
+        # 20.9 ms with teleop running. A max_rate_hz of 0 leaves the node
+        # uncapped, so there is no budget to hold.
+        if not cfg['max_rate_hz'] > 0:
+            pytest.skip(f'max_rate_hz is {cfg["max_rate_hz"]}: no cap, so no budget')
         budget_ms = 1000.0 / cfg['max_rate_hz']
         assert mean_ms < budget_ms, (
             f'{self.DEVICE}: {Path(model).name} averages {mean_ms:.1f} ms a frame, over the '
@@ -383,9 +398,9 @@ class TestJetsonGPU:
 
 @pytest.mark.hardware
 class TestDependencies:
-    # The Python modules package.xml declares. Upstream's luma.core, PIL and
-    # rosbag2_py are left out: the LED matrix takes text over pyserial, and
-    # racecar log records through the ros2 bag command.
+    # The list holds the Python modules that package.xml declares. Upstream's
+    # luma.core, PIL and rosbag2_py are left out: the LED matrix takes text
+    # over pyserial, and racecar log records through the ros2 bag command.
     @pytest.mark.parametrize(
         'module',
         [
@@ -422,7 +437,8 @@ class TestDependencies:
 
 class TestOffCar:
     def test_racecar_test_leaves_hardware_out(self, pytestconfig):
-        # setup.cfg's addopts; a -m on the command line replaces it.
+        # setup.cfg's addopts deselects the marker, and a -m on the command
+        # line replaces it.
         addopts = pytestconfig.getini('addopts')
         assert '-m' in addopts, 'setup.cfg addopts has no -m "not hardware"'
         assert addopts[addopts.index('-m') + 1] == 'not hardware'
