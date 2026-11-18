@@ -93,6 +93,11 @@ long as the session. Compare variants by the rotation spread of `map -> odom`
 (how often the scan matcher overrides the odometry) and by occupied cells per
 free square meter (thinner walls give fewer).
 
+The odometry lines of session and replay reports measure `map -> odom` from
+its last value before the car first moved. A localization run starts the
+transform at the start pose, so the raw value is not drift; a mapping run
+starts it at zero, so there the two are the same.
+
 Session and replay reports score the scan-to-map fit (`scan_fit.py`): each
 scan is placed in the map at the localizer's pose and every point's distance
 to the nearest wall cell is measured. The report gives the median distance,

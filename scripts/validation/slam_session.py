@@ -167,12 +167,12 @@ def max_gap(times: Sequence[float], t0: float, t1: float) -> float:
 @dataclass
 class Drift:
     path_m: float
-    final: tuple[float, float, float]  # map -> odom at the end: x, y, yaw (rad)
+    final: tuple[float, float, float]  # map -> odom change at the end: x, y, yaw (rad)
     largest_jump_m: float
     largest_jump_deg: float
     largest_jump_t: float  # seconds from the first map -> odom sample
-    max_offset_m: float  # largest map -> odom translation during the run
-    max_yaw_deg: float  # largest map -> odom rotation during the run
+    max_offset_m: float  # largest map -> odom change in translation during the run
+    max_yaw_deg: float  # largest map -> odom change in rotation during the run
     yaw_sd_deg: float  # spread of the map -> odom rotation over the run
 
 
@@ -185,7 +185,12 @@ def drift_summary(
 
     `map_odom` is (t, x, y, yaw) of the map -> odom transform, `odom` is
     (t, x, y) of /odom/integrated. A jump between consecutive transforms is a
-    correction applied at once, as a loop closure does.
+    correction applied at once, as a loop closure does. Offsets are measured
+    from map -> odom at its last sample before the car first moved
+    (first_moved()). A localization run starts at its start pose, so its raw
+    transform is not drift, and neither is the localizer settling while the
+    car stands still. A mapping run starts at the identity, so its numbers
+    are the raw transform, as upstream reports them.
     """
     if not map_odom:
         return None
@@ -196,14 +201,25 @@ def drift_summary(
         r = abs(math.degrees(math.atan2(math.sin(b[3] - a[3]), math.cos(b[3] - a[3]))))
         if d > jump_m or (d == jump_m and r > jump_deg):
             jump_m, jump_deg, jump_t = d, r, b[0] - map_odom[0][0]
-    yaws = [math.degrees(math.atan2(math.sin(m[3]), math.cos(m[3]))) for m in map_odom]
+    moved = first_moved(odom)
+    base = map_odom[0]
+    for m in map_odom:
+        if moved is None or m[0] >= moved:
+            break
+        base = m
+    run = []
+    for m in map_odom:
+        if m[0] >= base[0]:
+            turn = math.atan2(math.sin(m[3] - base[3]), math.cos(m[3] - base[3]))
+            run.append((m[1] - base[1], m[2] - base[2], turn))
+    yaws = [math.degrees(r[2]) for r in run]
     return Drift(
         path,
-        tuple(map_odom[-1][1:]),  # type: ignore[arg-type]
+        run[-1],
         jump_m,
         jump_deg,
         jump_t,
-        max(math.hypot(m[1], m[2]) for m in map_odom),
+        max(math.hypot(r[0], r[1]) for r in run),
         max(abs(y) for y in yaws),
         float(np.std(yaws)),
     )
@@ -214,7 +230,8 @@ def drift_lines(drift: Drift) -> list[str]:
     end = math.hypot(x, y)
     share = f' ({end / drift.path_m:.2%} of the path)' if drift.path_m else ''
     return [
-        f'Odometry path {drift.path_m:.1f} m. map -> odom at the end: {end:.3f} m, '
+        f'Odometry path {drift.path_m:.1f} m. map -> odom at the end, from where it stood when '
+        f'the car first moved: {end:.3f} m, '
         f'{math.degrees(yaw):+.1f} deg{share}.',
         f'During the run: largest offset {drift.max_offset_m:.3f} m, largest rotation '
         f'{drift.max_yaw_deg:.1f} deg, rotation spread (SD) {drift.yaw_sd_deg:.2f} deg. '

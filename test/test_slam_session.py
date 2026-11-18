@@ -90,6 +90,30 @@ class TestAnalysis:
         assert d.largest_jump_deg == pytest.approx(2.0)
         assert d.final[0] == pytest.approx(0.11)
 
+    def test_drift_counts_from_when_the_car_first_moved(self, ss):
+        # A localization run: map -> odom starts at the start pose, and the
+        # localizer settles by 0.2 m while the car stands still.
+        x, y, yaw = 0.0062, 4.5226, 0.6694
+        map_odom = [
+            (0.0, x, y, yaw),
+            (1.0, x + 0.2, y, yaw + 0.05),
+            (3.0, x + 0.2, y, yaw + 0.05),
+            (5.0, x + 0.23, y + 0.04, yaw + 0.05 + math.radians(2)),
+        ]
+        odom = [(0.0, 0, 0), (2.0, 0, 0), (2.5, 1, 0), (5.0, 3, 0)]
+        d = ss.drift_summary(map_odom, odom)
+        assert d.final[:2] == pytest.approx((0.03, 0.04))
+        assert math.degrees(d.final[2]) == pytest.approx(2.0)
+        assert d.max_offset_m == pytest.approx(0.05) and d.max_yaw_deg == pytest.approx(2.0)
+        # The settling is still the largest correction applied at once.
+        assert d.largest_jump_m == pytest.approx(0.2) and d.largest_jump_t == pytest.approx(1.0)
+
+    def test_drift_wraps_the_rotation(self, ss):
+        map_odom = [(0.0, 0, 0, math.radians(179)), (2.0, 0, 0, math.radians(-179))]
+        d = ss.drift_summary(map_odom, [(0.0, 0, 0), (1.0, 1, 0)])
+        assert d.max_yaw_deg == pytest.approx(2.0)
+        assert math.degrees(d.final[2]) == pytest.approx(2.0)
+
     def test_no_drift_without_transforms(self, ss):
         assert ss.drift_summary([], [(0, 0, 0)]) is None
 
