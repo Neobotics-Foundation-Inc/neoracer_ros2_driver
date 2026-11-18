@@ -462,6 +462,41 @@ class TestNeoRacerPage:
         assert res.status == 200 and res.getheader('Content-Type') == 'image/svg+xml'
 
 
+class TestUnit:
+    """scripts/neoracer-mapview.service: the NeoRacer names, Humble and port 8088."""
+
+    @pytest.fixture
+    def unit(self):
+        return (ROOT / 'scripts' / 'neoracer-mapview.service').read_text()
+
+    def test_runs_the_viewer_on_humble_as_racecar(self, unit):
+        script = '/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py'
+        assert 'source /opt/ros/humble/setup.bash' in unit and 'jazzy' not in unit
+        assert f'exec python3 {script}' in unit
+        assert 'User=racecar' in unit and 'Environment=HOME=/home/racecar' in unit
+        assert 'EnvironmentFile=-/run/racecar/environment' in unit
+
+    def test_leaves_out_what_breaks_on_the_neoracer(self, unit):
+        settings = [line for line in unit.splitlines() if not line.startswith('#')]
+        # The discovery range is Jazzy only (plan D6). NoNewPrivileges would
+        # stop the sudo -n that starts and stops the autonomy unit.
+        assert not any('ROS_AUTOMATIC_DISCOVERY_RANGE' in line for line in settings)
+        assert not any('NoNewPrivileges' in line for line in settings)
+
+    def test_independent_of_teleop(self, unit):
+        # The page offers "Start mapping" while teleop and autonomy are down.
+        assert 'teleop' not in unit.split('[Service]')[0]
+
+    def test_names_its_port(self, mv, unit):
+        assert mv.PORT == 8088 and f'(port {mv.PORT})' in unit
+
+    def test_the_port_is_no_other_page(self, mv):
+        readme = (ROOT / 'README.md').read_text()
+        labs = {int(p) for p in re.findall(r'^\| \w+ \| (80\d\d) \|', readme, re.MULTILINE)}
+        assert 8084 in labs and len(labs) == 7  # the lab dashboards' table
+        assert mv.PORT not in labs | {8080, 8888}
+
+
 def test_viewer_subscribes_only_while_polled(mv, monkeypatch):
     rclpy = pytest.importorskip('rclpy')
     if getattr(rclpy, '__file__', None) is None:
