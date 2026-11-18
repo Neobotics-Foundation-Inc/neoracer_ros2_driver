@@ -279,6 +279,17 @@ class TestNeoRacer:
         assert 'Jetson power mode 25W.' in report
         assert 'Swap in use: up to 3 MiB. Discard this run.' in report
 
+    def test_a_session_needs_the_mcap_plugin(self, ss, tmp_path, monkeypatch, capsys):
+        import argparse
+
+        monkeypatch.setenv('RACECAR_MAP_ROOT', str(tmp_path / 'maps'))
+        monkeypatch.setattr(ss, 'disk_line', lambda path=None: ('ok', '50 GB free'))
+        monkeypatch.setattr(ss.neoracer_log, 'storage_installed', lambda storage: False)
+        args = argparse.Namespace(cmd='map', name='room', camera='on', inference='off')
+        assert ss.Session(args).preflight() is False
+        assert 'ros-humble-rosbag2-storage-mcap' in capsys.readouterr().out
+        assert ss.bag_argv(tmp_path / 'bag')[5:7] == ['--storage', 'mcap']
+
     def test_slam_replays_add_no_lifecycle_manager_section(self, ss, tmp_path):
         for kind in ('mapping', 'slam_toolbox'):
             assert list(ss.replay_overrides(kind, {}, tmp_path / 'room', (0, 0, 0))) == [

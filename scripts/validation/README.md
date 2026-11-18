@@ -29,8 +29,10 @@ with the mode switch UP the ESP32 drives from the sticks and the caps do not
 apply, so keep the speed switch UP (slow) while mapping. Saves go through
 `/autonomy/save_map`. The script stops the teleop service
 (sudo may ask for a password), starts teleop with inference off, the autonomy
-launch, `foxglove_bridge` with `foxglove_validation.yaml`, a bag, and the load
-recorder, then prints the Lichtblick address (`ws://<car>:8765`).
+launch, `foxglove_bridge` with `foxglove_validation.yaml`, an MCAP bag, and the
+load recorder, then prints the Lichtblick address (`ws://<car>:8765`). On
+Humble the MCAP plugin is the package `ros-humble-rosbag2-storage-mcap`, which
+`scripts/setup_ros2.sh` installs; without it the session does not start.
 
 Keys while driving, read without Enter:
 

@@ -56,7 +56,8 @@ REPO = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
-import scan_fit  # noqa: E402, I100
+import neoracer_log  # noqa: E402, I100
+import scan_fit  # noqa: E402
 import slam_eval  # noqa: E402
 import sysinfo  # noqa: E402
 
@@ -423,6 +424,13 @@ class Session:
             return False
         if self.mode == 'localization' and not Path(str(stem) + '.yaml').exists():
             print(f'No saved map {self.name} in {stem.parent}.')
+            return False
+        # Humble ships MCAP as a separate package; without it the bag would not start.
+        if not neoracer_log.storage_installed('mcap'):
+            print(
+                'The MCAP bag plugin is not installed. Run scripts/setup_ros2.sh, or '
+                'sudo apt install ros-humble-rosbag2-storage-mcap.'
+            )
             return False
         running = subprocess.run(
             ['pgrep', '-f', 'teleop.launch.py'], capture_output=True, text=True, check=False
