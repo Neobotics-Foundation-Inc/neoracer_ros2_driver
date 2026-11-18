@@ -9,6 +9,12 @@ well-localized scan in an unchanged room has most points within a cell or two
 of a wall; people, moved furniture, and space the map never saw add a tail,
 so the median and the share within FIT_INLIER_M are the measures, not the
 mean.
+
+A point counts only when its range lies in slam_toolbox's band,
+min_laser_range to max_laser_range in config/slam_mapping.yaml with the car
+profile's override, so a scan is scored with the returns its map was built
+from. The LakiBeam reports its blind rear wedge as inf, and those beams drop
+out too.
 """
 
 from __future__ import annotations
@@ -19,17 +25,34 @@ import math
 from pathlib import Path
 from typing import Any
 
+from neoracer_ros2_driver.car_profile import param_override
 import numpy as np
 import yaml
 
 FIT_INLIER_M = 0.10
-MIN_RANGE_M = 0.3  # inside it: the car's own antennas and cable header
-MAX_RANGE_M = 12.0
+SLAM_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slam_mapping.yaml'
 OUTSIDE_M = 1.0  # distance given to a point that falls outside the map
 PGM_OCCUPIED = 0
 
 Pose = tuple[float, float, float]  # x, y, yaw (rad)
 Track = Sequence[tuple[float, float, float, float]]  # t, x, y, yaw
+
+
+def laser_band(config: Path = SLAM_CONFIG, override: Path | None = None) -> tuple[float, float]:
+    """Return slam_toolbox's (min_laser_range, max_laser_range) in meters; the override wins."""
+    band: dict[str, float] = {}
+    for path in (config, override):
+        if path is None:
+            continue
+        node = (yaml.safe_load(path.read_text()) or {}).get('slam_toolbox') or {}
+        params = node.get('ros__parameters') or {}
+        for key in ('min_laser_range', 'max_laser_range'):
+            if key in params:
+                band[key] = float(params[key])
+    return band['min_laser_range'], band['max_laser_range']
+
+
+MIN_RANGE_M, MAX_RANGE_M = laser_band(SLAM_CONFIG, param_override('slam_mapping'))
 
 
 @dataclass

@@ -89,7 +89,10 @@ scan is placed in the map at the localizer's pose and every point's distance
 to the nearest wall cell is measured. The report gives the median distance,
 the share of points within 100 mm, and the 90th percentile of each scan's
 median (the bad stretches), with the time of the worst scan. A mapping run
-scored against its own map gives the best fit the map allows.
+scored against its own map gives the best fit the map allows. Only returns
+inside slam_toolbox's range band count (`min_laser_range` to
+`max_laser_range` in `config/slam_mapping.yaml`, with the car profile's
+override); the LakiBeam's blind rear wedge reads inf and drops out.
 
 ## Single measurements
 

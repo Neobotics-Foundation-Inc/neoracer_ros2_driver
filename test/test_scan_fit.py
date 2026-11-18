@@ -1,10 +1,14 @@
 """Unit tests for scripts/validation/scan_fit.py."""
 
 import math
+from pathlib import Path
 
 from conftest import load_script
 import numpy as np
 import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope='module')
@@ -33,7 +37,8 @@ def test_compose(sf):
 
 
 def test_scan_points_drop_the_self_returns(sf):
-    pts = sf.scan_points(np.array([0.25, 1.0, np.inf, 20.0]), 0.0, math.pi / 2)
+    ranges = np.array([sf.MIN_RANGE_M - 0.01, 1.0, np.inf, sf.MAX_RANGE_M + 1.0])
+    pts = sf.scan_points(ranges, 0.0, math.pi / 2)
     assert pts == pytest.approx(np.array([[0.0, 1.0]]), abs=1e-12)
 
 
@@ -67,3 +72,31 @@ def test_localized_against_fit(sf):
     status = [(0.0, False), (1.0, True), (2.0, False)]
     _, missed, _ = sf.localized_against_fit(status, shares, window_sec=1.0)
     assert missed == pytest.approx(3.0)  # 2.0 to 5.0, good fit after the first localized
+
+
+class TestNeoRacer:
+    """The range band comes from the SLAM config; LakiBeam scans score as upstream's do."""
+
+    def test_band_is_slam_toolboxs(self, sf):
+        config = yaml.safe_load((ROOT / 'config' / 'slam_mapping.yaml').read_text())
+        params = config['slam_toolbox']['ros__parameters']
+        assert (sf.MIN_RANGE_M, sf.MAX_RANGE_M) == (
+            params['min_laser_range'],
+            params['max_laser_range'],
+        )
+
+    def test_the_car_profile_override_wins(self, sf, tmp_path):
+        override = tmp_path / 'slam_mapping.yaml'
+        override.write_text('slam_toolbox:\n  ros__parameters:\n    min_laser_range: 0.3\n')
+        low, high = sf.laser_band(sf.SLAM_CONFIG, override)
+        assert low == 0.3 and high == sf.MAX_RANGE_M
+
+    def test_lakibeam_scan_drops_the_blind_wedge(self, sf):
+        # 1440 beams of 0.25 deg from -180 deg; the rear 90 deg reads inf, as on the car.
+        angles = -math.pi + np.radians(0.25) * np.arange(1440)
+        ranges = np.where(np.abs(angles) > np.radians(135.0), np.inf, 2.0)
+        ranges[720] = sf.MIN_RANGE_M / 2  # a self-return straight ahead
+        pts = sf.scan_points(ranges, -math.pi, np.radians(0.25))
+        assert len(pts) == 1081 - 1  # 1081 beams within 135 deg of the nose, less the self-return
+        assert np.hypot(pts[:, 0], pts[:, 1]) == pytest.approx(2.0)
+        assert np.all(pts[:, 0] > 2.0 * math.cos(np.radians(135.25)))
