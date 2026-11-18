@@ -160,6 +160,11 @@ and reported, and a second run finds nothing to move. The old units have the
 same `neoracer-<id>` names, so the new units replace them and keep their
 enable state.
 
+The driver does not use `scripts/dashboards/.migrated/` after the move. The
+folder is kept because an old checkout can hold something the steps above do
+not carry, such as a code change. Once the car profile and the data root hold
+what you need, you can delete it.
+
 ## webteleop
 
 Drive from buttons or the keyboard, with the camera, the lidar, the encoder,
