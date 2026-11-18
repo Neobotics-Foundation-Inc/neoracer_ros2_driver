@@ -774,6 +774,24 @@ class TestFeatureEndpoint:
         assert 'needs the camera. Turn it on?' in html
         assert 'needs detections. Turn them on?' in html
 
+    def test_camera_and_detections_read_restarting_while_teleop_restarts(self, dashboard):
+        html = dashboard._load_dashboard_html()
+        assert "const RESTARTING = ['starting', 'Restarting', 'Restarting'];" in html
+        assert "restarts: f.id !== 'autonomy'" in html
+
+    @pytest.mark.parametrize(('page', 'seconds'), [('dashboard.html', 3), ('health.html', 2)])
+    def test_the_live_square_explains_itself_at_the_page_poll_rate(self, page, seconds):
+        html = (Path(__file__).resolve().parent.parent / 'scripts' / page).read_text()
+        assert f'const POLL_MS = {seconds}000;' in html and 'const MISSES = 2;' in html
+        title = f'id="live" title="The page asks the car for its status every {seconds} seconds'
+        assert title in html
+        assert 'missed two requests in a row' in html
+
+    def test_the_badge_names_the_parts_behind_it(self, dashboard):
+        html = dashboard._load_dashboard_html()
+        assert 'Every part under System status is running or turned off.' in html
+        assert 'Open System status below for details.' in html
+
 
 class TestDrivingAppsAndAutonomy:
     @pytest.fixture

@@ -67,7 +67,7 @@
   <h1 class="nr-title">Apps <span class="thin" id="host"></span></h1>
   <div class="nr-meta">
     <span class="nr-badge off" id="overall">Loading</span>
-    <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
+    <span class="nr-live wait" id="live" title="The page asks the car for its status every 3 seconds, and the square blinks at each answer. No answer means the car missed two requests in a row, so the page may be out of date."><i></i><span>Waiting</span></span>
     <a class="nr-btn small" href="/health">System Health</a>
     <div class="nr-seg" role="group" aria-label="Theme">
       <button type="button" data-theme-pick="dark">Dark</button>
@@ -176,8 +176,12 @@ const APP_STATE = {
   failed: ['err', 'Failed', 'Failed'],
   unavailable: ['unavailable', '', 'Not available'],
 };
+// Camera and detections change by restarting teleop, so their in-between
+// state reads Restarting, whether the change turns them on or off.
+const RESTARTING = ['starting', 'Restarting', 'Restarting'];
 function tile(attr, item, state, port) {
-  const [cls, word, sr] = APP_STATE[state] || ['', '', item.off || 'Stopped'];
+  const look = state === 'activating' && item.restarts ? RESTARTING : APP_STATE[state];
+  const [cls, word, sr] = look || ['', '', item.off || 'Stopped'];
   const said = state === 'active' && item.on ? item.on : sr;
   return `<button type="button" class="app ${cls}" ${attr}="${esc(item.id)}" title="${esc(item.desc)}"
       aria-label="${esc(`${item.name}${port ? `, port ${port}` : ''}, ${said.toLowerCase()}. ${item.desc}`)}">
@@ -227,7 +231,7 @@ function featureState(id) { return (features.find((f) => f.id === id) || {}).sta
 function renderFeatures(view) {
   if (!view) return;
   features = view.items;
-  setHtml('features', features.map((f) => tile('data-feature', { ...f, on: 'On', off: 'Off' }, f.state, null)).join(''));
+  setHtml('features', features.map((f) => tile('data-feature', { ...f, on: 'On', off: 'Off', restarts: f.id !== 'autonomy' }, f.state, null)).join(''));
   const job = view.job || {};
   if (job.message && job.message !== featureMessage) $('msg').textContent = job.message;
   featureMessage = job.message || '';
@@ -366,13 +370,19 @@ function renderAdvanced(data) {
 }
 
 // The bar's badge: Fault only for a real fault, Check for anything else not running.
+// Its hover text names the parts behind the badge.
 function renderOverall(data) {
   const nodes = Object.values(data.nodes || {}), health = Object.values(data.system_health || {});
-  const kind = health.some((h) => h.status === 'dead') ? 'err'
-    : [...nodes, ...health].some((n) => n.status !== 'healthy' && n.status !== 'off') ? 'warn' : 'ok';
+  const faults = health.filter((h) => h.status === 'dead');
+  const checks = [...nodes, ...health].filter((n) => n.status !== 'healthy' && n.status !== 'off');
+  const kind = faults.length ? 'err' : checks.length ? 'warn' : 'ok';
   const el = $('overall');
   el.className = `nr-badge ${kind}`;
   el.textContent = kind === 'ok' ? 'System OK' : 'Check system';
+  const names = (kind === 'err' ? faults : checks).map((n) => n.label).join(', ');
+  el.title = kind === 'ok'
+    ? 'Every part under System status is running or turned off.'
+    : `${kind === 'err' ? 'Fault' : 'Check'}: ${names}. Open System status below for details.`;
 }
 
 function setView(view) {
