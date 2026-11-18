@@ -107,7 +107,7 @@ main.maps-open #hint { left: calc(min(340px, 80%) + var(--nr-space-3)); }
 
 <div class="sheet" id="startsheet"><div>
   <h2 id="starttitle">Start mapping</h2>
-  <div class="nr-small nr-muted" id="startnote">Teleop must be running. Drive with the gamepad.</div>
+  <div class="nr-small nr-muted" id="startnote">Teleop must be running. Set the handset's speed switch UP (slow), then drive with the handset.</div>
   <div class="row"><input type="text" class="nr-input" id="newname" placeholder="map name (letters, digits, - and _)"
     autocomplete="off" autocapitalize="off" spellcheck="false"></div>
   <div class="row"><button class="nr-btn primary" id="startgo">Start</button><button class="nr-btn quiet" id="startcancel">Cancel</button></div>
@@ -393,7 +393,8 @@ function showBanner() {
   // The Jetson's over-current counters rose during this run (the supply sagged under load).
   else if (sys.throttled_this_run && sys.throttled_this_run.length) msg = { text: 'Over-current throttling during this run. Check the battery and its connector. This run is not valid.', kind: 'bad' };
   else if (sys.temp_c != null && sys.hot_c != null && sys.temp_c >= sys.hot_c) msg = { text: `Jetson is hot (${sys.temp_c.toFixed(0)} C).`, kind: 'warn' };
-  else if (s.mode === 'mapping') msg = { text: 'Speed limited for mapping. Turn gently to prevent map blur.', kind: 'warn' };
+  // With the mode switch UP the sticks drive through the firmware, whose only cap is the speed switch's.
+  else if (s.mode === 'mapping') msg = { text: 'Mapping: keep the speed switch UP (slow). Turn gently to prevent map blur.', kind: 'warn' };
   b.textContent = msg ? msg.text : '';
   b.className = msg ? `show ${msg.kind}` : '';
 }
@@ -449,8 +450,8 @@ function render() {
 function openStart(source) {
   $('starttitle').textContent = source ? `Extend "${source}"` : 'Start mapping';
   $('startnote').textContent = source
-    ? 'Name for the extended map. Use the same name to extend it in place.'
-    : 'Teleop must be running. Drive with the gamepad.';
+    ? 'Name for the extended map. Use the same name to extend it in place. The speed switch must be UP (slow).'
+    : "Teleop must be running. Set the handset's speed switch UP (slow), then drive with the handset.";
   $('newname').value = source || '';
   $('startsheet').dataset.source = source || '';
   $('startsheet').classList.add('show');

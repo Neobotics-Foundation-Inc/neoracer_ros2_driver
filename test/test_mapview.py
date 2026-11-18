@@ -448,6 +448,13 @@ class TestNeoRacerPage:
         width = frames['footprint_left_y_mm'] - frames['footprint_right_y_mm']
         assert half == pytest.approx(width / 2000, abs=0.001)
 
+    def test_asks_for_the_speed_switch_up_for_mapping(self, page):
+        # `racecar map start` maps only with the handset's speed switch UP (plan D12).
+        assert page.count("Set the handset's speed switch UP (slow)") == 2  # the sheet, its script
+        assert 'The speed switch must be UP (slow).' in page  # extend
+        assert 'keep the speed switch UP (slow)' in page  # the mapping banner
+        assert 'gamepad' not in page and 'Speed limited for mapping' not in page
+
     def test_serves_the_shared_files(self, mv, server):
         res, _ = request(server, 'GET', f'/ui/neoracer.css?v={mv.webui.ASSET_VERSION}')
         assert res.status == 200 and res.getheader('Content-Type').startswith('text/css')
