@@ -11,8 +11,9 @@ amcl:
     scan_topic: /scan                 # the LakiBeam, frame laser
     map_topic: /map
     tf_broadcast: true
-    # A scan waits up to this long for odom -> base_link (at most 26 ms on the
-    # dev car; see slam_mapping.yaml), and map -> odom is stamped this far ahead.
+    # A scan waits up to this long for odom -> base_link (it came at most 26 ms
+    # after the scan on the dev car; see slam_mapping.yaml), and map -> odom is
+    # stamped this far ahead.
     transform_tolerance: 1.0
 
     # An Ackermann car has no sideways motion, so the differential model fits.
@@ -32,7 +33,7 @@ amcl:
     laser_model_type: likelihood_field
     max_beams: 60
     laser_min_range: 0.12             # the car's outline; see slam_mapping.yaml
-    laser_max_range: 25.0             # the LakiBeam1's rating
+    laser_max_range: 15.0             # the LakiBeam1's rating at 10% reflectivity
     laser_likelihood_max_dist: 2.0
     sigma_hit: 0.1                    # wall distance spread, m; Nav2 default 0.2
     z_hit: 0.9                        # with z_rand: weight of the wall fit over random returns

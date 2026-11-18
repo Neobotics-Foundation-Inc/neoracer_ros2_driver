@@ -22,12 +22,12 @@ slam_toolbox:
     mode: localization
 
     debug_logging: false
-    throttle_scans: 4                 # 7.4 Hz of the LakiBeam's 29.7; see slam_mapping.yaml
+    throttle_scans: 1                 # as slam_mapping.yaml
     transform_publish_period: 0.05    # map -> odom at 20 Hz; it changes with each scan match (about 2 Hz)
     map_update_interval: 5.0
     resolution: 0.05
     min_laser_range: 0.12             # the car's outline; see slam_mapping.yaml
-    max_laser_range: 25.0             # the LakiBeam1's rating
+    max_laser_range: 15.0             # the LakiBeam1's rating at 10% reflectivity
     minimum_time_interval: 0.5
     transform_timeout: 0.2            # see slam_mapping.yaml
     tf_buffer_duration: 30.0
