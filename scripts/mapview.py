@@ -54,7 +54,7 @@ TRAIL_STEP_M = 0.05
 TRAIL_MAX = 5000
 THUMB_PX = 160
 # Unknown, free, and wall cells; the same colors as the page's map canvas.
-THUMB_RGB = {'unknown': (0x23, 0x22, 0x28), 'free': (0x42, 0x3F, 0x52), 'wall': (0xFF, 0xFF, 0xFF)}
+THUMB_RGB = {'unknown': (0x13, 0x13, 0x17), 'free': (0x4A, 0x4B, 0x53), 'wall': (0xFF, 0xFF, 0xFF)}
 JOB_LINES = 40
 FIND_TIMEOUT_SEC = 5.0
 # Same spread as the start pose of `racecar map load` (config/autonomy.yaml,

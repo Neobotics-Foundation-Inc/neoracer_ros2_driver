@@ -5,6 +5,7 @@ import http.client
 import json
 import math
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -15,6 +16,8 @@ from neoracer_ros2_driver import autonomy as au
 import numpy as np
 import pytest
 import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(scope='module')
@@ -316,6 +319,53 @@ class TestHttp:
     def test_unknown_path(self, server):
         assert request(server, 'GET', '/nope')[0].status == 404
         assert request(server, 'POST', '/nope', {})[0].status == 404
+
+
+class TestNeoRacerPage:
+    """The page in the NeoRacer look, and the NeoRacer's outline on the map."""
+
+    @pytest.fixture
+    def page(self, mv):
+        return (Path(mv.__file__).parent / 'mapview.html').read_text()
+
+    def test_has_no_upstream_brand(self, page):
+        lower = page.lower()
+        for banned in ('rcn-', 'barlow', 'racecar neo', 'brand/mark.png', 'app-icon'):
+            assert banned not in lower, banned
+
+    def test_shows_the_logo_for_each_theme(self, page):
+        assert 'class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg"' in page
+        assert 'class="for-light" src="/ui/brand/neoracer-logo.svg"' in page
+        assert 'data-theme-pick="dark"' in page and 'data-theme-pick="light"' in page
+
+    def test_uses_only_icons_the_shared_set_has(self, mv, page):
+        icons = (mv.webui.WEB_DIR / 'icons.svg').read_text()
+        ids = set(re.findall(r'<symbol id="([\w-]+)"', icons))
+        # Icons in the markup, the status pills' icons, and each button's glyph.
+        used = set(re.findall(r'icons\.svg#([\w-]+)"', page))
+        used |= set(re.findall(r"(?:ok|warn|err|off): '([\w-]+)'", page))
+        used |= set(re.findall(r", '([\w-]+)'\)\);", page))
+        assert {'plus', 'check', 'save', 'target', 'layers'} <= used
+        assert used <= ids, used - ids
+
+    def test_draws_the_neoracer_outline(self, page):
+        frames = yaml.safe_load((ROOT / 'config' / 'frames.yaml').read_text())
+        number = r'([\d.]+)'
+        found = re.search(
+            rf'const FOOTPRINT = \{{ front: {number}, rear: {number}, half: {number} \}};', page
+        )
+        assert found is not None
+        front, rear, half = (float(v) for v in found.groups())
+        assert front == pytest.approx(frames['footprint_front_x_mm'] / 1000, abs=0.001)
+        assert rear == pytest.approx(-frames['footprint_rear_x_mm'] / 1000, abs=0.001)
+        width = frames['footprint_left_y_mm'] - frames['footprint_right_y_mm']
+        assert half == pytest.approx(width / 2000, abs=0.001)
+
+    def test_serves_the_shared_files(self, mv, server):
+        res, _ = request(server, 'GET', f'/ui/neoracer.css?v={mv.webui.ASSET_VERSION}')
+        assert res.status == 200 and res.getheader('Content-Type').startswith('text/css')
+        res, _ = request(server, 'GET', '/ui/brand/neoracer-logo.svg')
+        assert res.status == 200 and res.getheader('Content-Type') == 'image/svg+xml'
 
 
 def test_viewer_subscribes_only_while_polled(mv, monkeypatch):

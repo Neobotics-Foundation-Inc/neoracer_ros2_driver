@@ -111,7 +111,7 @@ def test_icons_parse_and_have_ids(webui):
 def test_pages_link_shared_files_with_the_asset_version(webui):
     # A browser keeps /ui/ files for CACHE_CONTROL; the version query is what
     # makes it fetch a changed neoracer.css or charts.js at once.
-    for page in (SCRIPTS / 'health.html',):
+    for page in (SCRIPTS / 'health.html', SCRIPTS / 'mapview.html'):
         text = page.read_text()
         for name in ('neoracer.css', 'charts.js', 'theme.js', 'lost.js'):
             for link in re.findall(rf'"/ui/{re.escape(name)}[^"]*"', text):
