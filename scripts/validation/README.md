@@ -94,9 +94,12 @@ long as the session. Compare variants by the rotation spread of `map -> odom`
 free square meter (thinner walls give fewer).
 
 The odometry lines of session and replay reports measure `map -> odom` from
-its last value before the car first moved. A localization run starts the
-transform at the start pose, so the raw value is not drift; a mapping run
-starts it at zero, so there the two are the same.
+its last value before the car first moved. In a localization run the
+transform starts at the offset between the start pose and the odometry pose.
+The ESP32 keeps its odometry pose through the session's teleop restart, so
+that offset can be meters and tens of degrees before the car moves. None of
+it is drift. In a mapping run the transform stays at zero until the car
+moves, so its lines read as the raw transform, as upstream's do.
 
 Session and replay reports score the scan-to-map fit (`scan_fit.py`): each
 scan is placed in the map at the localizer's pose and every point's distance

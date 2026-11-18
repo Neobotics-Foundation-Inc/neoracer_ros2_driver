@@ -91,13 +91,14 @@ class TestAnalysis:
         assert d.final[0] == pytest.approx(0.11)
 
     def test_drift_counts_from_when_the_car_first_moved(self, ss):
-        # A localization run: map -> odom starts at the start pose, and the
-        # localizer settles by 0.2 m while the car stands still.
+        # A localization run: map -> odom starts far from zero, and the
+        # localizer settles by 0.2 m while the car stands still. The sample
+        # after the car moved holds a 10 mm correction.
         x, y, yaw = 0.0062, 4.5226, 0.6694
         map_odom = [
             (0.0, x, y, yaw),
             (1.0, x + 0.2, y, yaw + 0.05),
-            (3.0, x + 0.2, y, yaw + 0.05),
+            (3.0, x + 0.21, y, yaw + 0.05),
             (5.0, x + 0.23, y + 0.04, yaw + 0.05 + math.radians(2)),
         ]
         odom = [(0.0, 0, 0), (2.0, 0, 0), (2.5, 1, 0), (5.0, 3, 0)]
@@ -105,14 +106,35 @@ class TestAnalysis:
         assert d.final[:2] == pytest.approx((0.03, 0.04))
         assert math.degrees(d.final[2]) == pytest.approx(2.0)
         assert d.max_offset_m == pytest.approx(0.05) and d.max_yaw_deg == pytest.approx(2.0)
+        # The sample before the base counts as no change: rotations 0, 0, 0, 2 deg.
+        assert d.yaw_sd_deg == pytest.approx(math.sqrt(0.75))
         # The settling is still the largest correction applied at once.
         assert d.largest_jump_m == pytest.approx(0.2) and d.largest_jump_t == pytest.approx(1.0)
+
+    def test_drift_of_a_mapping_run_reads_as_upstream(self, ss):
+        # map -> odom stays at the identity while the car stands, then turns 4 deg.
+        map_odom = [(0.0, 0, 0, 0), (1.0, 0, 0, 0), (2.0, 0, 0, 0), (3.0, 0.1, 0, math.radians(4))]
+        odom = [(0.0, 0, 0), (2.5, 1, 0), (3.0, 2, 0)]
+        d = ss.drift_summary(map_odom, odom)
+        assert d.final == pytest.approx((0.1, 0, math.radians(4)))
+        assert d.max_offset_m == pytest.approx(0.1) and d.max_yaw_deg == pytest.approx(4)
+        # Upstream's spread of the four rotations 0, 0, 0 and 4 deg.
+        assert d.yaw_sd_deg == pytest.approx(math.sqrt(3))
 
     def test_drift_wraps_the_rotation(self, ss):
         map_odom = [(0.0, 0, 0, math.radians(179)), (2.0, 0, 0, math.radians(-179))]
         d = ss.drift_summary(map_odom, [(0.0, 0, 0), (1.0, 1, 0)])
-        assert d.max_yaw_deg == pytest.approx(2.0)
+        assert d.max_yaw_deg == pytest.approx(2.0) and d.yaw_sd_deg == pytest.approx(1.0)
         assert math.degrees(d.final[2]) == pytest.approx(2.0)
+
+    def test_drift_lines(self, ss):
+        d = ss.Drift(20.0, (0.06, 0.08, math.radians(1.5)), 0.054, 1.1, 54.0, 0.2, 3.0, 0.87)
+        first, second = ss.drift_lines(d)
+        assert first == (
+            "Odometry path 20.0 m. Change in map -> odom from the car's first move to the end: "
+            '0.100 m, +1.5 deg (0.50% of the path).'
+        )
+        assert second.startswith('During the run: largest offset 0.200 m, largest rotation 3.0')
 
     def test_no_drift_without_transforms(self, ss):
         assert ss.drift_summary([], [(0, 0, 0)]) is None

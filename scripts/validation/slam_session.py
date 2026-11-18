@@ -185,12 +185,16 @@ def drift_summary(
 
     `map_odom` is (t, x, y, yaw) of the map -> odom transform, `odom` is
     (t, x, y) of /odom/integrated. A jump between consecutive transforms is a
-    correction applied at once, as a loop closure does. Offsets are measured
-    from map -> odom at its last sample before the car first moved
-    (first_moved()). A localization run starts at its start pose, so its raw
-    transform is not drift, and neither is the localizer settling while the
-    car stands still. A mapping run starts at the identity, so its numbers
-    are the raw transform, as upstream reports them.
+    correction applied at once, as a loop closure does. Offsets, rotations
+    and their spread are measured from map -> odom at its last sample before
+    the car first moved (first_moved()), or at its first sample if the car
+    never moved. Earlier samples count as no change. A localization run
+    starts the transform at the offset between the start pose and the
+    odometry pose, which the ESP32 keeps through the session's teleop
+    restart. That offset is there before the car moves, so it is not drift,
+    and neither is the localizer settling while the car stands still. In a
+    mapping run the transform stays at the identity until the car moves, so
+    its numbers are upstream's.
     """
     if not map_odom:
         return None
@@ -209,9 +213,11 @@ def drift_summary(
         base = m
     run = []
     for m in map_odom:
-        if m[0] >= base[0]:
-            turn = math.atan2(math.sin(m[3] - base[3]), math.cos(m[3] - base[3]))
-            run.append((m[1] - base[1], m[2] - base[2], turn))
+        if m[0] < base[0]:
+            run.append((0.0, 0.0, 0.0))
+            continue
+        turn = math.atan2(math.sin(m[3] - base[3]), math.cos(m[3] - base[3]))
+        run.append((m[1] - base[1], m[2] - base[2], turn))
     yaws = [math.degrees(r[2]) for r in run]
     return Drift(
         path,
@@ -230,9 +236,8 @@ def drift_lines(drift: Drift) -> list[str]:
     end = math.hypot(x, y)
     share = f' ({end / drift.path_m:.2%} of the path)' if drift.path_m else ''
     return [
-        f'Odometry path {drift.path_m:.1f} m. map -> odom at the end, from where it stood when '
-        f'the car first moved: {end:.3f} m, '
-        f'{math.degrees(yaw):+.1f} deg{share}.',
+        f"Odometry path {drift.path_m:.1f} m. Change in map -> odom from the car's first move "
+        f'to the end: {end:.3f} m, {math.degrees(yaw):+.1f} deg{share}.',
         f'During the run: largest offset {drift.max_offset_m:.3f} m, largest rotation '
         f'{drift.max_yaw_deg:.1f} deg, rotation spread (SD) {drift.yaw_sd_deg:.2f} deg. '
         f'Largest single correction {drift.largest_jump_m * 1e3:.0f} mm, '
