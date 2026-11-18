@@ -50,6 +50,10 @@ RACECAR_MAP = HERE / 'neoracer_map.py'
 IDLE_SEC = 10.0
 SCAN_PERIOD_SEC = 0.2
 SCAN_POINTS = 360
+# The scan returns the localizers use (config/amcl.yaml, laser_min_range and
+# laser_max_range): inside 0.12 m is the car's own outline, and 15 m is the
+# LakiBeam1's rating at 10% reflectivity.
+SCAN_RANGE_M = (0.12, 15.0)
 TRAIL_STEP_M = 0.05
 TRAIL_MAX = 5000
 THUMB_PX = 160
@@ -152,7 +156,7 @@ def scan_to_map(
     lx = pose[0] + c * laser[0] - s * laser[1]
     ly = pose[1] + s * laser[0] + c * laser[1]
     x, y = au.scan_points_in_map(
-        ranges, angle_min, angle_increment, (lx, ly, pose[2] + laser[2]), 0.3, 12.0, points
+        ranges, angle_min, angle_increment, (lx, ly, pose[2] + laser[2]), *SCAN_RANGE_M, points
     )
     return [[round(float(a), 2), round(float(b), 2)] for a, b in zip(x, y, strict=True)]
 

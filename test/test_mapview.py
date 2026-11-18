@@ -132,6 +132,20 @@ class TestLiveData:
         )
         assert pts == [[pytest.approx(1.0), pytest.approx(-0.8)]]
 
+    def test_scan_ranges_are_the_localizers(self, mv):
+        amcl = yaml.safe_load((ROOT / 'config' / 'amcl.yaml').read_text())
+        params = amcl['amcl']['ros__parameters']
+        assert mv.SCAN_RANGE_M == (params['laser_min_range'], params['laser_max_range'])
+
+    def test_scan_keeps_what_the_lakibeam_sees(self, mv):
+        # Beams at 0, 90, 180 and 270 deg from a car at the origin facing +x.
+        # 0.2 m and 14 m are inside the LakiBeam's range; 0.1 m is the car
+        # itself and 16 m is past the rating.
+        pts = mv.scan_to_map(
+            [0.2, 14.0, 0.1, 16.0], 0.0, math.pi / 2, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        )
+        assert pts == [[0.2, 0.0], [0.0, 14.0]]
+
     def test_trail_steps_ages_and_restarts(self, mv):
         t = mv.Trail(step_m=0.1, limit=3)
         for x in (0.0, 0.05, 0.2, 0.4, 0.6):
