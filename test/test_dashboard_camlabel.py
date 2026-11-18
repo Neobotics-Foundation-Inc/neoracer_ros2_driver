@@ -130,3 +130,6 @@ def test_the_page_and_the_shared_styles_are_served(cl, server):
     assert 'data-app="Camera label"' in page and '/ui/neoracer.css' in page
     with urllib.request.urlopen(server + '/ui/neoracer.css', timeout=5) as r:
         assert r.headers['Content-Type'].startswith('text/css')
+    # A link from another port carries the theme in the query string.
+    with urllib.request.urlopen(server + '/?theme=light', timeout=5) as r:
+        assert 'data-app="Camera label"' in r.read().decode()

@@ -333,7 +333,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(asset[0])
             return
-        if self.path == '/':
+        # The page also answers with a query string. theme.js reads ?theme=,
+        # which a link from another port can carry: each port keeps its own storage.
+        if self.path.split('?', 1)[0] == '/':
             self._send((BASE / 'wallfollow.html').read_bytes(), 'text/html; charset=utf-8')
         elif self.path == '/state':
             with _lock:
