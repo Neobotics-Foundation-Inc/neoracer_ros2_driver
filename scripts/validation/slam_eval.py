@@ -16,7 +16,8 @@ Records go to slam_eval/ under the data root: one CSV per `load` run and marks.c
 
 `load` reads the Jetson through sysinfo.py: CPU, GPU, the junction
 temperature, the board's power, memory, swap, and the SoC's over-current
-throttling. A run with swap in use or throttling is to be discarded.
+throttling. A run whose swap in use grows, or that throttles, is to be
+discarded.
 """
 
 from __future__ import annotations
@@ -226,11 +227,17 @@ def summarize(samples: list[Sample]) -> list[str]:
     clocks = [s.arm_mhz for s in samples if s.arm_mhz]
     if clocks:
         lines.append(f'ARM clock          min {min(clocks)} MHz')
+    # Swap left in use by earlier work, such as a build, stays in use until a
+    # page is read back, so only swap that grows during the run counts.
     swap = [s.swap_used_mib for s in samples if s.swap_used_mib is not None]
     if not swap:
         lines.append('Swap in use: not read.')
-    elif max(swap):
-        lines.append(f'Swap in use: up to {max(swap)} MiB. Discard this run.')
+    elif max(swap) > swap[0]:
+        lines.append(
+            f'Swap in use: {swap[0]} MiB at the start, up to {max(swap)} MiB. Discard this run.'
+        )
+    elif swap[0]:
+        lines.append(f'Swap in use: {swap[0]} MiB from before the run, no more during it.')
     else:
         lines.append('Swap in use: none for the whole run.')
     if flags:

@@ -425,6 +425,10 @@ class Session:
         if self.mode == 'localization' and not Path(str(stem) + '.yaml').exists():
             print(f'No saved map {self.name} in {stem.parent}.')
             return False
+        if self.mode == 'localization' and not self.pose:
+            self.pose = start_mark_pose(stem)
+            if self.pose:
+                print(f'Start pose from the map: {self.pose} (the start mark).')
         # Humble ships MCAP as a separate package; without it the bag would not start.
         if not neoracer_log.storage_installed('mcap'):
             print(
@@ -685,16 +689,18 @@ class Session:
 
     def status(self) -> str:
         elapsed = time.monotonic() - self.started
-        s = self.recorder.samples[-1] if self.recorder and self.recorder.samples else None
+        samples = self.recorder.samples if self.recorder else []
+        s = samples[-1] if samples else None
         parts = [f'{int(elapsed // 60):02d}:{int(elapsed % 60):02d}']
         if s:
             parts.append(f'cpu {s.cpu_busy:3.0f}%')
             if s.temp_c is not None:
                 parts.append(f'{s.temp_c:.1f}C')
-            # A run with swap in use or throttling is discarded, so both show here.
+            # A run whose swap grows, or that throttles, is discarded, so both show here.
             alarms = ['THROTTLED'] if s.throttled else []
-            if s.swap_used_mib:
-                alarms.append(f'SWAP {s.swap_used_mib} MiB')
+            start = samples[0].swap_used_mib
+            if s.swap_used_mib and start is not None and s.swap_used_mib > start:
+                alarms.append(f'SWAP +{s.swap_used_mib - start} MiB')
             parts.append(' '.join(alarms) or 'ok')
         if self.map_size:
             parts.append(f'map {self.map_size}')
@@ -803,10 +809,10 @@ class Session:
             if self.mode == 'localization':
                 print('Drive at least 0.5 m before the first mark so the localizer updates.')
             # With the mode switch UP the ESP32 drives from the sticks, so the
-            # Jetson's mapping caps do not apply; the speed switch sets the pace.
+            # Jetson's mapping caps do not apply. The firmware caps the sticks at
+            # 15 percent only with the speed switch UP, so every session keeps it UP.
             print('Drive with the handset, mode switch UP (manual).')
-            if self.mode == 'mapping':
-                print('Keep the speed switch UP (slow).')
+            print('Keep the speed switch UP (slow).')
             print('Keys are read without Enter.')
             with Terminal() as term:
                 try:
@@ -871,6 +877,22 @@ class Session:
             stops=ended,
             disk_end=disk_line()[1],
         )
+
+
+def start_mark_pose(stem: Path) -> str:
+    """
+    Return the map's start pose from its meta.yaml as `x,y,yaw`, or ''.
+
+    The session asks for the car on the start mark, which is where the map was
+    begun. The ESP32 keeps its odometry pose through the session's teleop
+    restart, so the map origin is the odometry origin of the mapping run and
+    not the start mark. Without a start pose the localizer starts at the map
+    origin.
+    """
+    from neoracer_ros2_driver import autonomy as au
+
+    pose = au.pose_of(au.read_record(stem.parent / au.META_FILE).get('start_pose'))
+    return ','.join(str(v) for v in pose) if pose else ''
 
 
 def hostname_ip() -> str:
