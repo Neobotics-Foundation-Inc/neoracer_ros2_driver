@@ -34,6 +34,15 @@ def page(mv):
     return (Path(mv.__file__).parent / 'mapview.html').read_text()
 
 
+@pytest.fixture
+def pillow():
+    # The viewer reads saved maps with Pillow (python3-pil on the car). Off the
+    # car, the tests that read a map skip when Pillow is not installed.
+    return pytest.importorskip('PIL')
+
+
+# OpenCV writes the test maps and decodes the thumbnails, so the tests do not
+# check Pillow against itself.
 def write_map(folder: Path, name: str, pixels: np.ndarray, origin=(-1.0, -2.0, 0.0)) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(folder / f'{name}.pgm'), pixels)
@@ -86,7 +95,7 @@ class TestMapsFromDisk:
         assert grid[0].tolist() == [100] * 5
         assert grid[3, 0] == -1 and grid[3, 1] == 0
 
-    def test_read_saved_flips_to_map_rows(self, mv, tmp_path):
+    def test_read_saved_flips_to_map_rows(self, mv, tmp_path, pillow):
         info, grid = mv.read_saved(write_map(tmp_path, 'room', room_pixels()))
         assert info == {'width': 5, 'height': 4, 'resolution': 0.05, 'origin': [-1.0, -2.0]}
         assert grid[-1].tolist() == [100] * 5  # the top image row is the last map row
@@ -103,12 +112,12 @@ class TestMapsFromDisk:
             (auto / f'b{suffix}').write_text('x')
         assert mv.saved_stem('b') == auto / 'b'
 
-    def test_thumbnail_png(self, mv, tmp_path):
+    def test_thumbnail_png(self, mv, tmp_path, pillow):
         png = mv.thumbnail_png(write_map(tmp_path, 'room', room_pixels()), max_px=3)
         img = decode_png(png)
         assert png[:4] == b'\x89PNG' and max(img.shape[:2]) <= 3
 
-    def test_thumbnail_colors_match_page(self, mv, tmp_path):
+    def test_thumbnail_colors_match_page(self, mv, tmp_path, pillow):
         png = mv.thumbnail_png(write_map(tmp_path, 'room', room_pixels()), max_px=1000)
         colors = {tuple(int(v) for v in px[::-1]) for px in decode_png(png).reshape(-1, 3)}
         assert colors <= set(mv.THUMB_RGB.values())
@@ -370,7 +379,7 @@ class TestHttp:
         assert json.loads(res.getheader('X-Map-Info'))['version'] == 4
         assert gzip.decompress(data) == bytes([0, 100])
 
-    def test_maps_thumb_and_saved(self, server, root):
+    def test_maps_thumb_and_saved(self, server, root, pillow):
         saved_map(root, 'hall')
         res, data = request(server, 'GET', '/api/maps')
         assert [m['name'] for m in json.loads(data)['maps']] == ['hall']

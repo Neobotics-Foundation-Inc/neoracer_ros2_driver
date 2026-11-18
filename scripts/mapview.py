@@ -8,11 +8,10 @@ never drives the car.
 ROS subscriptions open on the first browser request and close IDLE_SEC after
 the last one, so with no browser connected the viewer costs no ROS traffic.
 The map list, thumbnails, and saved maps are read from the map folder without
-ROS; OpenCV reads the map images and draws the thumbnails. Start, save, stop,
-load, and keep run `racecar map` (scripts/neoracer_map.py) as a child process,
-one at a time, and the page shows its output. Set pose publishes /initialpose
-with the spread `racecar map load` uses; Find me calls
-/autonomy/global_localization.
+ROS. Start, save, stop, load, and keep run `racecar map`
+(scripts/neoracer_map.py) as a child process, one at a time, and the page shows
+its output. Set pose publishes /initialpose with the spread `racecar map load`
+uses; Find me calls /autonomy/global_localization.
 
 Run by scripts/neoracer-mapview.service. The page is scripts/mapview.html.
 """
@@ -23,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import math
 from pathlib import Path
@@ -65,7 +65,7 @@ FIND_TIMEOUT_SEC = 5.0
 # start_spread_xy_m and start_spread_yaw_deg).
 SET_POSE_SD = (0.25, 10.0)
 # The junction temperature the System Health page and `racecar status` call hot
-# (scripts/diagnose.py, SOC_FAIL_C). The Orin's own throttling starts near 95 C.
+# (scripts/diagnose.py, SOC_FAIL_C).
 HOT_C = 85.0
 ACTIONS = ('start', 'save', 'stop', 'load', 'recover')
 
@@ -84,19 +84,16 @@ def occupancy_from_pixels(pixels: np.ndarray, meta: dict[str, Any]) -> np.ndarra
 
 def read_saved(stem: Path) -> tuple[dict[str, Any], np.ndarray] | None:
     """Return (map info, occupancy rows from the bottom edge, as /map) for a saved map."""
-    import cv2
+    from PIL import Image
 
     meta_path = Path(f'{stem}.yaml')
     try:
         meta = yaml.safe_load(meta_path.read_text()) or {}
+        image = meta_path.parent / str(meta.get('image', f'{stem.name}.pgm'))
+        pixels = np.asarray(Image.open(image).convert('L'), dtype=float)
     except (OSError, yaml.YAMLError):
         return None
-    image = meta_path.parent / str(meta.get('image', f'{stem.name}.pgm'))
-    # imread returns None, not an error, for a missing or unreadable image.
-    pixels = cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)
-    if pixels is None:
-        return None
-    grid = np.flipud(occupancy_from_pixels(pixels.astype(float), meta))
+    grid = np.flipud(occupancy_from_pixels(pixels, meta))
     origin = meta.get('origin', [0.0, 0.0, 0.0])
     info = {
         'width': int(grid.shape[1]),
@@ -118,8 +115,7 @@ def saved_stem(name: str) -> Path | None:
 
 
 def thumbnail_png(stem: Path, max_px: int = THUMB_PX) -> bytes | None:
-    """Return a PNG of the saved map, its longer side at most max_px, or None."""
-    import cv2
+    from PIL import Image
 
     saved = read_saved(stem)
     if saved is None:
@@ -129,15 +125,11 @@ def thumbnail_png(stem: Path, max_px: int = THUMB_PX) -> bytes | None:
     rgb[:] = THUMB_RGB['unknown']
     rgb[grid == 0] = THUMB_RGB['free']
     rgb[grid == 100] = THUMB_RGB['wall']
-    # The top image row first, and the channels in OpenCV's order (blue first).
-    image = np.ascontiguousarray(np.flipud(rgb)[:, :, ::-1])
-    height, width = image.shape[:2]
-    scale = max_px / max(height, width)
-    if scale < 1.0:
-        size = (max(1, round(width * scale)), max(1, round(height * scale)))
-        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
-    ok, png = cv2.imencode('.png', image)
-    return png.tobytes() if ok else None
+    img = Image.fromarray(np.flipud(rgb))
+    img.thumbnail((max_px, max_px))
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
 
 
 # -- live data --

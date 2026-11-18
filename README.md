@@ -273,6 +273,8 @@ Autonomy commands enter through the same mux as other `/drive` commands, so the 
 
 The map viewer is a web page for mapping and localization. It shows the map the car is building or using, the car on it, the path the car has driven, and the live lidar scan. Its buttons run the same `racecar map` commands as the shell. The page never drives the car: it publishes no `/drive`, and you drive with the handset as usual.
 
+On the map, walls are white, free space is grey and unexplored space is dark. The car is a yellow arrow. It is faded while the car is not localized. The trail is a gold line and the scan is red dots. A short red line and a green line mark the x and y axes at the map's origin. A scale bar sits at the bottom left.
+
 `scripts/mapview.py` serves the page on port 8088. On a phone or laptop on the car's network, open `http://neoracer.local:8088`. If that name does not resolve, use the car's IP address instead, for example `http://10.42.0.1:8088` on the car's access point. The apps page on 8080 does not list the viewer yet.
 
 The top bar shows the mode (Mapping or Localization), the map's name, and Localized or Not localized. Details adds the scan fit, the pose spread, the car's pose, the CPU load, the Jetson's junction temperature, and the theme switch. A banner under the bar shows these:
@@ -289,14 +291,14 @@ The top bar shows the mode (Mapping or Localization), the map's name, and Locali
 | Stop | Runs `racecar map stop`. While mapping, it offers Save and stop, or Stop without saving. A mapping run is autosaved either way. |
 | Maps | Opens the list of maps, each with a thumbnail, its state, when it was saved and its size. Each map has Load and Extend, and Keep when it has unsaved changes. |
 | Load | Runs `racecar map load NAME`. Choose to start from the car's last saved position on the map, or to search the whole map while you drive (`--global`). |
-| Extend | Shows the saved map. Drag on it from where the car is toward the way it faces. The page then runs `racecar map start NEW --from NAME --pose x,y,yaw`. Give the same name to extend the map in place. |
+| Extend | Shows the saved map. Drag on it from where the car is toward the way it faces. The page then runs `racecar map start NEW --from NAME --pose x,y,yaw`. Give the same name to extend the map in place. As for Start mapping, teleop must be running and the speed switch UP (slow). |
 | Keep | Runs `racecar map recover NAME`: the autosave of a run that was never saved becomes the saved map. |
 | Set pose | While localizing, drag on the map from where the car is toward the way it faces. The page publishes that pose on `/initialpose`, with the spread `racecar map load` uses. |
 | Find me | While localizing with AMCL, calls `/autonomy/global_localization`. AMCL then searches the whole map. Drive slowly until the bar shows Localized. |
 | Clear trail | Clears the car's drawn path on every open map page. |
 | Zoom in, Zoom out, Center on the car | Change the view only. You can also drag to pan, and pinch or scroll to zoom. |
 
-The commands run one at a time, and the page shows each one's output. A failed command's output stays until the next command. Every button except Save, Clear trail and the view buttons shows a confirmation first. Start and Load stop the current autonomy run. They also stop a lab app that drives the car, after a confirmation that names it.
+The commands run one at a time, and the page shows each one's output. A failed command's output stays until the next command. Save and Clear trail act at once. Every other button that runs a command or sets the pose asks you to confirm first. Start and Load stop the current autonomy run. They also stop a lab app that drives the car, after a confirmation that names it.
 
 With no browser open, the viewer holds no ROS subscriptions. It subscribes to `/autonomy/status`, `/autonomy/pose`, `/map` and `/scan` at the first request and drops them 10 s after the last one. The map list and the thumbnails come from the map folder, `~/neoracer_data/maps`.
 
@@ -307,6 +309,8 @@ sudo cp ~/ros2_ws/src/neoracer_ros2_driver/scripts/neoracer-mapview.service /etc
 sudo systemctl daemon-reload
 sudo systemctl start neoracer-mapview
 ```
+
+To stop it, run `sudo systemctl stop neoracer-mapview`.
 
 Or run `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py` in a terminal with the workspace sourced. Either way, the buttons need what `racecar map` needs: `neoracer-autonomy.service` and `/etc/sudoers.d/neoracer` installed, and teleop running.
 
