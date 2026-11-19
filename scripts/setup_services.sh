@@ -7,12 +7,19 @@
 #   neoracer-data.service      - oneshot: the data root, ~/neoracer_data
 #   neoracer-teleop.service    - full stack via launch_teleop.sh
 #   neoracer-watchdog.service  - BindsTo=teleop, restart-on-failure supervisor
-#   neoracer-dashboard.service - web status page (port 8080)
+#   neoracer-dashboard.service - web apps page (port 8080)
 #   neoracer-jupyter.service   - JupyterLab (port 8888)
+#   neoracer-mapview.service   - web map viewer (port 8088)
 #
-# neoracer-autonomy.service (SLAM on top of teleop) is held for now: the unit
-# stays in this directory but is not installed, and an existing install is
-# retired below. `racecar launch autonomy` runs the same launch in a terminal.
+# Installed, not enabled:
+#   neoracer-autonomy.service  - SLAM mapping or localization, BindsTo=teleop.
+#                                `racecar map` and the map viewer start it.
+#                                Mapping at boot would build an unsaved map
+#                                and take CPU from every lab.
+#
+# /etc/sudoers.d/neoracer, from sudoers.d-neoracer, lets the racecar user
+# start, stop and restart these units and the lab dashboards with no password.
+# It is checked with `visudo -cf` before it is installed.
 #
 # Lab dashboards, shipped in scripts/dashboards/ and installed disabled by
 # setup_dashboards.sh:
@@ -41,19 +48,27 @@ SERVICES=(
     neoracer-watchdog.service
     neoracer-dashboard.service
     neoracer-jupyter.service
+    neoracer-mapview.service
 )
-
-# Units this setup deliberately does not install, and takes back off a car that
-# has them from an earlier run. Their .service files stay in scripts/ so the
-# work resumes by moving the name back into SERVICES.
-HELD=(
+INSTALL_ONLY=(
     neoracer-autonomy.service
 )
 
 echo "Core services:"
 
+# Before 0.9.0, neoracer-autonomy.service ran the osracer autonomy base and
+# could be enabled at boot. The new unit has no [Install] section, so
+# `systemctl disable` cannot undo that link once it is installed. Disable the
+# old unit first, while its file is still in place.
+for svc in "${INSTALL_ONLY[@]}"; do
+    if [[ -e "/etc/systemd/system/multi-user.target.wants/$svc" ]]; then
+        sudo systemctl disable "$svc"
+        echo "  $svc: disabled at boot (it now starts on demand)"
+    fi
+done
+
 changed=0
-for svc in "${SERVICES[@]}"; do
+for svc in "${SERVICES[@]}" "${INSTALL_ONLY[@]}"; do
     src="${SCRIPT_DIR}/${svc}"
     dst="/etc/systemd/system/${svc}"
     if [[ ! -f "$src" ]]; then
@@ -77,28 +92,11 @@ fi
 # Retire the legacy jupyterlab.service if present: neoracer-jupyter.service
 # replaces it, and both bind port 8888, so leaving the old one enabled would
 # double-bind on boot.
-if systemctl list-unit-files 2>/dev/null | grep -q '^jupyterlab\.service'; then
+# No pipe into `grep -q`. Under pipefail, grep exits at the first match,
+# and the writer can then fail on a closed pipe although the name was found.
+if [[ -n "$(systemctl list-unit-files 'jupyterlab.service' --no-legend 2>/dev/null)" ]]; then
     echo "  retiring legacy jupyterlab.service (replaced by neoracer-jupyter)"
     sudo systemctl disable --now jupyterlab.service 2>/dev/null || true
-fi
-
-# Take a held unit back off a car that installed it before the hold. Stopping
-# and disabling would be enough to keep it off the boot path; the unit file
-# goes too so `racecar service status` reports it as absent rather than as a
-# service someone could start by hand and expect to work.
-held_removed=0
-for svc in "${HELD[@]}"; do
-    if [[ -f "/etc/systemd/system/$svc" ]]; then
-        echo "  $svc: held, removing (development paused)"
-        sudo systemctl disable --now "$svc" 2>/dev/null || true
-        sudo rm -f "/etc/systemd/system/$svc"
-        sudo systemctl reset-failed "$svc" 2>/dev/null || true
-        held_removed=1
-    fi
-done
-
-if [[ $held_removed -eq 1 ]]; then
-    sudo systemctl daemon-reload
 fi
 
 # Enable so they auto-start on boot. `enable` is idempotent - no-op if
@@ -112,6 +110,21 @@ for svc in "${SERVICES[@]}"; do
         echo "  $svc: enabled"
     fi
 done
+
+# Password-free start, stop and restart for the racecar user. A file that
+# fails `visudo -cf` is never installed: a broken sudoers file can lock sudo
+# out for every user.
+SUDOERS_SRC="${SCRIPT_DIR}/sudoers.d-neoracer"
+SUDOERS_DST="/etc/sudoers.d/neoracer"
+if sudo cmp -s "$SUDOERS_SRC" "$SUDOERS_DST" 2>/dev/null; then
+    echo "  $SUDOERS_DST: already up to date"
+elif sudo visudo -cqf "$SUDOERS_SRC"; then
+    sudo install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DST"
+    echo "  $SUDOERS_DST: installed/updated"
+else
+    echo "  $SUDOERS_SRC fails visudo -c; not installed" >&2
+    exit 1
+fi
 
 # The lab dashboards ship in this tree; setup_dashboards.sh installs their
 # units (no network needed) and moves the checkouts an older setup cloned
@@ -135,7 +148,9 @@ else
 fi
 
 echo
-echo "Core services installed and enabled. To start now:"
+echo "Core services installed and enabled. neoracer-autonomy is installed and"
+echo "starts on demand: racecar map start NAME, or the map viewer on port 8088."
+echo "To start the core services now:"
 echo "  sudo systemctl start neoracer-teleop"
 echo "Or reboot to bring everything up automatically."
 echo

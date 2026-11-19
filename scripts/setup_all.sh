@@ -10,6 +10,23 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The systemd units and the sudoers file name the racecar user and
+# /home/racecar/ros2_ws; set up anywhere else, every service would fail.
+EXPECTED_DIR="/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts"
+if [ "$EUID" -eq 0 ]; then
+    echo "Run as the racecar user, not with sudo or as root: bash scripts/setup_all.sh" >&2
+    exit 1
+fi
+if [ "$(id -un)" != "racecar" ]; then
+    echo "Run as the racecar user (this is $(id -un)). The services expect racecar." >&2
+    exit 1
+fi
+if [ "$SCRIPT_DIR" != "$EXPECTED_DIR" ]; then
+    echo "The driver must be at /home/racecar/ros2_ws/src/neoracer_ros2_driver" >&2
+    echo "(this copy is at ${SCRIPT_DIR%/scripts})." >&2
+    exit 1
+fi
+
 if [ "$(lsb_release -cs)" != "jammy" ]; then
     echo "WARNING: this script targets Ubuntu 22.04 (Jammy); detected '$(lsb_release -cs)'."
     echo "Continue anyway? [y/N]"
@@ -61,7 +78,7 @@ echo "==> [7/8] JupyterLab + workspace"
 bash "$SCRIPT_DIR/setup_jupyter.sh"
 
 echo
-echo "==> [8/8] systemd services (core stack enabled, lab dashboards installed off)"
+echo "==> [8/8] systemd services (core stack and map viewer enabled, autonomy on demand, lab dashboards off)"
 bash "$SCRIPT_DIR/setup_services.sh"
 
 echo
