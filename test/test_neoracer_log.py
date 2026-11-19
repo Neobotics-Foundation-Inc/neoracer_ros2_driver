@@ -1,5 +1,6 @@
 """Unit tests for scripts/neoracer_log.py (the `racecar log` implementation)."""
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -339,6 +340,41 @@ class TestCli:
         monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {})
         assert rl.main(['start', '--topics', '/scan', '--exclude', '/sc.*']) == 1
         assert 'nothing to record' in capsys.readouterr().err
+
+    def test_start_keeps_the_recorder_off_the_terminal(self, tmp_path, monkeypatch, capsys):
+        # On a terminal, the recorder's keyboard controls turn off echo and
+        # read keystrokes. Its own session does not stop them, so its stdin
+        # is /dev/null.
+        started = {}
+
+        class Recorder:
+            pid = 4321
+
+            def __init__(self, argv, **kwargs):
+                started.update(kwargs, argv=argv)
+
+        monkeypatch.setattr(rl, 'STATE_FILE', tmp_path / 'log.state')
+        monkeypatch.setattr(rl, 'load_config', lambda *a, **k: {})
+        monkeypatch.setattr(rl, 'choose_storage', lambda *a: ('mcap', ''))
+        monkeypatch.setattr(rl, 'bandwidth_warning', lambda *a: None)
+        monkeypatch.setattr(rl.subprocess, 'Popen', Recorder)
+        assert rl.main(['start', 'lap1', '--topics', '/odom', '--dir', str(tmp_path)]) == 0
+        assert started.get('stdin') is rl.subprocess.DEVNULL
+        assert started['start_new_session'] is True
+        assert started['argv'][:3] == ['ros2', 'bag', 'record']
+        assert 'pid 4321' in capsys.readouterr().out
+
+    def test_every_recorder_starts_off_the_terminal(self):
+        # calibrate_dynamics.py records each drive run with the same argv.
+        scripts = (ROOT / 'scripts').rglob('*.py')
+        users = [p for p in scripts if 'build_record_argv(' in p.read_text()]
+        assert {p.name for p in users} == {'neoracer_log.py', 'calibrate_dynamics.py'}
+        for path in users:
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Call) and getattr(node.func, 'attr', '') == 'Popen':
+                    kwargs = {k.arg: ast.unparse(k.value) for k in node.keywords}
+                    where = f'{path.name}:{node.lineno}'
+                    assert kwargs.get('stdin') == 'subprocess.DEVNULL', where
 
     def test_stop_has_a_finalize_timeout(self):
         args = rl.build_parser().parse_args(['stop'])

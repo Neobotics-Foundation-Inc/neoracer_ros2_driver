@@ -844,8 +844,11 @@ class Driver:
         storage, _ = choose_storage(None, cfg.get('STORAGE'))
         root = Path(resolve_log_root(cfg.get('DIR')))
         bag_dir = root / build_bag_name(f'{prefix}_{run}', time.time())
+        # The recorder reads stdin from /dev/null, so its keyboard controls
+        # (space pauses) stay off the terminal, as in neoracer_log.py.
         recorder = subprocess.Popen(
             build_record_argv(bag_dir, TOPICS, storage=storage or 'sqlite3'),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
