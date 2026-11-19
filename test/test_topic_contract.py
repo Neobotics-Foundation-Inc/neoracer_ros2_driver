@@ -606,7 +606,7 @@ TABLE = (
         publishers=(
             End(
                 'TransformBroadcaster (controller_node, odom -> base_link)',
-                f'{CONTROLLER}:339',
+                f'{CONTROLLER}:340',
                 REL,
             ),
             End('robot_state_publisher (base_link -> base_footprint, static)', FRAMES_URDF, REL),
