@@ -284,6 +284,8 @@ To view a mapping run in Lichtblick:
 
 The layout shows a top-down 3D view of the map, the scan and the pose, following the car. It also shows a table of `/autonomy/status` and a plot of the pose. Its pose estimate tool publishes nothing while client publishing is off.
 
+`scripts/validation/` holds test tools for this launch. `slam_session.py` runs a whole mapping or localization session from one terminal and writes a report under `~/neoracer_data/slam_eval/sessions/`, and its `replay` runs a session's bag through slam_toolbox or AMCL with changed settings, for tuning the SLAM and AMCL configs offline. See `scripts/validation/README.md`.
+
 ### Map viewer
 
 The map viewer is a web page for mapping and localization. It shows the map the car is building or using, the car on it, the path the car has driven, and the live lidar scan. Its buttons run the same `racecar map` commands as the shell. The page never drives the car: it publishes no `/drive`, and you drive with the handset as usual.
