@@ -1008,6 +1008,18 @@ def note_turned_off(checks: list[Check], running: dict[str, bool] | None = None)
     ]
 
 
+def note_mapping_pause(checks: list[Check], ros: RosResult) -> list[Check]:
+    """While mapping, inference_node drops its camera input (pause_while_mapping); say so."""
+    msg = ros.values.get(AUTONOMY_STATUS)
+    mode = {kv.key: kv.value for kv in msg.values}.get('mode') if msg is not None else None
+    if mode != 'mapping':
+        return checks
+    return [
+        Check(c.group, c.name, OK, 'paused while mapping') if c.name == 'YOLO inference' else c
+        for c in checks
+    ]
+
+
 def autonomy_checks(unit_state: str, ros: RosResult, sampled: bool) -> list[Check]:
     """
     Mode, localized, scan fit, spread, and saves from /autonomy/status, plus the pose rate.
@@ -1228,7 +1240,9 @@ def main() -> int:
     checks: list[Check] = []
     checks.extend(host.get('devices', []))
     if 'sensors' in requested:
-        checks.extend(note_turned_off(rate_checks('sensors', SENSOR_TOPICS, ros)))
+        checks.extend(
+            note_turned_off(note_mapping_pause(rate_checks('sensors', SENSOR_TOPICS, ros), ros))
+        )
     if 'actuators' in requested:
         checks.extend(actuator_checks(ros))
     if 'autonomy' in requested:

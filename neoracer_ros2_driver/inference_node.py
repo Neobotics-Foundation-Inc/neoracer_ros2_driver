@@ -29,6 +29,12 @@ newest one behind it and drops the rest. Detections therefore track the present
 rather than falling further behind a backlog. ``max_rate_hz`` caps the work
 below that, leaving GPU headroom for whatever else the car is running.
 
+With ``pause_while_mapping``, the node drops its camera subscription while
+``/autonomy/status`` reports mode ``mapping`` and subscribes again on any other
+mode. While a map is built, the car then spends no CPU decoding frames and no
+GPU time on the model. The model stays loaded, so detections return with the
+first frame after mapping ends.
+
 Health goes to ``/diagnostics`` (``DiagnosticArray``) on a timer: inference
 latency, detection counts, and whether frames are still arriving.
 
@@ -43,7 +49,7 @@ from ament_index_python.packages import get_package_share_directory
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from vision_msgs.msg import (
     BoundingBox2D,
@@ -59,6 +65,11 @@ import cv2
 import numpy as np
 
 from neoracer_ros2_driver import inference_lib as il
+
+
+def pauses_for(mode, enabled):
+    """Report whether inference pauses for an /autonomy/status mode."""
+    return enabled and mode == 'mapping'
 
 
 def load_yolo(model_path, task='detect'):
@@ -95,6 +106,7 @@ class InferenceNode(Node):
         image_topic = self.declare_parameter('image_topic', '/camera/color').value
         det_topic = self.declare_parameter('detections_topic', '/edgetpu/inference').value
         max_rate = self.declare_parameter('max_rate_hz', 15.0).value
+        self.pause_while_mapping = bool(self.declare_parameter('pause_while_mapping', True).value)
         self.publish_annotated = self.declare_parameter('publish_annotated', False).value
         annotated_topic = self.declare_parameter(
             'annotated_topic', '/edgetpu/inference/image'
@@ -118,6 +130,7 @@ class InferenceNode(Node):
         self.last_image_time = None
         self.last_infer_t = 0.0
         self.model_ok = True
+        self.paused = False
 
         # Depth 1 + best effort: the newest frame wins and a slow model sheds the
         # rest in the middleware instead of queueing stale work.
@@ -132,7 +145,18 @@ class InferenceNode(Node):
             self.create_publisher(Image, annotated_topic, qos) if self.publish_annotated else None
         )
         self.diag_pub = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
-        self.create_subscription(Image, image_topic, self._image_cb, qos)
+        self.image_topic = image_topic
+        self.image_qos = qos
+        self.image_sub = None
+        self._subscribe_images()
+        # The status subscription is latched, as autonomy_node publishes it, so
+        # a node started while mapping reads the mode as soon as it subscribes.
+        latched = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(DiagnosticStatus, '/autonomy/status', self._status_cb, latched)
         self.create_timer(diag_period, self._publish_diagnostics)
 
         self.get_logger().info(f'[INFO] Inference node ready: {image_topic} -> {det_topic}')
@@ -234,6 +258,28 @@ class InferenceNode(Node):
             half=self.half,
             verbose=False,
         )[0]
+
+    def _subscribe_images(self):
+        """Subscribe to the camera topic with the newest-frame-wins queue."""
+        self.image_sub = self.create_subscription(
+            Image, self.image_topic, self._image_cb, self.image_qos
+        )
+
+    def _status_cb(self, msg):
+        """Drop the camera subscription while mapping and subscribe again after."""
+        mode = next((kv.value for kv in msg.values if kv.key == 'mode'), '')
+        pause = pauses_for(mode, self.pause_while_mapping)
+        if pause == self.paused:
+            return
+        self.paused = pause
+        if pause:
+            self.destroy_subscription(self.image_sub)
+            self.image_sub = None
+            self.get_logger().info('[INFO] Mapping: inference paused, camera unsubscribed.')
+        else:
+            self.last_image_time = None
+            self._subscribe_images()
+            self.get_logger().info('[INFO] Mapping ended: inference resumed.')
 
     def _image_cb(self, msg):
         """Decode one frame, run the model, publish what it found."""
@@ -347,6 +393,9 @@ class InferenceNode(Node):
         if not self.model_ok:
             status.level = DiagnosticStatus.ERROR
             status.message = 'Inference failed'
+        elif self.paused:
+            status.level = DiagnosticStatus.OK
+            status.message = 'Paused while mapping'
         elif self.last_image_time is None:
             status.level = DiagnosticStatus.WARN
             status.message = 'No images received yet'

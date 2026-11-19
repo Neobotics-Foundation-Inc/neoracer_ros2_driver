@@ -113,7 +113,7 @@ CAMERA_READERS = (
     _dash('pursuit', 'pursuit', 123),
     _dash('smartfollow', 'smartfollow', 256),
     _dash('webteleop', 'teleop', 313),
-    End('inference_node', 'neoracer_ros2_driver/inference_node.py:135', BE),
+    End('inference_node', 'neoracer_ros2_driver/inference_node.py:264', BE),
     _overview(60),
 )
 ODOM_READERS = (
@@ -292,7 +292,7 @@ TABLE = (
     Row(
         '/edgetpu/inference',
         'vision_msgs/msg/Detection2DArray',
-        publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:130', REL),),
+        publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:143', REL),),
         subscribers=(
             End(LIB, 'library/real/vision_real.py:34', BE),
             _fork('vision_real.py:34'),
@@ -316,7 +316,7 @@ TABLE = (
     Row(
         '/diagnostics',
         'diagnostic_msgs/msg/DiagnosticArray',
-        publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:134', REL),),
+        publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:147', REL),),
         subscribers=(
             End(LIB, 'library/real/telemetry_real.py:37', BE),
             _fork('telemetry_real.py:37'),
@@ -337,6 +337,7 @@ TABLE = (
             End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:75 (latched)', REL, TL),
             End('8080 dashboard', 'scripts/dashboard.py:196 (latched)', REL, TL),
             _viewer(413, 'latched', REL, TL),
+            End('inference_node', 'neoracer_ros2_driver/inference_node.py:159 (latched)', REL, TL),
         ),
         evidence=(
             (AUTONOMY_NODE, "create_publisher(DiagnosticStatus, '/autonomy/status', latched)"),
@@ -350,10 +351,16 @@ TABLE = (
                 "create_subscription(DiagnosticStatus, '/autonomy/status', self._record_autonomy, "
                 'latched)',
             ),
+            (
+                'neoracer_ros2_driver/inference_node.py',
+                "create_subscription(DiagnosticStatus, '/autonomy/status', self._status_cb, "
+                'latched)',
+            ),
         ),
         note=(
-            'added by F23; the throttle node reads it for the mapping caps (F14), '
-            'the 8080 page for its Autonomy card (F32)'
+            'added by F23; the throttle node reads it for the mapping caps (F14), the '
+            'inference node for its pause while mapping (F27) and the 8080 page for its '
+            'Autonomy card (F32)'
         ),
     ),
     Row(
