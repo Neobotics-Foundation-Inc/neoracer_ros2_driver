@@ -1,21 +1,21 @@
 """
 Topic contract: what the student library and the lab dashboards read and write.
 
-Library v0.9.0-bot (MITRacecarNeo/racecar-neo-library), the Neobotics fork
-of the library that deployed cars run until F45 resyncs it, and the seven
-NeoRacer lab dashboards (camlabel, eps, linefollow, pursuit, smartfollow,
-wallfollow, webteleop; in scripts/dashboards/ since F33, so their references
-are checked like the driver's) reach the car only through the topics,
+The student library at tag v0.9.0-neobotics (Neobotics-Foundation-Inc/
+racecar-neo-library: upstream's v0.9.0-bot with the NeoRacer's changes, the
+version setup_jupyter.sh installs), and the seven NeoRacer lab dashboards
+(camlabel, eps, linefollow, pursuit, smartfollow, wallfollow, webteleop; in
+scripts/dashboards/ since F33, so their references are checked like the
+driver's) reach the car only through the topics,
 services, action and TF frames below. A
 topic the library reads that nothing publishes does not fail: the library
 reads zeros. So every row is checked against the driver's own sources: the
 driver side exists with the message type, and the QoS on each end lets the
 two connect (a RELIABLE subscriber hears nothing from a BEST_EFFORT
 publisher; a TRANSIENT_LOCAL subscriber needs a TRANSIENT_LOCAL publisher).
-Every read of the deployed fork must be live: the 0.9.0 driver may not break
-the cars in the field. The one exception is /compute_path_to_pose: plan D1
-(decided 2026-11-12) leaves navigation to upstream's 0.9.4, and the library
-resync (F45) drops rc.nav in the same release (FORK_READS_NOT_PROVIDED).
+The library refs are lines in that tag. The library raises
+NotImplementedError for the depth camera, the dot matrix pixels and the LED
+strip instead of using a topic, so those rows have no library end.
 
 Evidence is matched against code only: comments, docstrings and YAML or
 XML comments are stripped first, so a commented-out publisher does not count.
@@ -41,12 +41,9 @@ ROOT = Path(__file__).resolve().parent.parent
 BE, REL = 'best_effort', 'reliable'
 VOL, TL = 'volatile', 'transient_local'
 
-LIB = 'library v0.9.0-bot'
+LIB = 'library v0.9.0-neobotics'
 AUTONOMY_NODE = 'neoracer_ros2_driver/autonomy_node.py'
 DASH = 'dashboard'
-FORK = 'deployed library fork'
-# Neobotics-Foundation-Inc/racecar-neo-library, branch main, read at d8ca6ab.
-FORK_REF = 'racecar-neo-library@d8ca6ab'
 
 
 @dataclass(frozen=True)
@@ -80,10 +77,6 @@ def _sensor(who, source):
     return End(who, source, BE)
 
 
-def _fork(path, reliability=BE, durability=VOL):
-    return End(FORK, f'{FORK_REF} library/real/{path}', reliability, durability)
-
-
 # The mux subscribes to the RC topics only with rc_authority_enable (off by default).
 MUX_RC = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py:276', BE)
 MUX_RC_LINK = End('mux_node (rc_authority_enable)', 'neoracer_ros2_driver/mux_node.py:273', BE)
@@ -106,8 +99,7 @@ def _overview(line):
 
 
 CAMERA_READERS = (
-    End(LIB, 'library/real/camera_real.py:64', BE),
-    _fork('camera_real.py:49 (depth 10)'),
+    End(LIB, 'library/real/camera_real.py:96 (depth 1, on the first read)', BE),
     _dash('camlabel', 'camlabel', 81),
     _dash('linefollow', 'linefollow', 255),
     _dash('pursuit', 'pursuit', 123),
@@ -124,8 +116,7 @@ ODOM_READERS = (
     _dash('wallfollow', 'wallfollow', 173),
 )
 SCAN_READERS = (
-    End(LIB, 'library/real/lidar_real.py:36 (qos_profile_sensor_data)', BE),
-    _fork('lidar_real.py:41 (qos_profile_sensor_data)'),
+    End(LIB, 'library/real/lidar_real.py:40 (qos_profile_sensor_data)', BE),
     _dash('eps', 'eps', 399),
     _dash('smartfollow', 'smartfollow', 254),
     _dash('webteleop', 'teleop', 321),
@@ -136,10 +127,7 @@ SCAN_READERS = (
     End('AMCL', 'launch/autonomy.launch.py localizer:=amcl (sensor data QoS)', BE),
     _viewer(416, 'qos_profile_sensor_data', BE),
 )
-DRIVE_WRITERS = (
-    End(LIB, 'library/real/drive_real.py:34 (depth 1)', REL),
-    _fork('drive_real.py:40 (depth 1)', REL),
-) + tuple(
+DRIVE_WRITERS = (End(LIB, 'library/real/drive_real.py:27 (depth 1)', REL),) + tuple(
     _dash(name, script, line, 'depth 1', REL)
     for name, script, line in (
         ('eps', 'eps', 398),
@@ -151,8 +139,7 @@ DRIVE_WRITERS = (
     )
 )
 CONTROLLER = 'neoracer_ros2_driver/controller.py'
-PHYSICS = 'library/real/physics_real.py:54'
-FORK_PHYSICS = 'physics_real.py:57 (depth 1)'
+PHYSICS = 'library/real/physics_real.py:59 (depth 1)'
 AUTONOMY = 'launch/autonomy.launch.py'
 FRAMES_URDF = 'urdf/neoracer.urdf.xacro'
 TELEOP = 'launch/teleop.launch.py'
@@ -189,16 +176,14 @@ TABLE = (
     Row(
         '/camera/depth',
         'sensor_msgs/msg/Image',
-        subscribers=(End(LIB, 'library/real/camera_real.py:58', BE),),
-        absent='no depth camera; the library fork raises NotImplementedError (plan D7)',
+        absent='no depth camera; the library raises NotImplementedError and subscribes to nothing',
     ),
     Row(
         '/joy',
         'sensor_msgs/msg/Joy',
         publishers=(End('controller_node', f'{CONTROLLER}:231', REL),),
         subscribers=(
-            End(LIB, 'library/real/controller_real.py:89 (depth 1)', REL),
-            _fork('controller_real.py:89 (depth 1)', REL),
+            End(LIB, 'library/real/controller_real.py:88 (depth 1)', REL),
             End('mux_node', 'neoracer_ros2_driver/mux_node.py:267', BE),
             End('gamepad_node', 'neoracer_ros2_driver/gamepad_node.py:51', BE),
         ),
@@ -206,7 +191,7 @@ TABLE = (
             (CONTROLLER, "create_publisher(Joy, '/joy', 10)"),
             ('config/controller.yaml', 'publish_joy: true'),
         ),
-        note='both libraries subscribe RELIABLE, so /joy must stay RELIABLE',
+        note='the library subscribes RELIABLE, so /joy must stay RELIABLE',
     ),
     Row(
         '/scan',
@@ -227,7 +212,6 @@ TABLE = (
         publishers=(End('controller_node', f'{CONTROLLER}:205', REL),),
         subscribers=(
             End(LIB, PHYSICS, BE),
-            _fork(FORK_PHYSICS),
             _overview(62),
             _dash('webteleop', 'teleop', 324, 'qos_profile_sensor_data, raw'),
         ),
@@ -239,7 +223,6 @@ TABLE = (
         publishers=(End('controller_node', f'{CONTROLLER}:233', BE),),
         subscribers=(
             End(LIB, PHYSICS, BE),
-            _fork(FORK_PHYSICS),
             _dash('webteleop', 'teleop', 324, 'qos_profile_sensor_data, raw'),
         ),
         evidence=(
@@ -251,7 +234,7 @@ TABLE = (
         '/encoder/speed',
         'std_msgs/msg/Float32',
         publishers=(End('controller_node', f'{CONTROLLER}:220', BE),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), _overview(63)),
+        subscribers=(End(LIB, PHYSICS, BE), _overview(63)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
         ),
@@ -261,7 +244,7 @@ TABLE = (
         'sensor_msgs/msg/BatteryState',
         publishers=(End('controller_node', f'{CONTROLLER}:211', REL),),
         subscribers=(
-            End(LIB, 'library/real/physics_real.py:78 (depth 10)', REL),
+            End(LIB, 'library/real/physics_real.py:82 (depth 10)', REL),
             _dash('webteleop', 'teleop', 328, 'depth 10', REL),
         ),
         evidence=((CONTROLLER, "create_publisher(BatteryState, '/battery/state', 10)"),),
@@ -271,7 +254,7 @@ TABLE = (
         '/rc/channels',
         'std_msgs/msg/Float32MultiArray',
         publishers=(End('controller_node', f'{CONTROLLER}:223', BE),),
-        subscribers=(End(LIB, PHYSICS, BE), _fork(FORK_PHYSICS), MUX_RC),
+        subscribers=(End(LIB, PHYSICS, BE), MUX_RC),
         evidence=(
             (
                 CONTROLLER,
@@ -294,8 +277,7 @@ TABLE = (
         'vision_msgs/msg/Detection2DArray',
         publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:143', REL),),
         subscribers=(
-            End(LIB, 'library/real/vision_real.py:34', BE),
-            _fork('vision_real.py:34'),
+            End(LIB, 'library/real/vision_real.py:39 (depth 10)', BE),
             _dash('pursuit', 'pursuit', 124, 'depth 10', REL),
             _dash('smartfollow', 'smartfollow', 257, 'depth 10', REL),
             _dash('webteleop', 'teleop', 318, 'qos_profile_sensor_data'),
@@ -317,10 +299,7 @@ TABLE = (
         '/diagnostics',
         'diagnostic_msgs/msg/DiagnosticArray',
         publishers=(End('inference_node', 'neoracer_ros2_driver/inference_node.py:147', REL),),
-        subscribers=(
-            End(LIB, 'library/real/telemetry_real.py:37', BE),
-            _fork('telemetry_real.py:37'),
-        ),
+        subscribers=(End(LIB, 'library/real/telemetry_real.py:38 (depth 10)', BE),),
         evidence=(
             (
                 'neoracer_ros2_driver/inference_node.py',
@@ -333,7 +312,7 @@ TABLE = (
         'diagnostic_msgs/msg/DiagnosticStatus',
         publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:209 (latched)', REL, TL),),
         subscribers=(
-            End(LIB, 'library/real/slam_real.py:45 (latched)', REL, TL),
+            End(LIB, 'library/real/slam_real.py:50 (latched)', REL, TL),
             End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:75 (latched)', REL, TL),
             End('8080 dashboard', 'scripts/dashboard.py:196 (latched)', REL, TL),
             _viewer(413, 'latched', REL, TL),
@@ -368,7 +347,7 @@ TABLE = (
         'geometry_msgs/msg/PoseWithCovarianceStamped',
         publishers=(End('autonomy_node', f'{AUTONOMY_NODE}:208', REL),),
         subscribers=(
-            End(LIB, 'library/real/slam_real.py:54 (depth 10)', REL),
+            End(LIB, 'library/real/slam_real.py:53 (depth 10)', REL),
             _viewer(414, 'depth 10'),
         ),
         evidence=(
@@ -385,8 +364,7 @@ TABLE = (
             End('slam_toolbox localizer', f'{AUTONOMY} localizer:=slam_toolbox', REL, TL),
         ),
         subscribers=(
-            End(LIB, 'library/real/slam_real.py:57 (latched)', REL, TL),
-            _fork('slam_real.py:52 (latched)', REL, TL),
+            End(LIB, 'library/real/slam_real.py:56 (latched)', REL, TL),
             End('autonomy_node', f'{AUTONOMY_NODE}:201 (latched, localization)', REL, TL),
             _viewer(415, 'latched', REL, TL),
         ),
@@ -441,8 +419,7 @@ TABLE = (
         '/dotmatrix/text',
         'std_msgs/msg/String',
         publishers=(
-            End(LIB, 'library/real/display_real.py:59 (depth 1)', REL),
-            _fork('display_real.py:54 (depth 1)', REL),
+            End(LIB, 'library/real/display_real.py:53 (depth 1)', REL),
             _dash('webteleop', 'teleop', 329, 'depth 1', REL),
         ),
         subscribers=(End('led_matrix_node', 'neoracer_ros2_driver/led_matrix_node.py:62', REL),),
@@ -461,14 +438,15 @@ TABLE = (
     Row(
         '/dotmatrix/pixels',
         'std_msgs/msg/UInt8MultiArray',
-        publishers=(End(LIB, 'library/real/display_real.py:62', REL),),
-        absent='the LED matrix node takes text only; the library fork stubs pixels (plan D7)',
+        absent=(
+            'the LED matrix node takes text only; the library raises NotImplementedError '
+            'for pixels'
+        ),
     ),
     Row(
         '/led/pixels',
         'std_msgs/msg/UInt8MultiArray',
-        publishers=(End(LIB, 'library/real/led_real.py:34', REL),),
-        absent='no addressable LED strip; the library fork stubs it (plan D7)',
+        absent='no addressable LED strip; the library raises NotImplementedError for it',
     ),
     # -- read by the dashboards --
     Row(
@@ -545,8 +523,10 @@ TABLE = (
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/battery/voltage', qos_profile_sensor_data)"),
         ),
-        subscribers=(_fork(FORK_PHYSICS),),
-        note='the deployed fork reads it (physics_real.py, physics.py); kept until F45',
+        note=(
+            'the library reads /battery/state since v0.9.0-neobotics; the controller keeps '
+            'publishing this topic for code that reads it directly (F07)'
+        ),
     ),
     Row(
         '/rc/link',
@@ -599,80 +579,14 @@ TABLE = (
             'writes to the car profile; library v0.9.2-bot reads its yaw in the 0.9.2 port'
         ),
     ),
-    # -- read by the deployed library fork through the autonomy launch --
-    Row(
-        'TF map -> base_footprint',
-        'tf2_msgs/msg/TFMessage',
-        publishers=(
-            End(
-                'TransformBroadcaster (controller_node, odom -> base_link)',
-                f'{CONTROLLER}:340',
-                REL,
-            ),
-            End('robot_state_publisher (base_link -> base_footprint, static)', FRAMES_URDF, REL),
-            End('slam_toolbox (map -> odom)', f'{AUTONOMY} mode:=mapping', REL),
-            End('AMCL (map -> odom)', f'{AUTONOMY} mode:=localization', REL),
-        ),
-        subscribers=(
-            _fork('slam_real.py:77 (lookup_transform)', REL),
-            _fork('nav_real.py:64 (lookup_transform)', REL),
-        ),
-        evidence=(
-            (CONTROLLER, 'self._odom_tf = TransformBroadcaster(self)'),
-            ('config/odom.yaml', 'odometry.publish_tf: true'),
-            ('launch/controller.launch.py', "('odom_config', 'odom.yaml')"),
-            (FRAMES_URDF, '<child link="base_footprint" />'),
-            (TELEOP, "'frames': 'true'"),
-            SLAM_NODE,
-            AMCL_NODE,
-            ('config/amcl.yaml', 'tf_broadcast: true'),
-        ),
-        kind='frame',
-        note=(
-            f'{SLAM}; the controller publishes odom -> base_link (plan D1 retired the EKF), '
-            'the teleop frames publish base_footprint as a static child of base_link for '
-            'one release (D5), and slam_toolbox or AMCL publishes map -> odom'
-        ),
-    ),
+    # -- used by the autonomy node --
     Row(
         '/slam_toolbox/serialize_map',
         'slam_toolbox/srv/SerializePoseGraph',
-        subscribers=(
-            _fork('slam_real.py:63 (client)', REL),
-            End('autonomy_node', f'{AUTONOMY_NODE}:223 (client, saves)', REL),
-        ),
+        subscribers=(End('autonomy_node', f'{AUTONOMY_NODE}:223 (client, saves)', REL),),
         evidence=(SLAM_NODE,),
         kind='service',
-        note=(
-            f'{SLAM} in mapping; autonomy_node saves through it, and the fork reads it '
-            'until F45'
-        ),
-    ),
-    Row(
-        '/slam_toolbox/deserialize_map',
-        'slam_toolbox/srv/DeserializePoseGraph',
-        subscribers=(_fork('slam_real.py:66 (client)', REL),),
-        evidence=(SLAM_NODE,),
-        kind='service',
-        note=f'{SLAM} in mapping',
-    ),
-    Row(
-        '/slam_toolbox/clear_changes',
-        'slam_toolbox/srv/Clear',
-        subscribers=(_fork('slam_real.py:69 (client)', REL),),
-        evidence=(SLAM_NODE,),
-        kind='service',
-        note=f'{SLAM} in mapping',
-    ),
-    Row(
-        '/compute_path_to_pose',
-        'nav2_msgs/action/ComputePathToPose',
-        subscribers=(_fork('nav_real.py:48 (action client)', REL),),
-        kind='action',
-        absent=(
-            'not provided until upstream 0.9.4: plan D1 (decided 2026-11-12) has no '
-            'navigation until then, and the library resync (F45) drops rc.nav'
-        ),
+        note=f'{SLAM} in mapping; autonomy_node saves through it',
     ),
 )
 
@@ -705,17 +619,6 @@ FEATURE_MAP_ROWS = {
     '/autonomy/status', '/autonomy/pose', '/map', '/autonomy/save_map',
     '/autonomy/global_localization',
 }  # fmt: skip
-
-# Everything the deployed fork reads, and writes, on a real car.
-FORK_READS = {
-    '/camera/color', '/joy', '/scan', '/imu/fused', '/mag', '/encoder/speed',
-    '/battery/voltage', '/rc/channels', '/edgetpu/inference', '/diagnostics', '/map',
-    'TF map -> base_footprint', '/slam_toolbox/serialize_map', '/slam_toolbox/deserialize_map',
-    '/slam_toolbox/clear_changes', '/compute_path_to_pose',
-}  # fmt: skip
-FORK_WRITES = {'/drive', '/dotmatrix/text'}
-# Fork reads with no server until upstream 0.9.4 (decided 2026-11-12).
-FORK_READS_NOT_PROVIDED = {'/compute_path_to_pose'}
 
 LIVE = [r for r in TABLE if not r.pending and not r.absent]
 
@@ -834,7 +737,7 @@ def test_every_reader_connects_to_every_writer(row):
 def test_the_table_matches_what_the_car_published(row):
     msg_type, reliability = BASELINE[row.name]
     assert row.msg_type == msg_type
-    driver_side = [p for p in row.publishers if not p.who.startswith((LIB, DASH, FORK))]
+    driver_side = [p for p in row.publishers if not p.who.startswith((LIB, DASH))]
     for pub in driver_side:
         assert pub.reliability == reliability, (row.name, pub.who)
 
@@ -847,7 +750,7 @@ def test_rows_the_port_has_not_added_name_their_feature():
 
 def test_every_library_read_is_covered():
     library_reads = {
-        '/camera/color', '/camera/depth', '/joy', '/scan', '/imu/fused', '/mag',
+        '/camera/color', '/joy', '/scan', '/imu/fused', '/mag',
         '/encoder/speed', '/battery/state', '/rc/channels', '/edgetpu/inference',
         '/diagnostics', '/autonomy/status', '/autonomy/pose', '/map', '/autonomy/save_map',
     }  # fmt: skip
@@ -855,30 +758,6 @@ def test_every_library_read_is_covered():
     for name in library_reads:
         assert name in rows, name
         assert any(s.who == LIB for s in rows[name].subscribers), name
-
-
-def test_every_fork_read_is_live():
-    # Deployed cars run the fork until F45; the 0.9.0 driver must not break them.
-    rows = {r.name: r for r in TABLE}
-    assert FORK_READS_NOT_PROVIDED <= FORK_READS
-    for name in FORK_READS:
-        row = rows[name]
-        assert any(s.who == FORK for s in row.subscribers), name
-        if name in FORK_READS_NOT_PROVIDED:
-            assert row.absent and not row.pending, f'{name}: marked not provided'
-            continue
-        assert not row.pending and not row.absent, f'{name}: deployed cars read it'
-    for row in TABLE:
-        if any(s.who == FORK for s in row.subscribers):
-            assert row.name in FORK_READS, row.name
-
-
-def test_every_fork_write_reaches_the_driver():
-    rows = {r.name: r for r in TABLE}
-    for name in FORK_WRITES:
-        row = rows[name]
-        assert any(p.who == FORK for p in row.publishers), name
-        assert row in LIVE and row.subscribers, name
 
 
 def test_comments_and_docstrings_do_not_count(tmp_path):
