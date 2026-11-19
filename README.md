@@ -71,7 +71,7 @@ Safety and uptime layers:
 
 - **Mux** forwards fresh `/drive` and publishes zero once it is older than `command_timeout_sec` (0.5 s), so a stopped program stops the car. A lost handset does not zero it; see `config/mux.yaml`.
 - **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
-- **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` runs SLAM on top of teleop on demand, and setup does not install it yet; see [Autonomy: SLAM](#autonomy-slam).
+- **Six systemd units at boot** (`neoracer-{data,teleop,watchdog,dashboard,jupyter,mapview}.service`), wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` runs SLAM on top of teleop on demand. Setup installs it but does not enable it; see [Autonomy: SLAM](#autonomy-slam).
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
 
 ## Quickstart (fresh JetPack 6.2 install)
@@ -263,11 +263,11 @@ racecar launch autonomy mode:=localization map:=room             # AMCL on the s
 racecar launch autonomy mode:=localization map:=room pose:=global   # AMCL searches the whole map
 ```
 
-`racecar map` (`scripts/neoracer_map.py`, logic in `scripts/map_control.py`) runs the same launch through `neoracer-autonomy.service`. `start <name>` maps, `save` writes the map, `load <name>` localizes on it, and `stop` ends the run, autosaving a mapping run. `resume`, `recover`, `status`, `list` and `info` cover the rest; `racecar map --help` lists them. Teleop must be running. Starting, loading or resuming stops the lab apps that publish `/drive`. The unit is started and stopped with `sudo -n systemctl`, which `/etc/sudoers.d/neoracer` allows with no password; setup installs neither the unit nor that file yet.
+`racecar map` (`scripts/neoracer_map.py`, logic in `scripts/map_control.py`) runs the same launch through `neoracer-autonomy.service`. `start <name>` maps, `save` writes the map, `load <name>` localizes on it, and `stop` ends the run, autosaving a mapping run. `resume`, `recover`, `status`, `list` and `info` cover the rest; `racecar map --help` lists them. Teleop must be running. Starting, loading or resuming stops the lab apps that publish `/drive`. The unit is started and stopped with `sudo -n systemctl`, which `/etc/sudoers.d/neoracer` allows with no password. Setup installs both.
 
 `racecar map start` and a mapping `racecar map resume` read the handset's speed switch (radio Ch8) and start mapping only with it UP (slow). With the mode switch UP the sticks drive through the firmware, where the driver's caps do not apply and the speed switch's 15 percent cap is the only limit. The switch is read once, before the run starts, so keep it UP until the run ends.
 
-While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/throttle.yaml`). `neoracer-autonomy.service` runs the same launch from the mode file `~/.config/racecar/autonomy.conf` and resumes a mapping run from its autosave after a crash; setup does not install it yet. Per-car values go in the car profile, `params/slam_mapping.yaml`, `params/amcl.yaml` and so on. Navigation comes with a later upstream release. The vendor SLAM and Nav2 stack stays in `~/osracer_ws` for OSRBOT's own tools (`racecar ws osracer`).
+While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/throttle.yaml`). `neoracer-autonomy.service` runs the same launch from the mode file `~/.config/racecar/autonomy.conf` and resumes a mapping run from its autosave after a crash. Setup installs it, and it starts only on demand. Per-car values go in the car profile, `params/slam_mapping.yaml`, `params/amcl.yaml` and so on. Navigation comes with a later upstream release. The vendor SLAM and Nav2 stack stays in `~/osracer_ws` for OSRBOT's own tools (`racecar ws osracer`).
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
 
@@ -292,7 +292,7 @@ The map viewer is a web page for mapping and localization. It shows the map the 
 
 On the map, walls are white, free space is grey and unexplored space is dark. The car is a yellow arrow. It is faded while the car is not localized. The trail is a gold line and the scan is red dots. A short red line and a green line mark the x and y axes at the map's origin. A scale bar sits at the bottom left.
 
-`scripts/mapview.py` serves the page on port 8088. On a phone or laptop on the car's network, open `http://neoracer.local:8088`. If that name does not resolve, use the car's IP address instead, for example `http://10.42.0.1:8088` on the car's access point. The apps page on 8080 does not list the viewer yet.
+`scripts/mapview.py` serves the page on port 8088. On a phone or laptop on the car's network, open `http://neoracer.local:8088`. If that name does not resolve, use the car's IP address instead, for example `http://10.42.0.1:8088` on the car's access point. The apps page on 8080 links to it.
 
 The top bar shows the mode (Mapping or Localization), the map's name, and Localized or Not localized. Details adds the scan fit, the pose spread, the car's pose, the CPU load, the Jetson's junction temperature, and the theme switch. A banner under the bar shows these:
 
@@ -319,17 +319,9 @@ The commands run one at a time, and the page shows each one's output. A failed c
 
 With no browser open, the viewer holds no ROS subscriptions. It subscribes to `/autonomy/status`, `/autonomy/pose`, `/map` and `/scan` at the first request and drops them 10 s after the last one. The map list and the thumbnails come from the map folder, `~/neoracer_data/maps`.
 
-`neoracer-mapview.service` runs the viewer as the racecar user, independent of teleop. Setup does not install it yet. To run it until the next reboot:
+`neoracer-mapview.service` runs the viewer as the racecar user, independent of teleop. Setup installs it and enables it at boot. `racecar service stop mapview` stops it until the next boot, and `racecar service disable mapview` keeps it off.
 
-```sh
-sudo cp ~/ros2_ws/src/neoracer_ros2_driver/scripts/neoracer-mapview.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl start neoracer-mapview
-```
-
-To stop it, run `sudo systemctl stop neoracer-mapview`.
-
-Or run `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py` in a terminal with the workspace sourced. Either way, the buttons need what `racecar map` needs: `neoracer-autonomy.service` and `/etc/sudoers.d/neoracer` installed, and teleop running.
+Or run `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py` in a terminal with the workspace sourced. Either way, the buttons need what `racecar map` needs: `neoracer-autonomy.service` and `/etc/sudoers.d/neoracer`, which setup installs, and teleop running.
 
 ## Web dashboard
 
@@ -340,7 +332,7 @@ With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 - **System status**: the battery, each node's state and topic rate, the junction temperature, throttling, the data root, the autonomy service, and the tail of `~/logs/latest/watchdog.log`.
 - **System Health** (`/health`): the camera, lidar, IMU and encoder panels, the Jetson's load, temperatures and power, and the battery history.
 
-The page starts and stops services with `sudo -n systemctl`, so it needs the sudoers drop-in `/etc/sudoers.d/neoracer`, which lets the `racecar` user start, stop and restart each `neoracer-*` unit with no password. Without it, a tile reports that it has no permission.
+The page starts and stops services with `sudo -n systemctl`, so it needs the sudoers drop-in `/etc/sudoers.d/neoracer`, which lets the `racecar` user start, stop and restart each `neoracer-*` unit with no password. Setup installs it from `scripts/sudoers.d-neoracer` once `visudo -c` passes. Without it, a tile reports that it has no permission.
 
 ## Lab dashboards
 
