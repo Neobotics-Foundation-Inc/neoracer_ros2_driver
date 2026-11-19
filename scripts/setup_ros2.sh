@@ -29,6 +29,8 @@ sudo apt-get install -y \
     ros-humble-image-transport \
     ros-humble-image-transport-plugins \
     ros-humble-tf2-tools \
+    ros-humble-robot-state-publisher \
+    ros-humble-xacro \
     ros-humble-topic-tools \
     ros-humble-diagnostic-updater \
     ros-humble-slam-toolbox \

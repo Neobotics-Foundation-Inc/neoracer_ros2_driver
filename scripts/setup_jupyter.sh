@@ -11,7 +11,9 @@ JUPYTER_WS="$USER_HOME/jupyter_ws"
 # is only needed on PEP 668 images (Pi-OS bookworm/noble, where this script
 # came from); Jammy's pip 22.0.2 errors on it. Probe instead of assuming.
 PIP_FLAGS=(--user)
-if pip3 install --help 2>/dev/null | grep -q -- '--break-system-packages'; then
+# The help text is read whole. Under pipefail, a pipe into `grep -q` can
+# fail pip on a closed pipe although the flag was found.
+if [[ "$(pip3 install --help 2>/dev/null)" == *--break-system-packages* ]]; then
     PIP_FLAGS+=(--break-system-packages)
 fi
 
@@ -121,23 +123,25 @@ done
 # ---------------------------------------------------------------------------
 # Student library + labs.
 # ---------------------------------------------------------------------------
-# Two Neobotics repos supply the student side. The racecar-neo library fork
-# tracks main, which carries the FlySky auto-start fix (go() enters user program
-# mode without a START button - the FlySky RC has none, unlike the Xbox pad the
-# upstream MIT library assumes) plus rc.slam and rc.nav. That work landed on
-# main in v0.3.2; the old neobotics-slam-nav branch it used to name is gone.
+# Two Neobotics repos supply the student side. The racecar-neo library fork is
+# pinned to the tag made for this driver release, so a car set up later gets
+# the library this driver was tested with. The fork carries the NeoRacer
+# changes, such as the FlySky auto-start (go() enters the user program with no
+# START button, because the FlySky handset has none), the JPEG camera decode
+# and the 1,440-point lidar. Override LIB_REPO/LIB_PIN to test an unreleased
+# library revision on a car.
 # The labs come from neoracer-labs. Assemble both into
 # ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
 # library so notebooks can `import racecar_core`. Re-running refreshes both; a
 # fetch failure aborts setup rather than leaving a half-installed library.
-LIB_REPO="https://github.com/Neobotics-Foundation-Inc/racecar-neo-library"
-LIB_BRANCH="main"
+LIB_REPO="${LIB_REPO:-https://github.com/Neobotics-Foundation-Inc/racecar-neo-library}"
+LIB_PIN="${LIB_PIN:-v0.9.0-neobotics}"
 LABS_REPO="https://github.com/Neobotics-Foundation-Inc/neoracer-labs"
 NEO_OS="$JUPYTER_WS/neoracer-os"
 
-echo "Fetching student library ($LIB_BRANCH) + labs..."
+echo "Fetching student library ($LIB_PIN) + labs..."
 TMP="$(mktemp -d)"
-git clone --depth 1 --branch "$LIB_BRANCH" "$LIB_REPO" "$TMP/lib"
+git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"
 git clone --depth 1 "$LABS_REPO" "$TMP/labs"
 mkdir -p "$NEO_OS"
 # The library is ours to replace wholesale. The labs folder is the student's
