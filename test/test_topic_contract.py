@@ -478,7 +478,7 @@ TABLE = (
         subscribers=(
             *ODOM_READERS,
             # The firmware pose beside the integrated estimate, on either source.
-            End('calibrate_odom (F37)', 'scripts/calibration/calibrate_odom.py:488', BE),
+            End('calibrate_odom (F37)', 'scripts/calibration/calibrate_odom.py:507', BE),
         ),
         evidence=((CONTROLLER, "create_publisher(Odometry, '/odom', 10)"),),
     ),
@@ -573,7 +573,7 @@ TABLE = (
         subscribers=(
             End(
                 'calibrate_odom (F37)',
-                'scripts/calibration/calibrate_odom.py:449',
+                'scripts/calibration/calibrate_odom.py:478',
                 BE,
             ),
         ),

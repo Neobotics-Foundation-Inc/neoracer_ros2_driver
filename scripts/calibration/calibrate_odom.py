@@ -343,9 +343,24 @@ class Integration:
     max_steer_deg: float = 30.0
 
 
-def integrated_motion(
+def integration_from_params(params: dict[str, Any]) -> Integration:
+    """Return the integrated source's settings from controller_node's odometry.* values."""
+    return Integration(
+        speed_scale=float(params.get('odometry.speed_scale', 1.0)),
+        yaw_scale=float(params.get('odometry.yaw_rate_scale', 1.0)),
+        zero_hold_sec=float(params.get('odometry.zero_hold_sec', 1.0)),
+        zero_max_rate_dps=float(params.get('odometry.zero_max_rate_dps', 2.0)),
+        bias_tau_sec=float(params.get('odometry.bias_tau_sec', 30.0)),
+        stale_sec=float(params.get('odometry.stale_input_sec', 0.25)),
+        turn_gain=float(params.get('odometry.turn_gain', 0.0)),
+        wheelbase_m=float(params.get('odometry.wheelbase_m', 0.28764)),
+        max_steer_deg=float(params.get('odometry.max_steer_deg', 30.0)),
+    )
+
+
+def integrated_track(
     odom: list[list[float]], gyro: list[tuple[float, float]], bias: float, cfg: Integration
-) -> Pose | None:
+) -> list[tuple[float, float, float, float, float, float]]:
     """
     Replay a run through the driver's integrator, as the integrated source would run it.
 
@@ -353,12 +368,13 @@ def integrated_motion(
     body speed; gyro holds (t, rate) from /imu/fused with the yaw axis and
     sign applied. Each /odom sample is one step, as each `s` frame is in the
     controller, with the gyro rate at its time and the controller's scales.
-    The bias estimate starts from the first rest's mean, where the
-    controller's has had time to settle. Returns base_link's motion in the
-    start frame, heading unwrapped, or None without samples.
+    The bias estimate starts from `bias`, the first rest's mean, where the
+    controller's has had time to settle. Returns (t, x, y, heading, v, omega)
+    after each step, in the start frame with the heading unwrapped; empty
+    without samples.
     """
     if len(odom) < 2 or len(gyro) < 2:
-        return None
+        return []
     rates = np.asarray(gyro, float)
     integrator = OdomIntegrator(
         zero_hold_sec=cfg.zero_hold_sec,
@@ -371,14 +387,27 @@ def integrated_motion(
     )
     integrator.bias = bias * cfg.yaw_scale
     heading = 0.0
+    track = []
     for t, _x, _y, _yaw, v in odom:
         before = integrator.state.theta
         rate = float(np.interp(t, rates[:, 0], rates[:, 1]))
         integrator.step(t, v * cfg.speed_scale, rate * cfg.yaw_scale)
         turn = integrator.state.theta - before
         heading += math.atan2(math.sin(turn), math.cos(turn))
-    state = integrator.state
-    return state.x, state.y, heading
+        state = integrator.state
+        track.append((t, state.x, state.y, heading, state.v, state.omega))
+    return track
+
+
+def integrated_motion(
+    odom: list[list[float]], gyro: list[tuple[float, float]], bias: float, cfg: Integration
+) -> Pose | None:
+    """Return base_link's motion over a replayed run (integrated_track); None without samples."""
+    track = integrated_track(odom, gyro, bias, cfg)
+    if not track:
+        return None
+    _t, x, y, heading, _v, _w = track[-1]
+    return x, y, heading
 
 
 def odom_motion(poses: list[list[float]]) -> Pose:
@@ -455,17 +484,7 @@ class OdomCalibrator(CalibratorNode):
         self.sign = float(params.get('odometry.yaw_rate_sign', 1.0))
         self.yaw_scale = float(params.get('odometry.yaw_rate_scale', 1.0))
         self.speed_scale = float(params.get('odometry.speed_scale', 1.0))
-        self.integration = Integration(
-            speed_scale=self.speed_scale,
-            yaw_scale=self.yaw_scale,
-            zero_hold_sec=float(params.get('odometry.zero_hold_sec', 1.0)),
-            zero_max_rate_dps=float(params.get('odometry.zero_max_rate_dps', 2.0)),
-            bias_tau_sec=float(params.get('odometry.bias_tau_sec', 30.0)),
-            stale_sec=float(params.get('odometry.stale_input_sec', 0.25)),
-            turn_gain=float(params.get('odometry.turn_gain', 0.0)),
-            wheelbase_m=float(params.get('odometry.wheelbase_m', 0.28764)),
-            max_steer_deg=float(params.get('odometry.max_steer_deg', 30.0)),
-        )
+        self.integration = integration_from_params(params)
         config_dir = install_config_dir() or source_config_dir()
         if config_dir is None:
             raise RuntimeError('No config folder for neoracer_ros2_driver: run racecar build.')
