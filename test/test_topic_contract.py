@@ -7,7 +7,7 @@ version setup_jupyter.sh installs), and the seven NeoRacer lab dashboards
 (camlabel, eps, linefollow, pursuit, smartfollow, wallfollow, webteleop; in
 scripts/dashboards/ since F33, so their references are checked like the
 driver's) reach the car only through the topics,
-services, action and TF frames below. A
+services and TF frames below. A
 topic the library reads that nothing publishes does not fail: the library
 reads zeros. So every row is checked against the driver's own sources: the
 driver side exists with the message type, and the QoS on each end lets the
@@ -520,12 +520,13 @@ TABLE = (
         '/battery/voltage',
         'std_msgs/msg/Float32',
         publishers=(End('controller_node', f'{CONTROLLER}:217', BE),),
+        subscribers=(End('racecar status', 'scripts/diagnose.py:115 (best effort)', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/battery/voltage', qos_profile_sensor_data)"),
         ),
         note=(
-            'the library reads /battery/state since v0.9.0-neobotics; the controller keeps '
-            'publishing this topic for code that reads it directly (F07)'
+            'racecar status reads it; the library reads /battery/state since '
+            'v0.9.0-neobotics (F07)'
         ),
     ),
     Row(
@@ -580,6 +581,36 @@ TABLE = (
         ),
     ),
     # -- used by the autonomy node --
+    Row(
+        'TF map -> base_link',
+        'tf2_msgs/msg/TFMessage',
+        publishers=(
+            End(
+                'TransformBroadcaster (controller_node, odom -> base_link)',
+                f'{CONTROLLER}:340',
+                REL,
+            ),
+            End('slam_toolbox (map -> odom)', f'{AUTONOMY} mode:=mapping', REL),
+            End('AMCL (map -> odom)', f'{AUTONOMY} mode:=localization', REL),
+            End(
+                'slam_toolbox localizer (map -> odom)',
+                f'{AUTONOMY} localizer:=slam_toolbox',
+                REL,
+            ),
+        ),
+        subscribers=(End('lookup_transform (autonomy_node)', f'{AUTONOMY_NODE}:349', REL),),
+        evidence=(
+            (CONTROLLER, 'self._odom_tf = TransformBroadcaster(self)'),
+            ('config/odom.yaml', 'odometry.publish_tf: true'),
+            ('launch/controller.launch.py', "('odom_config', 'odom.yaml')"),
+            SLAM_NODE,
+            SLAM_LOCALIZER,
+            AMCL_NODE,
+            ('config/amcl.yaml', 'tf_broadcast: true'),
+        ),
+        kind='frame',
+        note=f'{SLAM}; autonomy_node turns it into /autonomy/pose, which the library reads',
+    ),
     Row(
         '/slam_toolbox/serialize_map',
         'slam_toolbox/srv/SerializePoseGraph',
@@ -758,6 +789,23 @@ def test_every_library_read_is_covered():
     for name in library_reads:
         assert name in rows, name
         assert any(s.who == LIB for s in rows[name].subscribers), name
+        # Cars run this library: a read with nothing behind it reads zeros.
+        assert rows[name] in LIVE, f'{name}: the library reads it'
+    for row in TABLE:
+        if any(s.who == LIB for s in row.subscribers):
+            assert row.name in library_reads, row.name
+
+
+def test_every_library_write_reaches_the_driver():
+    library_writes = {'/drive', '/dotmatrix/text'}
+    rows = {r.name: r for r in TABLE}
+    for name in library_writes:
+        row = rows[name]
+        assert any(p.who == LIB for p in row.publishers), name
+        assert row in LIVE and row.subscribers, name
+    for row in TABLE:
+        if any(p.who == LIB for p in row.publishers):
+            assert row.name in library_writes, row.name
 
 
 def test_comments_and_docstrings_do_not_count(tmp_path):
