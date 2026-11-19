@@ -12,7 +12,12 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
-        ('share/' + package_name + '/config', glob('config/*.yaml')),
+        # *.local.yaml: per-car files from before the car profile, which
+        # `racecar profile migrate` moves out; the driver never reads them here.
+        (
+            'share/' + package_name + '/config',
+            [f for f in glob('config/*.yaml') if not f.endswith('.local.yaml')],
+        ),
         # The Lichtblick layout ships with the configs; a user imports it by hand.
         ('share/' + package_name + '/config', glob('config/*.json')),
         ('share/' + package_name + '/urdf', glob('urdf/*.xacro')),

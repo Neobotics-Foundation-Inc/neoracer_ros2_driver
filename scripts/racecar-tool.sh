@@ -78,7 +78,7 @@ racecar() {
         build)
             # A source file deleted since the last --symlink-install build
             # leaves a dangling link that setup.py's scripts/*.py glob picks up,
-            # and setuptools then refuses to copy it.
+            # and the build then fails when setuptools copies it.
             local tree link
             for tree in "$ws/build/$pkg" "$ws/install/$pkg"; do
                 [[ -d "$tree" ]] || continue
@@ -1261,7 +1261,7 @@ _racecar_complete() {
                 local action="${COMP_WORDS[2]}"
                 case "$action" in
                     start|stop|restart|logs|enable|disable)
-                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit eps smartfollow linefollow webteleop" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter mapview autonomy camlabel wallfollow pursuit eps smartfollow linefollow webteleop" -- "$cur") )
                         ;;
                 esac
             fi

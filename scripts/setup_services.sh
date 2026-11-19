@@ -56,18 +56,23 @@ INSTALL_ONLY=(
 
 echo "Core services:"
 
+changed=0
+
 # Before 0.9.0, neoracer-autonomy.service ran the osracer autonomy base and
-# could be enabled at boot. The new unit has no [Install] section, so
-# `systemctl disable` cannot undo that link once it is installed. Disable the
-# old unit first, while its file is still in place.
+# could be enabled at boot. A boot link left from that unit would also start
+# the new unit at boot, although the new unit has no [Install] section. Setup
+# stops the old unit and removes the link. `-L` also finds a link whose unit
+# file is gone.
 for svc in "${INSTALL_ONLY[@]}"; do
-    if [[ -e "/etc/systemd/system/multi-user.target.wants/$svc" ]]; then
-        sudo systemctl disable "$svc"
-        echo "  $svc: disabled at boot (it now starts on demand)"
+    link="/etc/systemd/system/multi-user.target.wants/$svc"
+    if [[ -L "$link" ]]; then
+        sudo systemctl stop "$svc" 2>/dev/null || true
+        sudo rm -f "$link"
+        changed=1
+        echo "  $svc: stopped and removed from boot (it now starts on demand)"
     fi
 done
 
-changed=0
 for svc in "${SERVICES[@]}" "${INSTALL_ONLY[@]}"; do
     src="${SCRIPT_DIR}/${svc}"
     dst="/etc/systemd/system/${svc}"
@@ -92,8 +97,9 @@ fi
 # Retire the legacy jupyterlab.service if present: neoracer-jupyter.service
 # replaces it, and both bind port 8888, so leaving the old one enabled would
 # double-bind on boot.
-# No pipe into `grep -q`. Under pipefail, grep exits at the first match,
-# and the writer can then fail on a closed pipe although the name was found.
+# The unit list is read whole, not piped into `grep -q`. Under pipefail, grep
+# exits at the first match, and the writer can then fail on a closed pipe
+# although the name was found.
 if [[ -n "$(systemctl list-unit-files 'jupyterlab.service' --no-legend 2>/dev/null)" ]]; then
     echo "  retiring legacy jupyterlab.service (replaced by neoracer-jupyter)"
     sudo systemctl disable --now jupyterlab.service 2>/dev/null || true
@@ -101,25 +107,47 @@ fi
 
 # Enable so they auto-start on boot. `enable` is idempotent - no-op if
 # already enabled. We deliberately don't `start` here; the user controls
-# when the stack first comes up (avoids surprise launch during install).
+# when the stack first comes up (avoids surprise launch during install). The
+# one exception follows the loop.
+newly_enabled=()
 for svc in "${SERVICES[@]}"; do
     if systemctl is-enabled --quiet "$svc"; then
         echo "  $svc: already enabled"
     else
         sudo systemctl enable "$svc"
         echo "  $svc: enabled"
+        newly_enabled+=("$svc")
     fi
 done
 
-# Password-free start, stop and restart for the racecar user. A file that
-# fails `visudo -cf` is never installed: a broken sudoers file can lock sudo
-# out for every user.
+# A unit enabled for the first time normally comes up at the next boot. On a
+# car whose stack already runs, setup starts it now. `racecar update` from
+# 0.6.x restarts only the units that the older tool lists, so without this the
+# map viewer would stay down until the car reboots.
+if systemctl is-active --quiet neoracer-teleop.service; then
+    for svc in "${newly_enabled[@]}"; do
+        if sudo systemctl start "$svc"; then
+            echo "  $svc: started, because teleop is running"
+        else
+            echo "  $svc: did not start; see journalctl -u $svc" >&2
+        fi
+    done
+fi
+
+# The sudoers file gives the racecar user password-free start, stop and
+# restart. A file that fails `visudo -cf` is never installed, because a broken
+# sudoers file can lock sudo out for every user. The copy goes to a name with
+# a dot first, which sudo never reads, and is then renamed into place in one
+# step, so sudo never reads a half-written file.
 SUDOERS_SRC="${SCRIPT_DIR}/sudoers.d-neoracer"
 SUDOERS_DST="/etc/sudoers.d/neoracer"
-if sudo cmp -s "$SUDOERS_SRC" "$SUDOERS_DST" 2>/dev/null; then
+SUDOERS_TMP="/etc/sudoers.d/.neoracer.new"
+if sudo cmp -s "$SUDOERS_SRC" "$SUDOERS_DST" 2>/dev/null \
+    && [[ "$(sudo stat -c '%a %U %G' "$SUDOERS_DST" 2>/dev/null)" == "440 root root" ]]; then
     echo "  $SUDOERS_DST: already up to date"
-elif sudo visudo -cqf "$SUDOERS_SRC"; then
-    sudo install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DST"
+elif sudo visudo -cf "$SUDOERS_SRC" >/dev/null; then
+    sudo install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_TMP"
+    sudo mv -f "$SUDOERS_TMP" "$SUDOERS_DST"
     echo "  $SUDOERS_DST: installed/updated"
 else
     echo "  $SUDOERS_SRC fails visudo -c; not installed" >&2
@@ -151,7 +179,7 @@ echo
 echo "Core services installed and enabled. neoracer-autonomy is installed and"
 echo "starts on demand: racecar map start NAME, or the map viewer on port 8088."
 echo "To start the core services now:"
-echo "  sudo systemctl start neoracer-teleop"
+echo "  sudo systemctl start neoracer-teleop.service"
 echo "Or reboot to bring everything up automatically."
 echo
 echo "Dashboards are installed but off. Start one for a session with:"

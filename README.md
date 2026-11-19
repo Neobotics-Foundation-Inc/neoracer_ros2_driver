@@ -153,12 +153,14 @@ Eight phases, all under `scripts/`:
 4. **`setup_udev.sh`**: installs `/etc/udev/rules.d/99-racecar.rules` (stable `/dev/osrbot_*`)
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
 6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
-7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
-8. **`setup_services.sh`**: installs the systemd units; core stack enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
+7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library at a pinned tag + labs
+8. **`setup_services.sh`**: installs the systemd units and `/etc/sudoers.d/neoracer`; core stack and map viewer enabled, `neoracer-autonomy` installed but not enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
 The lidar driver (package `lakibeam1`) is third-party and is not vendored in this repo. Phase 5 clones it from the [Neobotics fork](https://github.com/Neobotics-Foundation-Inc/Lakibeam_ROS2_Driver) at tag `v1.0-neobotics`, which carries the scan-health fixes described in [docs/lidar_scan_health.md](docs/lidar_scan_health.md). Override with `LAKI_REPO=` / `LAKI_PIN=` to test an unreleased revision.
+
+Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. If the clone fails, setup stops at phase 7 and leaves the car's library as it was.
 
 ## The `racecar` shell tool
 
