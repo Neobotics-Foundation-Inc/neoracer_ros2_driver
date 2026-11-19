@@ -9,9 +9,11 @@ The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 - ``o px py pz vx vy vz yaw``           odom  (position m, velocity m/s, yaw rad)
 - ``r c1 c2 ... c10``                   FlySky RC channels (SBUS counts; -1 == firmware failsafe)
 - ``m x y z``                           magnetometer (Gauss)
+- ``TRIM:`` / ``OK:`` / ``ERROR:``        replies to ``trim get`` and ``trim set``
 """
 
 import math
+import re
 from typing import Any
 
 from neoracer_ros2_driver.limits import clamp
@@ -334,3 +336,95 @@ def rc_to_joy(channels, cfg):
             _set_button(buttons, btn_i)
 
     return axes, buttons
+
+
+# ---- Board steering trim (`trim get` / `trim set`) ----
+# The firmware trim is added to every steering pulse, from the Jetson and from
+# the handset. Replies, as NEORACER_V1.2 sends them:
+#   trim get       -> "TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg"
+#   trim set <deg> -> "OK: steering trim=-1.50deg save queued", or "ERROR: ..."
+#                     when the number does not parse or the NVS save queue is
+#                     full (the trim is then active but not saved).
+# The firmware clamps to its range but accepts NaN and saves it, so the value is
+# checked here before it is sent.
+BOARD_REPLY_PREFIXES = ('TRIM:', 'OK:', 'ERROR:')
+TRIM_RANGE_DEFAULT = (-5.0, 5.0)
+# The firmware prints the trim with two decimals.
+TRIM_CONFIRM_TOL_DEG = 0.01
+_TRIM_REPLY = re.compile(
+    r'^TRIM:\s*(?P<deg>\S+?)deg\s+center_pwm=(?P<pwm>-?\d+)us\s+'
+    r'range=(?P<low>-?\d+(?:\.\d+)?)\.\.(?P<high>-?\d+(?:\.\d+)?)deg'
+)
+
+
+def is_board_reply(line: str) -> bool:
+    """Return whether a serial line answers a board command rather than streaming data."""
+    return line.startswith(BOARD_REPLY_PREFIXES)
+
+
+# A /motor speed within this of 0 leaves the car still.
+STILL_SPEED = 1e-3
+
+
+def motor_moving(speed: float) -> bool:
+    """
+    Return whether a /motor speed drives the car.
+
+    NaN counts as driving: clamp() turns it into full speed.
+    """
+    return not abs(speed) <= STILL_SPEED
+
+
+def parse_trim_reply(line: str) -> tuple[float, float, float] | None:
+    """
+    Return (trim_deg, low_deg, high_deg) from a `trim get` reply, or None.
+
+    trim_deg is NaN when the board holds NaN; the range is always finite.
+    """
+    match = _TRIM_REPLY.match(line.strip())
+    if match is None:
+        return None
+    try:
+        deg, low, high = (float(match[k]) for k in ('deg', 'low', 'high'))
+    except ValueError:
+        return None
+    if not all(math.isfinite(v) for v in (low, high)) or low >= high:
+        return None
+    return deg, low, high
+
+
+def trim_set_command(trim_deg: float) -> str:
+    """Return the `trim set` line for a trim in degrees (positive steers left)."""
+    return f'trim set {trim_deg:.2f}\n'
+
+
+def trim_problem(value: Any, low: float, high: float) -> str:
+    """Return why `value` cannot be sent as the board trim, or '' when it can."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f'the trim must be a number of degrees, not {value!r}'
+    if not math.isfinite(value):
+        return f'the trim must be a finite number of degrees, not {value}'
+    if not low <= value <= high:
+        return f'the trim {value:g} deg is outside the board range {low:g} to {high:g} deg'
+    return ''
+
+
+def trim_write_outcome(
+    requested: float, set_reply: str | None, get_reply: str | None
+) -> tuple[bool, str]:
+    """
+    Return (accepted, reason) for a `trim set` followed by a `trim get`.
+
+    Accepted only when the board answered OK and reads back the requested
+    trim, to the two decimals it prints.
+    """
+    if set_reply is None:
+        return False, 'the board did not answer trim set'
+    if not set_reply.startswith('OK:'):
+        return False, f'the board answered: {set_reply}'
+    read = parse_trim_reply(get_reply) if get_reply is not None else None
+    if read is None:
+        return False, 'the board did not answer trim get after trim set'
+    if abs(read[0] - round(requested, 2)) > TRIM_CONFIRM_TOL_DEG:
+        return False, f'the board reads {read[0]:+.2f} deg after trim set {requested:+.2f}'
+    return True, ''

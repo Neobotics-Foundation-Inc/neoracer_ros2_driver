@@ -25,6 +25,12 @@ def cal():
     return load_script('calibrate')
 
 
+@pytest.fixture(autouse=True)
+def _no_controller(cal, monkeypatch):
+    """Keep `status` off the ROS graph: the board's trim reads as not reachable."""
+    monkeypatch.setattr(cal, 'board_trim_live', lambda timeout=2.0: None)
+
+
 @pytest.fixture
 def config(tmp_path):
     d = tmp_path / 'config'
@@ -56,9 +62,9 @@ def _ros_yaml(path: Path, node: str, params: dict) -> None:
 
 class TestSteps:
     def test_installed_follows_the_tool_file(self, cal, tools):
-        # The lidar tool imports calibrate_odom.py, so the lidar step needs it too.
+        # The lidar and steering tools import calibrate_odom.py, so their steps need it too.
         (tools / 'calibrate_odom.py').unlink()
-        assert [s.key for s in cal.STEPS if not s.installed] == ['lidar', 'odom']
+        assert [s.key for s in cal.STEPS if not s.installed] == ['lidar', 'odom', 'steering']
 
     def test_the_lidar_step_names_the_tools_it_still_needs(self, cal, tools):
         (tools / 'calibrate_odom.py').unlink()
@@ -615,6 +621,38 @@ class TestNeoRacer:
         i = lines.index('steering: Steering trim, set in the ESP32 firmware')
         assert lines[i + 2] == f'  {step.note}'
         assert lines[i + 3] == '  trim_deg  0.8'
+
+    def test_the_steering_step_needs_the_driver_and_the_scan_match(self, cal, tools):
+        step = next(s for s in cal.STEPS if s.key == 'steering')
+        assert step.requires == ('calibrate_odom.py', 'calibrate_dynamics.py')
+        (tools / 'calibrate_dynamics.py').unlink()
+        assert step.missing == ['calibrate_dynamics.py']
+
+    def test_status_shows_the_boards_trim_beside_the_copy(
+        self, cal, config, params, tools, monkeypatch
+    ):
+        (params / 'steering.yaml').write_text('trim_deg: -1.0\n')
+        monkeypatch.setattr(cal, 'board_trim_live', lambda timeout=2.0: -1.0)
+        lines = cal.status_lines(config)
+        i = lines.index('steering: Steering trim, set in the ESP32 firmware')
+        assert lines[i + 4] == '  board     -1.00 deg (live), as the profile copy'
+
+    @pytest.mark.parametrize(
+        'copy,live,text',
+        [
+            (-1.0, -1.004, 'as the profile copy'),
+            (-1.0, -1.5, 'not the profile copy: a new board or a full flash'),
+            (None, -1.0, '-1.00 deg (live)'),
+            (-1.0, None, 'not read: teleop is not running'),
+            (-1.0, float('nan'), "the controller did not read the board's trim"),
+        ],
+    )
+    def test_the_board_line(self, cal, copy, live, text):
+        assert text in cal.board_trim_line(copy, live)
+
+    def test_a_board_that_differs_from_the_copy_warns_in_color(self, cal):
+        line = cal.board_trim_line(-1.0, -1.5, color=True)
+        assert '\033[33m' in line and 'full flash' in line
 
     def test_the_odometry_note_names_the_integrated_source(self, cal):
         step = next(s for s in cal.STEPS if s.key == 'odom')

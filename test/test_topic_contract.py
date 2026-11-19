@@ -569,7 +569,7 @@ TABLE = (
     Row(
         '/odom/integrated',
         'nav_msgs/msg/Odometry',
-        publishers=(End('controller_node', f'{CONTROLLER}:337', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:338', BE),),
         subscribers=(
             End(
                 'calibrate_odom (F37)',

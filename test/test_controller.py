@@ -1,5 +1,6 @@
 """Unit tests for the ESP32 bridge helpers in controller_lib (no ROS required)."""
 
+import math
 from pathlib import Path
 import re
 
@@ -314,3 +315,76 @@ def test_shipped_yaml_and_code_defaults_match_the_test_config():
         assert params[key] == DEFAULT_CFG[key], key
         match = re.search(rf"p\('{key}', ([-0-9.]+)\)", source)
         assert match and float(match.group(1)) == DEFAULT_CFG[key], key
+
+
+# ---- Board steering trim (`trim get` / `trim set`) ----
+
+TRIM_GET_REPLY = 'TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg'
+
+
+def test_the_trim_reply_gives_the_trim_and_the_range():
+    assert cl.parse_trim_reply(TRIM_GET_REPLY) == (-1.0, -5.0, 5.0)
+    assert cl.parse_trim_reply('TRIM: 2.35deg center_pwm=1539us range=-5.0..5.0deg') == (
+        2.35,
+        -5.0,
+        5.0,
+    )
+
+
+def test_other_lines_are_not_a_trim_reply():
+    for line in ('OK: steering trim=-1.50deg save queued', 'ERROR: trim set needs degrees', ''):
+        assert cl.parse_trim_reply(line) is None
+    assert cl.parse_trim_reply('TRIM: xdeg center_pwm=1500us range=-5.0..5.0deg') is None
+
+
+def test_board_replies_are_told_apart_from_the_data_stream():
+    assert cl.is_board_reply(TRIM_GET_REPLY)
+    assert cl.is_board_reply('OK: steering trim=-1.50deg save queued')
+    assert cl.is_board_reply('ERROR: use trim get|set <deg>|reset')
+    for line in ('s 0 0 0 0 0 0 0 0 0 0 1 0 0 9.8 0 0 0', 'b 11.7', 'r 1023', 'OK', 'ERROR'):
+        assert not cl.is_board_reply(line)
+
+
+def test_the_set_command_has_two_decimals():
+    assert cl.trim_set_command(-1.5) == 'trim set -1.50\n'
+    assert cl.trim_set_command(0.123) == 'trim set 0.12\n'
+
+
+def test_only_a_finite_number_inside_the_range_is_sent():
+    # The firmware saves NaN as it is, so the driver checks before sending.
+    assert cl.trim_problem(-1.5, -5.0, 5.0) == ''
+    assert cl.trim_problem(-2, -5.0, 5.0) == ''
+    assert cl.trim_problem(5.0, -5.0, 5.0) == ''
+    for bad in (float('nan'), float('inf'), -float('inf'), 9.0, -5.01, True, 'left', None):
+        assert cl.trim_problem(bad, -5.0, 5.0), bad
+
+
+def test_a_write_is_accepted_only_when_the_board_reads_it_back():
+    ok_reply = 'OK: steering trim=-1.50deg save queued'
+    read_back = 'TRIM: -1.50deg center_pwm=1475us range=-5.0..5.0deg'
+    assert cl.trim_write_outcome(-1.5, ok_reply, read_back) == (True, '')
+    # Two decimals, as the board prints them.
+    assert cl.trim_write_outcome(-1.504, ok_reply, read_back)[0]
+
+
+def test_a_write_is_rejected_without_ok_or_without_the_read_back():
+    read_back = 'TRIM: -1.50deg center_pwm=1475us range=-5.0..5.0deg'
+    full = 'ERROR: steering trim=-1.50deg active, NVS save queue full'
+    assert cl.trim_write_outcome(-1.5, full, read_back) == (False, f'the board answered: {full}')
+    assert not cl.trim_write_outcome(-1.5, None, read_back)[0]
+    assert not cl.trim_write_outcome(-1.5, 'OK: steering trim=-1.50deg save queued', None)[0]
+    stale = 'TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg'
+    accepted, reason = cl.trim_write_outcome(-1.5, 'OK: steering trim=-1.50deg', stale)
+    assert not accepted and '-1.00' in reason
+
+
+def test_a_board_holding_nan_reads_as_nan_with_its_range():
+    trim, low, high = cl.parse_trim_reply('TRIM: nandeg center_pwm=1000us range=-5.0..5.0deg')
+    assert math.isnan(trim) and (low, high) == (-5.0, 5.0)
+
+
+def test_only_a_motor_speed_of_zero_leaves_the_car_still():
+    assert not cl.motor_moving(0.0) and not cl.motor_moving(-0.0005)
+    assert cl.motor_moving(0.01) and cl.motor_moving(-1.0)
+    # clamp() turns NaN into full speed, so NaN drives.
+    assert cl.motor_moving(float('nan'))

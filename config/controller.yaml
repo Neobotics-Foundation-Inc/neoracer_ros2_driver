@@ -14,6 +14,9 @@ controller_node:
     # Stays 0. The steering trim is set in the ESP32 firmware with `trim set`,
     # which also trims manual driving. Positive steers left.
     steering_trim_deg: 0.0
+    # board.steering_trim_deg is not set here: the controller reads it from the
+    # board at start (`trim get`), and setting it writes the board. See
+    # docs/esp32_protocol.md, "Board commands".
 
     # ---- Frames ----
     imu_frame: "imu_link"

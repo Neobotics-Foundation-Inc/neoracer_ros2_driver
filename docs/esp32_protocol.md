@@ -63,6 +63,46 @@ selects who drives (radio Ch7, SBUS index 6):
 - **Handset back on**: for about 2.5 s every channel reads 1023, which counts as
   manual, and then the live values return.
 
+## Board commands: the steering trim
+
+The board keeps a steering trim in degrees (positive steers left) and adds it
+to every steering pulse, from the `v` lines and from the handset. It is saved
+on the board, so it survives a power cycle but not a full flash.
+
+| Command | Reply |
+|---|---|
+| `trim get` | `TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg` |
+| `trim set <deg>` | `OK: steering trim=-1.50deg save queued`, or `ERROR: ...` when the number does not parse or the save queue is full (the trim is then active but not saved) |
+
+The controller sends these lines between `v` lines and reads the replies; it
+does not publish them. `board.steering_trim_deg` on `controller_node` shows the
+board's trim:
+
+- The controller sends these commands only when the car is still: the
+  `/motor` speed has been 0 for at least 1 s. While it waits for a reply it
+  sends no `v` lines, and `trim set` moves the steering to the new centre at
+  once.
+- At start the controller sends `trim get` every 2 s, up to five times, and
+  sets the parameter from the reply. An attempt while the car drives waits
+  for the next one and is not counted. Until the board answers, or when it
+  never answers, the parameter is NaN and cannot be set.
+- Setting it (`ros2 param set /controller_node board.steering_trim_deg -1.5`,
+  or `racecar calibrate steering`) sends `trim set`, then `trim get`, and the
+  change is accepted only when the board answers OK and reads the new value
+  back to two decimals. Each reply is awaited for 0.3 s. A change while the
+  car drives is rejected before anything is sent.
+- A value that is not a finite number of degrees inside the board's range is
+  rejected before anything is sent: the firmware clamps the range but saves
+  NaN as it is.
+- When a write is rejected after the board changed, the controller sets the
+  old trim back. If that fails too, the controller reads the board's trim
+  again, as at start, and the trim cannot be set until it has.
+- A board that holds NaN (full lock) shows NaN, and the controller log says
+  so. Setting a finite trim replaces it; NaN is never sent back.
+
+The driver's own `steering_trim_deg` stays 0; a car that had one gets it folded
+into the board's trim by `racecar calibrate steering`.
+
 ## IMU axes
 
 `/imu/fused` and `/mag` are published in REP-103 body axes: x forward, y left,
