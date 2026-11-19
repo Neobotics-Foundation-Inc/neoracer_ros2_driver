@@ -8,6 +8,7 @@ After=neoracer-teleop.service
 Type=exec
 User=racecar
 Group=racecar
+# RACECAR_DATA_DIR, from neoracer-data.service.
 EnvironmentFile=-/run/racecar/environment
 ExecStart=/bin/bash -c '\
     source /opt/ros/humble/setup.bash && \

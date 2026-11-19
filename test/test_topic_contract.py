@@ -323,6 +323,7 @@ TABLE = (
         subscribers=(
             End(LIB, 'library/real/slam_real.py:45 (latched)', REL, TL),
             End('throttle_node', 'neoracer_ros2_driver/throttle_node.py:75 (latched)', REL, TL),
+            End('8080 dashboard', 'scripts/dashboard.py:196 (latched)', REL, TL),
         ),
         evidence=(
             (AUTONOMY_NODE, "create_publisher(DiagnosticStatus, '/autonomy/status', latched)"),
@@ -331,8 +332,16 @@ TABLE = (
                 "create_subscription(DiagnosticStatus, '/autonomy/status', self._status_cb, "
                 'latched)',
             ),
+            (
+                'scripts/dashboard.py',
+                "create_subscription(DiagnosticStatus, '/autonomy/status', self._record_autonomy, "
+                'latched)',
+            ),
         ),
-        note='added by F23; the throttle node reads it for the mapping caps (F14)',
+        note=(
+            'added by F23; the throttle node reads it for the mapping caps (F14), '
+            'the 8080 page for its Autonomy card (F32)'
+        ),
     ),
     Row(
         '/autonomy/pose',
@@ -498,7 +507,7 @@ TABLE = (
         '/battery',
         'sensor_msgs/msg/BatteryState',
         publishers=(End('controller_node', f'{CONTROLLER}:208', BE),),
-        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:154', BE),),
+        subscribers=(End('8080 dashboard', 'scripts/dashboard.py:203', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(BatteryState, '/battery', qos_profile_sensor_data)"),
         ),

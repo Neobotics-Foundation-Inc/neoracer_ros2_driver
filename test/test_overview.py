@@ -55,6 +55,10 @@ def _ros_stubs():
         ),
         'std_msgs': module('std_msgs'),
         'std_msgs.msg': module('std_msgs.msg', Float32=msg_type('Float32')),
+        'diagnostic_msgs': module('diagnostic_msgs'),
+        'diagnostic_msgs.msg': module(
+            'diagnostic_msgs.msg', DiagnosticStatus=msg_type('DiagnosticStatus')
+        ),
     }
 
 
