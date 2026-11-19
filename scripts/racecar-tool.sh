@@ -28,19 +28,46 @@ _RC_DASH_UNITS=(neoracer-camlabel neoracer-wallfollow neoracer-pursuit
                 neoracer-eps neoracer-smartfollow neoracer-linefollow
                 neoracer-webteleop)
 # The lab dashboards that publish /drive, as DRIVING_APPS in
-# scripts/map_control.py. A second /drive publisher fights the first at the
-# mux, so starting one stops the others. camlabel runs alongside them.
+# scripts/map_control.py. Two of them running would both send commands to the
+# mux, so starting or restarting one stops the others first. camlabel runs
+# alongside them.
 _RC_DRIVE_UNITS=(neoracer-wallfollow neoracer-pursuit neoracer-eps
                  neoracer-smartfollow neoracer-linefollow neoracer-webteleop)
 
+# Running as the apps page and scripts/map_control.py count it: a unit that is
+# activating, such as one waiting to restart after a crash, comes back on its
+# own, so it counts as running.
+_rc_unit_running() {
+    case "$(systemctl is-active "$1" 2>/dev/null)" in
+        active|activating|reloading) return 0 ;;
+    esac
+    return 1
+}
+
 # Units that would come back on their own after a reboot. `restart` with no
-# unit named uses this so it never promotes a disabled service into a running
-# one; systemctl restart starts a stopped unit, which would otherwise put a
-# lab dashboard on the graph behind the student's back.
+# unit named and `racecar update` use this so they never promote a disabled
+# service into a running one; systemctl restart starts a stopped unit, which
+# would otherwise put a lab dashboard on the graph without the student asking.
+# At most one /drive dashboard is listed: the one running, or else the first
+# enabled one. Another enabled one stays stopped, and a line on stderr says so.
 _rc_enabled_units() {
-    local u
+    local u drive=""
+    for u in "${_RC_DRIVE_UNITS[@]}"; do
+        if _rc_unit_running "$u"; then
+            drive="$u"
+            break
+        fi
+    done
     for u in "${_RC_CORE_UNITS[@]}" "${_RC_DASH_UNITS[@]}"; do
-        systemctl is-enabled --quiet "$u" 2>/dev/null && echo "$u"
+        systemctl is-enabled --quiet "$u" 2>/dev/null || continue
+        if [[ " ${_RC_DRIVE_UNITS[*]} " == *" $u "* ]]; then
+            if [[ -n "$drive" && "$u" != "$drive" ]]; then
+                echo "  leaving $u stopped: $drive also publishes /drive" >&2
+                continue
+            fi
+            drive="$u"
+        fi
+        echo "$u"
     done
 }
 
@@ -446,9 +473,12 @@ __RC_COMPILE__
                         if [[ "$action" != stop && " ${_RC_DRIVE_UNITS[*]} " == *" $unit "* ]]; then
                             for u in "${_RC_DRIVE_UNITS[@]}"; do
                                 [[ "$u" == "$unit" ]] && continue
-                                if systemctl is-active --quiet "$u" 2>/dev/null; then
+                                if _rc_unit_running "$u"; then
                                     echo "  stopping $u (only one /drive publisher)"
-                                    _rc_systemctl stop "$u" || return
+                                    if ! _rc_systemctl stop "$u"; then
+                                        echo "racecar service: $u did not stop, so $unit was not ${action}ed." >&2
+                                        return 1
+                                    fi
                                 fi
                             done
                         fi
@@ -473,7 +503,7 @@ __RC_COMPILE__
                     # dashboard is turned on by name, so a car that wants one
                     # at boot says so: `racecar service enable camlabel`.
                     if [[ -n "$1" ]]; then
-                        sudo systemctl "$action" "neoracer-$1.service"
+                        sudo systemctl "$action" "neoracer-${1%.service}.service"
                     else
                         for u in "${units[@]}"; do
                             sudo systemctl "$action" "$u.service"
@@ -482,7 +512,7 @@ __RC_COMPILE__
                     ;;
                 logs)
                     local unit="${1:-teleop}"
-                    sudo journalctl -u "neoracer-$unit" -f
+                    sudo journalctl -u "neoracer-${unit%.service}" -f
                     ;;
                 status|"")
                     local u
@@ -503,11 +533,12 @@ actions:
   install        Install units: core stack enabled, autonomy on demand,
                  lab dashboards disabled
   start [name]   Start neoracer-<name>; no name = the core stack.
-                 Starting a lab dashboard that drives the car stops the
-                 others that do first.
+                 Starting or restarting a lab dashboard that drives the car
+                 stops the others that do first.
   stop [name]    Stop neoracer-<name>; no name = the core stack
   restart [name] Restart neoracer-<name>; no name = every enabled unit,
-                 dashboards included. Never starts a disabled one.
+                 dashboards included, and at most one that drives the car.
+                 Never starts a disabled one.
   enable [name]  Enable neoracer-<name>; no name = the core stack
   disable [name] Disable neoracer-<name>; no name = the core stack
   logs [name]    journalctl -u neoracer-<name> -f; default = teleop
@@ -528,7 +559,8 @@ enable and disable ask for it.
 
 Dashboards install disabled and are started for a session:
   racecar service start camlabel
-Each holds the camera or the GPU while it runs, so run one at a time.
+Each holds the camera or the GPU while it runs, so start only the ones the
+session needs.
 __RC_SVC_HELP__
                     ;;
                 *)
@@ -544,11 +576,16 @@ __RC_SVC_HELP__
             case "$phase" in
                 "")
                     echo "usage: racecar setup <phase>" >&2
-                    echo "  phases: all, ml, networking" >&2
+                    echo "  phases: all, dashboards, ml, networking" >&2
                     return 2
                     ;;
                 all)
                     bash "$pkg_dir/scripts/setup_all.sh" "$@"
+                    ;;
+                dashboards)
+                    # Installs the seven lab dashboards' units, stopped and
+                    # disabled; setup_services.sh also runs it.
+                    bash "$pkg_dir/scripts/setup_dashboards.sh" "$@"
                     ;;
                 ml|gpu)
                     bash "$pkg_dir/scripts/setup_ml.sh" "$@"
@@ -660,7 +697,7 @@ __RC_NET_HELP__
                     ;;
                 *)
                     echo "racecar setup: unknown phase '$phase'" >&2
-                    echo "  phases: all, ml, networking" >&2
+                    echo "  phases: all, dashboards, ml, networking" >&2
                     return 2
                     ;;
             esac
@@ -1082,6 +1119,9 @@ Commands:
                         ~/logs/latest/watchdog.log. Assumes teleop runs separately.
     setup <phase>       Run a setup script. Phases:
                           all          - setup_all.sh (the 8-phase orchestrator)
+                          dashboards   - install the lab dashboards' units
+                                         (stopped, disabled). Skip with
+                                         RACECAR_DASHBOARDS=0.
                           ml           - GPU stack: PyTorch/torchvision for Tegra,
                                          Ultralytics, ONNX export tooling; verifies
                                          the JetPack TensorRT bindings.
@@ -1104,8 +1144,8 @@ Commands:
                           status               active/enabled summary (default)
                         Core units: teleop, watchdog, dashboard (8080),
                           jupyter (8888), mapview (8088)
-                        Lab dashboards, off until started; one that drives
-                        the car at a time:
+                        Lab dashboards, off until started. One that drives
+                        the car runs at a time, and camlabel runs beside it:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
                           eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
                         neoracer-autonomy: SLAM on top of teleop, installed
@@ -1168,6 +1208,13 @@ _racecar_complete() {
         status)
             COMPREPLY=( $(compgen -W "--quick --json --strict --section --window --help" -- "$cur") )
             ;;
+        profile)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "path migrate export import" -- "$cur") )
+            else
+                COMPREPLY=( $(compgen -f -- "$cur") )
+            fi
+            ;;
         launch)
             local launch_dir="$HOME/ros2_ws/src/neoracer_ros2_driver/launch"
             if [[ -d "$launch_dir" ]]; then
@@ -1219,9 +1266,11 @@ _racecar_complete() {
             ;;
         setup)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "all ml networking" -- "$cur") )
+                COMPREPLY=( $(compgen -W "all dashboards ml networking" -- "$cur") )
             elif [[ "${COMP_WORDS[2]}" == "networking" ]]; then
-                COMPREPLY=( $(compgen -W "--ssid= --psk= --channel= --ap-addr= --eth-static= --show --reset --help" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--ssid= --psk= --channel= --ap-addr= --eth-static= --lidar-host= --wifi-iface= --eth-iface= --show --reset --help" -- "$cur") )
+            elif [[ "${COMP_WORDS[2]}" == "dashboards" ]]; then
+                COMPREPLY=( $(compgen -W "--help" -- "$cur") )
             fi
             ;;
         map)

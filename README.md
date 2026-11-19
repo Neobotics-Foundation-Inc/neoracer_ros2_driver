@@ -360,11 +360,11 @@ racecar service stop camlabel
 racecar service enable camlabel    # only if this car should boot into it
 ```
 
-Starting one of the six that publish `/drive` stops any other of them that is running first, as the 8080 page does. camlabel runs alongside them.
+Starting or restarting one of the six that publish `/drive` first stops any other of them that is running, as the 8080 page does. camlabel runs alongside them.
 
-`racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone.
+`racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone. It restarts at most one of the six that publish `/drive`, and so does `racecar update`: while one of them runs, another that is enabled stays stopped.
 
-The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml`, `pursuit.yaml`, `eps.yaml`, `smartfollow.yaml`, `linefollow.yaml`, or `teleop.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
+Each dashboard's folder has a README that documents it.
 
 ## Jupyter notebooks and the student library
 

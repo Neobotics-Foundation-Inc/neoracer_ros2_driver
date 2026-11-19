@@ -55,8 +55,8 @@ LABS = ('camlabel', *DRIVE)
 EVERY_UNIT = ' '.join(f'neoracer-{u}' for u in (*CORE, 'autonomy', *LABS))
 
 SYSTEMCTL = r"""#!/bin/bash
-# Stub: the unit lists come from RC_INSTALLED, RC_ACTIVE and RC_ENABLED; every
-# other call is logged.
+# Stub: the unit lists come from RC_INSTALLED, RC_ACTIVE, RC_ACTIVATING and
+# RC_ENABLED; every other call is logged.
 quiet=0
 rest=()
 for a in "$@"; do
@@ -74,6 +74,9 @@ case "${rest[0]}" in
     is-active)
         if has "$RC_ACTIVE" "$unit"; then
             [[ $quiet == 1 ]] || echo active; exit 0
+        fi
+        if has "${RC_ACTIVATING:-}" "$unit"; then
+            [[ $quiet == 1 ]] || echo activating; exit 3
         fi
         [[ $quiet == 1 ]] || echo inactive; exit 3 ;;
     is-enabled)
@@ -142,6 +145,19 @@ class Car:
 @pytest.fixture
 def car(tmp_path):
     return Car(tmp_path)
+
+
+def _unit_ports():
+    """Return {name: port} from each unit file's Description, as setup installs them."""
+    ports = {}
+    files = [*(ROOT / 'scripts').glob('neoracer-*.service')]
+    files += (ROOT / 'scripts' / 'dashboards').glob('*/neoracer-*.service.in')
+    for path in files:
+        found = re.search(r'^Description=.*\(port (\d+)\)', path.read_text(), re.M)
+        if found:
+            name = path.name.split('.')[0].removeprefix('neoracer-')
+            ports[name] = int(found.group(1))
+    return ports
 
 
 def _bash(script):
@@ -287,6 +303,28 @@ class TestService:
         line = next(ln for ln in out.splitlines() if 'neoracer-mapview' in ln)
         assert line.rstrip().endswith('http://neoracer.local:8088')
 
+    def test_status_gives_every_page_its_address(self, car):
+        for path in (ROOT / 'scripts').glob('neoracer-*.service'):
+            (car.units / path.name).write_text(path.read_text())
+        for path in (ROOT / 'scripts' / 'dashboards').glob('*/neoracer-*.service.in'):
+            (car.units / path.name.removesuffix('.in')).write_text(path.read_text())
+        lines = car.run('service', 'status').stdout.splitlines()
+        ports = _unit_ports()
+        assert {'dashboard', 'jupyter', 'mapview', *LABS} == set(ports)
+        for name in (*CORE, 'autonomy', *LABS):
+            line = next(ln for ln in lines if re.match(rf'\s+neoracer-{name}\s', ln))
+            if name in ports:
+                assert line.rstrip().endswith(f'http://neoracer.local:{ports[name]}'), line
+            else:
+                assert 'http://' not in line, line
+
+    def test_help_ports_match_the_unit_files(self, car):
+        service_help = car.run('service', 'help').stdout
+        top_help = ' '.join(car.run('help').stdout.split())
+        for name, port in _unit_ports().items():
+            assert f'{name} ({port})' in service_help, name
+            assert f'{name} ({port})' in top_help, name
+
     def test_status_names_a_unit_that_is_not_installed(self, car):
         out = car.run('service', 'status', RC_INSTALLED='neoracer-teleop').stdout
         assert re.search(r'neoracer-autonomy\s+not installed', out)
@@ -310,6 +348,52 @@ class TestService:
             'sudo systemctl stop neoracer-wallfollow.service',
             'sudo systemctl start neoracer-linefollow.service',
         ]
+
+    def test_restarting_a_drive_dashboard_stops_the_others(self, car):
+        result = car.run('service', 'restart', 'eps', RC_ACTIVE='neoracer-pursuit')
+        assert result.returncode == 0, result.stderr
+        assert car.calls() == [
+            'sudo systemctl stop neoracer-pursuit.service',
+            'sudo systemctl restart neoracer-eps.service',
+        ]
+
+    def test_starting_the_running_dashboard_does_not_stop_it(self, car):
+        car.run('service', 'start', 'linefollow', RC_ACTIVE='neoracer-linefollow neoracer-eps')
+        assert car.calls() == [
+            'sudo systemctl stop neoracer-eps.service',
+            'sudo systemctl start neoracer-linefollow.service',
+        ]
+
+    def test_a_dashboard_waiting_to_restart_is_stopped(self, car):
+        # A crashed unit waits RestartSec in the activating state, then comes back.
+        car.run('service', 'start', 'wallfollow', RC_ACTIVATING='neoracer-webteleop')
+        assert car.calls() == [
+            'sudo systemctl stop neoracer-webteleop.service',
+            'sudo systemctl start neoracer-wallfollow.service',
+        ]
+
+    def test_a_dashboard_that_does_not_stop_leaves_the_new_one_stopped(self, car):
+        (car.bin / 'sudo').write_text(
+            '#!/bin/bash\necho "sudo $*" >> "$RC_LOG"\n[[ "$2" == stop ]] && exit 1\nexit 0\n'
+        )
+        result = car.run('service', 'start', 'wallfollow', RC_ACTIVE='neoracer-pursuit')
+        assert result.returncode == 1
+        assert 'neoracer-pursuit did not stop, so neoracer-wallfollow was not started' in (
+            result.stderr
+        )
+        assert car.calls() == ['sudo systemctl stop neoracer-pursuit.service']
+
+    @pytest.mark.parametrize(
+        'args, call',
+        [
+            (('start', 'camlabel.service'), 'sudo systemctl start neoracer-camlabel.service'),
+            (('enable', 'camlabel.service'), 'sudo systemctl enable neoracer-camlabel.service'),
+            (('logs', 'camlabel.service'), 'sudo journalctl -u neoracer-camlabel -f'),
+        ],
+    )
+    def test_a_unit_may_be_named_with_its_suffix(self, car, args, call):
+        car.run('service', *args)
+        assert car.calls() == [call]
 
     def test_camlabel_runs_alongside_a_drive_dashboard(self, car):
         car.run('service', 'start', 'camlabel', RC_ACTIVE='neoracer-wallfollow')
@@ -337,6 +421,25 @@ class TestService:
             'sudo systemctl restart neoracer-teleop.service',
             'sudo systemctl restart neoracer-watchdog.service',
             'sudo systemctl restart neoracer-camlabel.service',
+        ]
+
+    def test_bare_restart_leaves_a_second_drive_dashboard_stopped(self, car):
+        result = car.run(
+            'service',
+            'restart',
+            RC_ENABLED='neoracer-teleop neoracer-wallfollow',
+            RC_ACTIVE='neoracer-pursuit',
+        )
+        assert result.returncode == 0, result.stderr
+        assert car.calls() == ['sudo systemctl restart neoracer-teleop.service']
+        assert 'leaving neoracer-wallfollow stopped' in result.stderr
+
+    def test_bare_restart_restarts_one_of_two_enabled_drive_dashboards(self, car):
+        enabled = 'neoracer-teleop neoracer-wallfollow neoracer-pursuit'
+        car.run('service', 'restart', RC_ENABLED=enabled)
+        assert car.calls() == [
+            'sudo systemctl restart neoracer-teleop.service',
+            'sudo systemctl restart neoracer-wallfollow.service',
         ]
 
     def test_bare_enable_covers_core_units_only(self, car):
@@ -383,6 +486,14 @@ class TestUpdate:
             'sudo systemctl restart neoracer-mapview.service',
         ]
 
+    def test_restarts_at_most_one_drive_dashboard(self, tmp_path):
+        car, result = self._update(
+            tmp_path, RC_ENABLED='neoracer-teleop neoracer-eps', RC_ACTIVE='neoracer-webteleop'
+        )
+        assert result.returncode == 0, result.stderr
+        assert car.calls()[-1] == 'sudo systemctl restart neoracer-teleop.service'
+        assert 'leaving neoracer-eps stopped' in result.stderr
+
     def test_a_failed_setup_restarts_nothing(self, tmp_path):
         package = tmp_path / 'package'
         (package / 'scripts').mkdir(parents=True)
@@ -397,13 +508,59 @@ class TestSetup:
     def test_no_phase_errors(self, car):
         result = car.run('setup')
         assert result.returncode == 2
-        assert 'phases: all, ml, networking' in result.stderr
+        assert 'phases: all, dashboards, ml, networking' in result.stderr
 
     def test_unknown_phase_errors(self, car):
         result = car.run('setup', 'whatever')
         assert result.returncode == 2
         assert 'unknown phase' in result.stderr
-        assert 'phases: all, ml, networking' in result.stderr
+        assert 'phases: all, dashboards, ml, networking' in result.stderr
+
+    def test_dashboards_runs_setup_dashboards(self, car):
+        result = car.run('setup', 'dashboards', '--help')
+        assert result.returncode == 0, result.stderr
+        assert 'Install the lab dashboards' in result.stdout
+        assert car.calls() == []
+
+    def test_networking_help(self, car):
+        result = car.run('setup', 'networking', '--help')
+        assert result.returncode == 0
+        for flag in ('--ssid', '--psk', '--channel', '--ap-addr', '--eth-static', '--lidar-host'):
+            assert flag in result.stdout
+        for flag in ('--wifi-iface', '--eth-iface', '--show', '--reset'):
+            assert flag in result.stdout
+
+    def test_networking_unknown_flag_errors(self, car):
+        result = car.run('setup', 'networking', '--bogus')
+        assert result.returncode == 2
+        assert 'unknown flag' in result.stderr
+
+    def test_networking_show_with_no_persisted_file(self, car):
+        result = car.run('setup', 'networking', '--show')
+        assert result.returncode == 0
+        assert 'No persisted networking config' in result.stdout
+
+    def test_networking_reset_removes_persisted_file(self, car):
+        cfg = car.home / '.config' / 'racecar' / 'networking.env'
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('RACECAR_AP_SSID="dummy"\n')
+        result = car.run('setup', 'networking', '--reset')
+        assert result.returncode == 0
+        assert not cfg.exists()
+        assert 'Cleared' in result.stdout
+
+    def test_networking_flag_persists_when_combined_with_show(self, car):
+        result = car.run('setup', 'networking', '--ssid=test-ssid', '--psk=test-pass', '--show')
+        assert result.returncode == 0
+        text = (car.home / '.config' / 'racecar' / 'networking.env').read_text()
+        assert 'RACECAR_AP_SSID="test-ssid"' in text
+        assert 'RACECAR_AP_PSK="test-pass"' in text
+        assert 'Persisted networking config' in result.stdout
+
+    def test_networking_reset_with_overrides_errors(self, car):
+        result = car.run('setup', 'networking', '--ssid=lab-net', '--reset')
+        assert result.returncode == 2
+        assert 'cannot be combined' in result.stderr
 
     def test_top_level_help_counts_the_setup_phases(self, car):
         phases = (ROOT / 'scripts' / 'setup_all.sh').read_text().count('==> [')
@@ -483,6 +640,21 @@ class TestLibrary:
         assert result.returncode == 0
         assert 'removed' in result.stdout
         assert not self.pth(car).exists()
+
+    def test_list_skips_folders_without_racecar_core(self, car, jws):
+        out = car.run('library', '--list').stdout
+        assert 'neoracer-os' in out
+        assert 'empty' not in out
+
+    def test_reset_when_nothing_to_remove(self, car):
+        result = car.run('library', '--reset')
+        assert result.returncode == 0
+        assert 'no .pth file to remove' in result.stdout
+
+    def test_status_after_select_reports_path(self, car, jws):
+        car.run('library', '--select', 'neoracer-os')
+        out = car.run('library', '--status').stdout
+        assert f'Current library: {jws / "neoracer-os" / "library"}' in out
 
     def test_list_marks_current_with_asterisk(self, car, jws):
         car.run('library', '--select', 'neoracer-os')
@@ -642,7 +814,23 @@ class TestCompletion:
         assert 'update' not in self._complete('racecar', 'service', '')
 
     def test_setup_offers_every_phase(self):
-        assert set(self._complete('racecar', 'setup', '')) == {'all', 'ml', 'networking'}
+        words = set(self._complete('racecar', 'setup', ''))
+        assert words == {'all', 'dashboards', 'ml', 'networking'}
+
+    def test_setup_networking_offers_every_flag(self):
+        words = set(self._complete('racecar', 'setup', 'networking', ''))
+        parser = TEXT.split('local action="apply"')[1].split('__RC_NET_HELP__')[0]
+        flags = set(re.findall(r'^\s+--([a-z-]+)\)', parser, re.M))
+        assert {'ssid', 'lidar-host', 'eth-iface', 'show'} <= flags
+        assert {f'--{f}=' for f in flags - {'show', 'reset', 'help'}} <= words
+        assert {'--show', '--reset', '--help'} <= words
+
+    def test_profile_actions(self):
+        words = set(self._complete('racecar', 'profile', ''))
+        assert words == {'path', 'migrate', 'export', 'import'}
+
+    def test_enable_completes_unit_names(self):
+        assert 'wallfollow' in self._complete('racecar', 'service', 'enable', '')
 
     def test_log_actions_and_start_flags(self):
         for action in ('start', 'stop', 'status', 'list', 'analyze', 'config'):
