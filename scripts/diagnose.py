@@ -172,6 +172,7 @@ SERVICE_UNITS = (
     'neoracer-watchdog',
     'neoracer-dashboard',
     'neoracer-jupyter',
+    'neoracer-mapview',
     'neoracer-data',
 )
 

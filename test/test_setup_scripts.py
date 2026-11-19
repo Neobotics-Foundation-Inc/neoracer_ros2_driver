@@ -12,6 +12,7 @@ a sudoers drop-in where upstream uses polkit rules, which Ubuntu 22.04's polkit
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -63,14 +64,19 @@ BOOT_UNITS = ['data', 'teleop', 'watchdog', 'dashboard', 'jupyter', 'mapview']
 # Installed, started on demand.
 ON_DEMAND_UNITS = ['autonomy']
 LAB_UNITS = ['wallfollow', 'camlabel', 'pursuit', 'eps', 'smartfollow', 'linefollow', 'webteleop']
-# Started and stopped with no password. neoracer-data is a oneshot that only
-# boot runs.
+# Started and stopped with no password. neoracer-data is a oneshot that runs
+# only at boot.
 SUDO_UNITS = ['teleop', 'watchdog', 'dashboard', 'jupyter', 'mapview', 'autonomy', *LAB_UNITS]
 SUDOERS = SCRIPTS / 'sudoers.d-neoracer'
 
 
 def read(name):
     return (SCRIPTS / name).read_text()
+
+
+def bash_array(text, name):
+    """Return the words of a bash array assignment such as `SERVICES=( ... )`."""
+    return text.split(f'\n{name}=(', 1)[1].split(')', 1)[0].split()
 
 
 @pytest.mark.parametrize('name', ALL_SCRIPTS)
@@ -198,29 +204,87 @@ class TestOneShotSetup:
             assert pin in read('setup_dev_tools.sh')
 
     def test_every_unit_the_tools_manage_is_installed(self):
+        # The arrays, not the header comment, which names every unit too.
         services = read('setup_services.sh')
-        for unit in [*BOOT_UNITS, *ON_DEMAND_UNITS]:
-            assert f'neoracer-{unit}.service' in services, unit
+        assert bash_array(services, 'SERVICES') == [f'neoracer-{u}.service' for u in BOOT_UNITS]
+        assert bash_array(services, 'INSTALL_ONLY') == [
+            f'neoracer-{u}.service' for u in ON_DEMAND_UNITS
+        ]
+
+    def test_ros_apt_source_lookup_has_a_fallback(self):
+        # Under pipefail an empty lookup would stop the script with no message.
+        text = read('setup_ros2.sh')
+        assert 'curl -fsS --retry 3' in text and 'ROS_APT_SOURCE_FALLBACK=' in text
+        assert "awk -F'\"' '{print $4}' || true)" in text
+        assert text.index('apt-get update') < text.index('apt-get install')
+
+    def test_udev_trigger_is_scoped(self):
+        # A bare trigger replays every device, the network included.
+        text = read('setup_udev.sh')
+        assert 'sudo udevadm trigger\n' not in text
+        assert 'sudo udevadm trigger --subsystem-match="$subsystem"' in text
+        rules = (SCRIPTS / 'udev' / '99-racecar.rules').read_text()
+        matched = set(re.findall(r'\bSUBSYSTEM=="([a-z0-9_]+)"', rules))
+        loop = re.search(r'for subsystem in ([a-z0-9_ ]+); do', text)
+        assert loop and matched <= set(loop.group(1).split()), matched
+
+    def test_a_missing_library_pin_says_so(self):
+        # The tag is made when the library release merges; until then the
+        # clone fails, and setup names the override.
+        text = read('setup_jupyter.sh')
+        clone = 'if ! git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"; then'
+        assert clone in text
+        assert 'set LIB_PIN' in text.split(clone, 1)[1].split('\nfi\n', 1)[0]
+
+    def test_every_boot_unit_is_a_status_row(self):
+        text = read('diagnose.py')
+        rows = text.split('SERVICE_UNITS = (', 1)[1].split(')', 1)[0]
+        for unit in BOOT_UNITS:
+            assert f"'neoracer-{unit}'" in rows, unit
+
+    def test_tool_completion_names_every_unit(self):
+        text = read('racecar-tool.sh')
+        line = re.search(r'start\|stop\|restart\|logs\|enable\|disable\)\n\s+COMPREPLY=.*', text)
+        assert line
+        names = set(re.search(r'compgen -W "([^"]+)"', line.group(0)).group(1).split())
+        for unit in SUDO_UNITS:
+            assert unit in names, unit
 
 
 class TestRerunOnASetUpCar:
     """A second run, such as `racecar update`, on a car set up before."""
 
     def test_build_clears_dangling_links_first(self):
-        # A file deleted since the last --symlink-install build leaves a link
-        # that setuptools refuses to copy.
+        # A file deleted since the last --symlink-install build leaves a link,
+        # and the build fails when setuptools copies it.
         text = read('setup_workspace.sh')
         assert 'find "$tree" -xtype l -print0' in text
         assert text.index('-xtype l') < text.rindex('colcon build')
 
     def test_old_autonomy_unit_is_disabled_before_the_new_one_is_installed(self):
-        # The pre-0.9.0 unit could be enabled at boot. The new one has no
-        # [Install] section, so its boot link must go while the old file is in place.
+        # The pre-0.9.0 unit could be enabled at boot. Its boot link would
+        # start the new unit at boot too, so setup stops the old unit and
+        # removes the link, even one whose unit file is gone.
         text = read('setup_services.sh')
-        disable = text.index('sudo systemctl disable "$svc"')
-        install = text.index('sudo install -m 0644 "$src" "$dst"')
-        assert disable < install
-        assert 'multi-user.target.wants/$svc' in text
+        assert 'link="/etc/systemd/system/multi-user.target.wants/$svc"' in text
+        assert 'if [[ -L "$link" ]]; then' in text
+        remove = text.index('sudo rm -f "$link"')
+        assert text.index('sudo systemctl stop "$svc"') < remove
+        assert remove < text.index('sudo install -m 0644 "$src" "$dst"')
+
+    def test_local_yaml_is_not_installed(self):
+        # Per-car files from before the car profile; profile migrate moves them.
+        setup_py = (ROOT / 'setup.py').read_text()
+        assert "if not f.endswith('.local.yaml')" in setup_py
+
+    def test_a_running_car_starts_what_this_run_enabled(self):
+        # `racecar update` from 0.6.x restarts only the units its older tool
+        # lists, so the map viewer would otherwise wait for a reboot.
+        text = read('setup_services.sh')
+        assert 'newly_enabled+=("$svc")' in text
+        start = text.index('if systemctl is-active --quiet neoracer-teleop.service; then')
+        assert 'for svc in "${newly_enabled[@]}"; do' in text[start:]
+        assert text.index('newly_enabled+=("$svc")') < start
 
 
 class TestLaunchWrapper:
@@ -278,6 +342,10 @@ class TestSystemdServices:
         assert 'teleop' not in text.split('[Service]')[0]
         assert 'scripts/mapview.py' in text
 
+    def test_teleop_wants_watchdog(self):
+        # Starting teleop, by hand or at boot, pulls the watchdog along.
+        assert 'Wants=neoracer-watchdog.service' in read('neoracer-teleop.service')
+
     def test_teleop_calls_launch_wrapper(self):
         assert 'launch_teleop.sh' in read('neoracer-teleop.service')
 
@@ -321,10 +389,42 @@ class TestSudoers:
 
     def test_setup_checks_the_file_before_installing_it(self):
         text = read('setup_services.sh')
-        check = text.index('sudo visudo -cqf "$SUDOERS_SRC"')
-        install = text.index('sudo install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DST"')
-        assert check < install
+        check = text.index('sudo visudo -cf "$SUDOERS_SRC"')
+        install = text.index('sudo install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_TMP"')
+        rename = text.index('sudo mv -f "$SUDOERS_TMP" "$SUDOERS_DST"')
+        assert check < install < rename
         assert 'SUDOERS_DST="/etc/sudoers.d/neoracer"' in text
+        # sudo skips a file in /etc/sudoers.d whose name has a dot, so it never
+        # reads the copy before the rename.
+        tmp = re.search(r'SUDOERS_TMP="/etc/sudoers\.d/([^"]+)"', text)
+        assert tmp and '.' in tmp.group(1)
+
+    def test_an_installed_file_with_the_wrong_mode_is_replaced(self):
+        # A copy made by hand with the same text but another mode or owner is
+        # installed again as root, 0440.
+        text = read('setup_services.sh')
+        mode = '"$(sudo stat -c \'%a %U %G\' "$SUDOERS_DST" 2>/dev/null)" == "440 root root"'
+        assert mode in text
+
+    def test_visudo_parses_the_file(self):
+        visudo = shutil.which('visudo') or next(
+            (p for p in ('/usr/sbin/visudo', '/sbin/visudo') if os.access(p, os.X_OK)), None
+        )
+        if visudo is None:
+            pytest.skip('visudo is not installed')
+        result = subprocess.run(
+            [visudo, '-cf', str(SUDOERS)], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_every_unit_the_python_callers_manage_is_in_the_file(self):
+        # The 8080 page and `racecar map` run `sudo -n systemctl` with these
+        # names; one missing from the file would fail with no password prompt.
+        named = {unit for _, unit in self.rules()}
+        for script in ('dashboard.py', 'map_control.py'):
+            units = set(re.findall(r"'(neoracer-[a-z]+)(?:\.service)?'", read(script)))
+            assert units, script
+            assert {f'{u}.service' for u in units} <= named, (script, units)
 
     def test_tool_calls_systemctl_one_full_unit_at_a_time(self):
         # A call naming several units, or a unit without .service, would not

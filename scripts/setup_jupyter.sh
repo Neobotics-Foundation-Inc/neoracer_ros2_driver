@@ -129,7 +129,8 @@ done
 # changes, such as the FlySky auto-start (go() enters the user program with no
 # START button, because the FlySky handset has none), the JPEG camera decode
 # and the 1,440-point lidar. Override LIB_REPO/LIB_PIN to test an unreleased
-# library revision on a car.
+# library revision on a car. LIB_PIN names a tag or a branch; `git clone
+# --branch` does not take a commit hash. LIB_REPO can be a local clone.
 # The labs come from neoracer-labs. Assemble both into
 # ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
 # library so notebooks can `import racecar_core`. Re-running refreshes both; a
@@ -141,7 +142,13 @@ NEO_OS="$JUPYTER_WS/neoracer-os"
 
 echo "Fetching student library ($LIB_PIN) + labs..."
 TMP="$(mktemp -d)"
-git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"
+if ! git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"; then
+    rm -rf "$TMP"
+    echo "Could not fetch the student library at $LIB_PIN from $LIB_REPO." >&2
+    echo "Check the network. If that tag or branch does not exist, set LIB_PIN" >&2
+    echo "(and LIB_REPO) to one that does. The library on the car is unchanged." >&2
+    exit 1
+fi
 git clone --depth 1 "$LABS_REPO" "$TMP/labs"
 mkdir -p "$NEO_OS"
 # The library is ours to replace wholesale. The labs folder is the student's

@@ -120,6 +120,8 @@ network.
 setup_services.sh
     |
     |-- core units -> /etc/systemd/system/ -> enabled at boot
+    |-- neoracer-autonomy.service -> /etc/systemd/system/ -> not enabled
+    |-- sudoers.d-neoracer -> visudo -c -> /etc/sudoers.d/neoracer (root, 0440)
     |
     `-- setup_dashboards.sh
               |

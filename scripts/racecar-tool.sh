@@ -87,7 +87,7 @@ racecar() {
         build)
             # A source file deleted since the last --symlink-install build
             # leaves a dangling link that setup.py's scripts/*.py glob picks up,
-            # and setuptools then refuses to copy it.
+            # and the build then fails when setuptools copies it.
             local tree link
             for tree in "$ws/build/$pkg" "$ws/install/$pkg"; do
                 [[ -d "$tree" ]] || continue
