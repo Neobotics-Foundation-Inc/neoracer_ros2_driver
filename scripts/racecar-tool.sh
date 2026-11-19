@@ -16,10 +16,10 @@ if [ -z "${RACECAR_DATA_DIR:-}" ]; then
 fi
 
 # Core stack, enabled at boot by setup_services.sh. neoracer-autonomy is not
-# here: it rides on teleop and starts on demand, and setup does not install it
-# yet.
+# here: setup installs it, but it rides on teleop and `racecar map` or the map
+# viewer starts it on demand.
 _RC_CORE_UNITS=(neoracer-teleop neoracer-watchdog neoracer-dashboard
-                neoracer-jupyter)
+                neoracer-jupyter neoracer-mapview)
 
 # Lab dashboards, installed disabled and started per session. Each holds the
 # camera or the GPU for its whole run, so they are opt-in rather than part of
@@ -40,7 +40,18 @@ _rc_enabled_units() {
 }
 
 _rc_unit_installed() {
-    systemctl list-unit-files "$1.service" 2>/dev/null | grep -q "^$1.service"
+    [[ -n "$(systemctl list-unit-files "$1.service" --no-legend 2>/dev/null)" ]]
+}
+
+# One unit per call, named in full: /etc/sudoers.d/neoracer allows exactly
+# `systemctl start|stop|restart neoracer-<name>.service`, so these need no
+# password. enable and disable still ask for it.
+_rc_systemctl() {
+    local action="$1" u
+    shift
+    for u in "$@"; do
+        sudo systemctl "$action" "${u%.service}.service" || return
+    done
 }
 
 # One status line. An absent unit reports as such rather than passing
@@ -225,7 +236,7 @@ racecar() {
             echo "Restarting services..."
             local -a live
             mapfile -t live < <(_rc_enabled_units)
-            [[ ${#live[@]} -gt 0 ]] && sudo systemctl restart "${live[@]}"
+            [[ ${#live[@]} -gt 0 ]] && _rc_systemctl restart "${live[@]}"
             echo "Update complete. Open a new terminal (or run: racecar source)"
             echo "so this shell picks up the new environment and racecar tool."
             ;;
@@ -423,7 +434,7 @@ __RC_COMPILE__
                             echo "Run 'racecar service install' first." >&2
                             return 1
                         fi
-                        sudo systemctl "$action" "$unit"
+                        _rc_systemctl "$action" "$unit"
                     elif [[ "$action" == restart ]]; then
                         # Restart what is already enabled, dashboards included,
                         # and leave every disabled unit where it is.
@@ -432,11 +443,11 @@ __RC_COMPILE__
                         if [[ ${#live[@]} -eq 0 ]]; then
                             echo "No enabled services to restart." >&2
                         else
-                            sudo systemctl restart "${live[@]}"
+                            _rc_systemctl restart "${live[@]}" || return
                             printf 'restarted: %s\n' "${live[*]}"
                         fi
                     else
-                        sudo systemctl "$action" "${units[@]}"
+                        _rc_systemctl "$action" "${units[@]}"
                     fi
                     ;;
                 enable|disable)
@@ -444,10 +455,10 @@ __RC_COMPILE__
                     # dashboard is turned on by name, so a car that wants one
                     # at boot says so: `racecar service enable camlabel`.
                     if [[ -n "$1" ]]; then
-                        sudo systemctl "$action" "neoracer-$1"
+                        sudo systemctl "$action" "neoracer-$1.service"
                     else
                         for u in "${units[@]}"; do
-                            sudo systemctl "$action" "$u"
+                            sudo systemctl "$action" "$u.service"
                         done
                     fi
                     ;;
@@ -469,7 +480,8 @@ __RC_COMPILE__
                     cat <<'__RC_SVC_HELP__'
 usage: racecar service <action> [unit]
 actions:
-  install        Install units: core stack enabled, lab dashboards disabled
+  install        Install units: core stack enabled, autonomy on demand,
+                 lab dashboards disabled
   start [name]   Start neoracer-<name>; no name = the core stack
   stop [name]    Stop neoracer-<name>; no name = the core stack
   restart [name] Restart neoracer-<name>; no name = every enabled unit,
@@ -478,14 +490,16 @@ actions:
   disable [name] Disable neoracer-<name>; no name = the core stack
   logs [name]    journalctl -u neoracer-<name> -f; default = teleop
   status         active/enabled snapshot for every unit (default)
-core units:      teleop, watchdog, dashboard, jupyter
+core units:      teleop, watchdog, dashboard, jupyter, mapview (8088)
 lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083),
                  eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
 
-neoracer-autonomy (SLAM on top of teleop) is started and stopped by
-`racecar map`, not at boot. Setup does not install it yet; until then run
-the same launch in a terminal:
-  racecar launch autonomy map:=<name>
+neoracer-autonomy (SLAM on top of teleop) is installed but not enabled.
+`racecar map` and the map viewer start and stop it. `racecar launch autonomy`
+runs the same launch in a terminal instead.
+
+start, stop and restart need no password (/etc/sudoers.d/neoracer).
+enable and disable ask for it.
 
 Dashboards install disabled and are started for a session:
   racecar service start camlabel
@@ -1063,13 +1077,14 @@ Commands:
                           enable|disable [name]  no name: the core stack
                           logs [name]          journalctl -f for neoracer-<name>
                           status               active/enabled summary (default)
-                        Core units: teleop, watchdog, dashboard, jupyter
+                        Core units: teleop, watchdog, dashboard, jupyter,
+                          mapview (8088)
                         Lab dashboards, off until started, one at a time:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
                           eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
-                        neoracer-autonomy: SLAM on top of teleop, started and
-                        stopped by `racecar map`; setup does not install it
-                        yet (racecar launch autonomy runs the same launch).
+                        neoracer-autonomy: SLAM on top of teleop, installed
+                        but not enabled; `racecar map` and the map viewer
+                        start and stop it.
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
                           --list              show valid folders in ~/jupyter_ws
