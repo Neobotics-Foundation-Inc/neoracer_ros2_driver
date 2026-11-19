@@ -13,13 +13,16 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 
 | Module (path) | Responsibility | Depends on |
 | --- | --- | --- |
-| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/odom/integrated`, `/joy`, `/mag`, `/battery/state` (and `/battery` for one more release), and the scalar `rc.physics` topics | controller_lib, odometry, pyserial |
+| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/odom/integrated` and its TF `odom -> base_link`, `/joy`, `/mag`, `/battery/state` (and `/battery` for one more release), and the scalar `rc.physics` topics | controller_lib, odometry, pyserial |
 | `controller_lib` (neoracer_ros2_driver/controller_lib.py) | pure parsing + FlySky-to-Joy mapping (unit-tested) | - |
 | `gamepad_node` (neoracer_ros2_driver/gamepad_node.py) | `/joy` to `/gamepad_drive` | ackermann_msgs |
 | `mux_node` (neoracer_ros2_driver/mux_node.py) | forward fresh `/drive` to `/mux_out`, zero once stale (`autonomy_passthrough`, the default); with it off, gate `/gamepad_drive` (LB) or `/drive` (RB) | - |
 | `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps, and the mapping caps while `/autonomy/status` reports mapping; `/mux_out` to `/motor` | - |
 | `autonomy_node` (neoracer_ros2_driver/autonomy_node.py) | the one SLAM interface. It reads `/scan`, the localizer's pose (`/pose` from slam_toolbox, `/amcl_pose` from AMCL) and, in localization, `/map`. It publishes `/autonomy/status` (latched, carries the mode the throttle node reads), `/autonomy/pose` and, for AMCL, `/initialpose`, and serves `/autonomy/save_map`, `/autonomy/autosave` and `/autonomy/global_localization`. Maps go under the data root's `maps/` folder (`~/neoracer_data/maps`; `RACECAR_MAP_ROOT` overrides it). It reads TF and publishes none. The autonomy launch starts it | autonomy, maps, slam_toolbox, nav2_map_server |
 | `autonomy` (neoracer_ros2_driver/autonomy.py) | pure localized test, scan fit and map files (unit-tested) | numpy, scipy |
+| autonomy launch (launch/autonomy.launch.py) | SLAM on top of teleop: slam_toolbox while mapping; map_server and AMCL under the Nav2 lifecycle manager, or the slam_toolbox localizer, in localization; `autonomy_node` in every mode. Configs `slam_mapping.yaml`, `slam_localization.yaml`, `amcl.yaml` and `autonomy.yaml`, each followed by its car profile override. Run by `racecar launch autonomy` or `neoracer-autonomy.service` (scripts/launch_autonomy.sh, autonomy_args.py, autonomy_stop.py) | slam_toolbox, nav2_amcl, nav2_map_server, nav2_lifecycle_manager |
+| `racecar map` (scripts/neoracer_map.py, scripts/map_control.py) | the operator front end for mapping and localization: checks the request, writes the mode file `~/.config/racecar/autonomy.conf`, stops and starts `neoracer-autonomy.service` through `sudo -n systemctl`, and waits for `/autonomy/status`. A mapping start reads the speed switch on `/rc/channels` and goes ahead only with it UP. A start or load stops the lab apps that publish `/drive` | autonomy, maps, rclpy |
+| map viewer (scripts/mapview.py, scripts/mapview.html, neoracer-mapview.service) | the web front end of `racecar map` on port 8088: the live map, the car's pose and trail, the scan, and the autonomy status. Its buttons run `racecar map` as a child process, one at a time. Set pose publishes `/initialpose` and Find me calls `/autonomy/global_localization`; it publishes no `/drive`. It subscribes to `/autonomy/status`, `/autonomy/pose`, `/map` and `/scan` only while a browser polls, and reads the map list and thumbnails from the map folder. Its warnings use the Jetson readers in scripts/sysinfo.py. Setup does not install the unit yet | map_control, autonomy, maps, sysinfo, webui, rclpy, Pillow |
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera/color` (JPEG-in-Image) | opencv, numpy |
 | `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
@@ -51,6 +54,8 @@ student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
 - Topics: `/motor`, `/imu/fused`, `/odom`, `/odom/integrated`, `/joy`, `/mag`, `/battery/state`, `/scan`,
   `/camera/color`, `/edgetpu/inference`, `/dotmatrix/text`, `/drive`, and the
   scalar `/encoder/speed`, `/battery/voltage`, `/rc/channels`.
+- TF: the static tree from `base_link` (frames), `odom -> base_link` from the
+  controller, and `map -> odom` from slam_toolbox or AMCL in the autonomy launch.
 - Weights: `share/neoracer_ros2_driver/models/`, searched before the working
   directory and before Ultralytics' own cache (inference_lib.resolve_model_path).
 
@@ -76,9 +81,10 @@ naming the missing part: `/camera/depth` (no depth camera), `/battery/current`
 (no current shunt), `/led/pixels` (no addressable strip), and
 `/dotmatrix/pixels` (the panel firmware takes text only).
 
-`/odom`, `/odometry/filtered`, `/map`, `/plan`, and `/cmd_vel` are NeoRacer
-additions with no reference counterpart. They serve the SLAM and Nav2 layer
-(`rc.slam`, `rc.nav`) that the reference platform does not carry.
+`/map` comes from slam_toolbox or map_server in the autonomy launch, as on the
+reference platform. The driver no longer starts the vendor EKF or Nav2, so
+`/odometry/filtered`, `/plan` and `/cmd_vel` are gone; navigation comes with a
+later upstream release.
 
 ## GPU stack
 
@@ -134,7 +140,10 @@ and `/odom`, smartfollow (8085) on all four of those topics at once, linefollow
 or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow,
 linefollow, and webteleop all publish `/drive`, where a second publisher
 fights the mux. One at a time, started per session through
-`racecar service start <name>`.
+`racecar service start <name>`. Autonomy and those six also run one at a
+time, because a driving app beside the localizer or slam_toolbox leaves too
+little CPU. A `racecar map` start, load or resume stops them first
+(`DRIVING_APPS` in `scripts/map_control.py`).
 
 A dashboard's tuning lives in the car profile and its logs under the data
 root, never in the tree, so a driver update keeps both. Before the dashboards

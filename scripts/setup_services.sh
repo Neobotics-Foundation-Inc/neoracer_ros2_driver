@@ -10,9 +10,9 @@
 #   neoracer-dashboard.service - web status page (port 8080)
 #   neoracer-jupyter.service   - JupyterLab (port 8888)
 #
-# neoracer-autonomy.service is held: the unit stays in this directory but is
-# not installed, and an existing install is retired below. SLAM and Nav2 still
-# run on demand through `racecar mapping` / `racecar navigation`.
+# neoracer-autonomy.service (SLAM on top of teleop) is held for now: the unit
+# stays in this directory but is not installed, and an existing install is
+# retired below. `racecar launch autonomy` runs the same launch in a terminal.
 #
 # Lab dashboards, shipped in scripts/dashboards/ and installed disabled by
 # setup_dashboards.sh:

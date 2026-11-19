@@ -1,25 +1,40 @@
 [Unit]
-Description=Neoracer Autonomy base (TF + twist bridge; SLAM/Nav2 run on demand)
+Description=Neoracer Autonomy (SLAM mapping or localization)
+# The data root first, as for every neoracer unit: maps go under it.
 Wants=neoracer-data.service
 After=neoracer-data.service
-# Teleop owns every device; autonomy only adds intelligence on top. Start
-# after it so /odom and /scan exist, but don't hard-bind: autonomy restarts
-# on its own if teleop bounces, and teleop never waits on autonomy.
-After=network-online.target neoracer-teleop.service
-Wants=network-online.target neoracer-teleop.service
+# Runs on top of teleop: stops with it (BindsTo) and restarts with it (PartOf);
+# a teleop restart then resumes a mapping run from its autosave.
+After=neoracer-teleop.service
+BindsTo=neoracer-teleop.service
+PartOf=neoracer-teleop.service
+# A start that keeps failing (a bad mode file) gives up after three tries.
+StartLimitIntervalSec=120
+StartLimitBurst=3
 
 [Service]
 Type=exec
 User=racecar
 Group=racecar
+# RACECAR_DATA_DIR, from neoracer-data.service, so maps go under
+# ~/neoracer_data/maps.
 EnvironmentFile=-/run/racecar/environment
+# Written by `racecar map` and the map viewer; see scripts/autonomy_args.py.
+EnvironmentFile=-/home/racecar/.config/racecar/autonomy.conf
 ExecStart=/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
-Restart=on-failure
-RestartSec=10
+# Autosave while slam_toolbox is still alive, before the stop signal.
+ExecStop=/bin/bash -c '\
+    source /opt/ros/humble/setup.bash && \
+    source /home/racecar/ros2_ws/install/setup.bash && \
+    python3 /home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/autonomy_stop.py $MAINPID'
+# ros2 launch exits 0 when slam_toolbox dies, so on-failure would never
+# restart it; systemd does not restart after a requested stop.
+Restart=always
+RestartSec=5
 Environment=HOME=/home/racecar
 WorkingDirectory=/home/racecar/ros2_ws
 KillMode=control-group
-TimeoutStopSec=15
-
-[Install]
-WantedBy=multi-user.target
+KillSignal=SIGINT
+# slam_toolbox can take 15 s to exit on SIGINT; the autosave runs first.
+# autonomy_node takes up to about 3 s to send mode off.
+TimeoutStopSec=30

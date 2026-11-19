@@ -9,7 +9,7 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [Quickstart (fresh JetPack 6.2 install)](#quickstart-fresh-jetpack-62-install)
 - [The `racecar` shell tool](#the-racecar-shell-tool)
 - [Networking (optional)](#networking-optional)
-- [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
+- [Autonomy: SLAM](#autonomy-slam)
 - [Web dashboard](#web-dashboard)
 - [Lab dashboards](#lab-dashboards)
 - [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library)
@@ -44,13 +44,12 @@ One ESP32 carries the IMU, wheel odometry, the FlySky receiver, and the motor ES
 ```
 FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/gamepad_drive──┐
                           │                                                ├──> mux_node ──/mux_out──> throttle_node ──/motor──┐
-                          │        student library / Nav2 ──────/drive─────┘   (ESP32 mode switch: up manual, down auto)       │
+                          │        student library ─────────────/drive─────┘   (ESP32 mode switch: up manual, down auto)       │
                           │                                                                                                   │
                           └──> /imu/fused, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
 
 LakiBeam1 ──(UDP)──> lakibeam1_scan_node ──/scan
 USB webcam ────────> camera ──/camera/color  (JPEG-in-Image) ──> inference_node ──/edgetpu/inference
-Nav2 ──/cmd_vel──> twist_bridge ──/drive
 student library ──/dotmatrix/text──> led_matrix ──(USB-UART)──> 8×8 display
 ```
 
@@ -61,7 +60,7 @@ Published topics:
 - `/mag` (sensor_msgs/MagneticField): ESP32 magnetometer, Gauss converted to Tesla
 - `/encoder/speed`, `/battery/voltage` (std_msgs/Float32), `/rc/channels` (std_msgs/Float32MultiArray): the scalar racecar_neo sensor topics the student library's `rc.physics` reads. Same data as `/odom`, `/battery`, and `/joy`, under the names the reference platform publishes
 - `/rc/link` (std_msgs/Bool): whether the transmitter is present, from the raw FlySky channels; for the mux, not the student library
-- `/odom/integrated` (nav_msgs/Odometry): the car's pose at 50 Hz from the state frame, for the calibration tools. `odometry.source` in `config/odom.yaml` picks the ESP32's own pose (`firmware`, the default) or an integration of the body speed and the gyro yaw rate (`integrated`). Its `odom -> base_link` transform is off by default, because the autonomy launch's EKF publishes that transform
+- `/odom/integrated` (nav_msgs/Odometry): the car's pose at 50 Hz from the state frame, for the calibration tools. `odometry.source` in `config/odom.yaml` picks the ESP32's own pose (`firmware`, the default) or an integration of the body speed and the gyro yaw rate (`integrated`). The controller also publishes its `odom -> base_link` transform, which SLAM and AMCL in the autonomy launch read
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
 - `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. Off at boot by default; see [Object detection](#object-detection).
@@ -72,7 +71,7 @@ Safety and uptime layers:
 
 - **Mux** forwards fresh `/drive` and publishes zero once it is older than `command_timeout_sec` (0.5 s), so a stopped program stops the car. A lost handset does not zero it; see `config/mux.yaml`.
 - **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
-- **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` is held and not installed; see [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2).
+- **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` runs SLAM on top of teleop on demand, and setup does not install it yet; see [Autonomy: SLAM](#autonomy-slam).
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
 
 ## Quickstart (fresh JetPack 6.2 install)
@@ -184,10 +183,12 @@ racecar service restart     # every enabled unit; never starts a disabled one
 racecar service start camlabel   # a lab dashboard, for this session
 racecar service logs teleop # journalctl -u neoracer-teleop -f
 
-racecar mapping             # SLAM to build a map (slam_toolbox default)
-racecar mapping save <name> # save the current map
-racecar navigation          # Nav2 on a saved map (teb default)
-racecar navigation rviz     # goal-setting RViz view (car desktop only)
+racecar map start <name>    # build a map; the handset's speed switch UP
+racecar map save            # save the map being built
+racecar map load <name>     # localize on a saved map
+racecar map stop            # stop mapping or localization
+racecar map list            # saved maps; unsaved ones marked
+racecar launch autonomy map:=<name>   # the same SLAM launch in a terminal
 
 racecar calibrate           # guided calibration: lidar, odom, steering (dynamics by name)
 racecar calibrate status    # what is calibrated on this car, when, and the values
@@ -249,26 +250,69 @@ racecar setup networking --reset    # disable the AP + clear the saved car ID
 
 Run `--reset` before capturing a golden image, so the clone ships with no active AP and no baked-in SSID.
 
-## Autonomy: SLAM and Nav2
+## Autonomy: SLAM
 
-SLAM and navigation run on demand, not as services. The autonomy base (`autonomy.launch.py`) runs only TF, the EKF, and the twist bridge.
-
-`neoracer-autonomy.service` is **held**: the unit file stays in `scripts/`, but setup does not install it, and a setup run removes it from a car that has it from an earlier release. The service does not work yet and development is paused until further notice. Start the base by hand while it is held:
+`launch/autonomy.launch.py` runs SLAM on top of teleop. Mapping runs slam_toolbox. Localization on a saved map runs AMCL with map_server, or the slam_toolbox localizer. `autonomy_node` runs in every mode; it publishes `/autonomy/status` and `/autonomy/pose` and serves `/autonomy/save_map`, which the student library uses. Teleop provides `/scan` and the `odom -> base_link -> laser` transforms. Maps go under `~/neoracer_data/maps/<name>/`.
 
 ```sh
-bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+racecar launch autonomy map:=room                                # build a map named room
+ros2 service call /autonomy/save_map std_srvs/srv/Trigger        # save it (another terminal)
+racecar launch autonomy mode:=localization map:=room             # AMCL on the saved map
+racecar launch autonomy mode:=localization map:=room pose:=global   # AMCL searches the whole map
 ```
 
-```sh
-racecar mapping                 # slam_toolbox (also: gmapping, cartographer)
-racecar mapping save my_track   # save the map under that name
-racecar navigation              # Nav2 with the teb planner (also: dwb)
-racecar navigation rviz         # RViz goal-setting view, on the car's desktop
-```
+`racecar map` (`scripts/neoracer_map.py`, logic in `scripts/map_control.py`) runs the same launch through `neoracer-autonomy.service`. `start <name>` maps, `save` writes the map, `load <name>` localizes on it, and `stop` ends the run, autosaving a mapping run. `resume`, `recover`, `status`, `list` and `info` cover the rest; `racecar map --help` lists them. Teleop must be running. Starting, loading or resuming stops the lab apps that publish `/drive`. The unit is started and stopped with `sudo -n systemctl`, which `/etc/sudoers.d/neoracer` allows with no password; setup installs neither the unit nor that file yet.
 
-`twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
+`racecar map start` and a mapping `racecar map resume` read the handset's speed switch (radio Ch8) and start mapping only with it UP (slow). With the mode switch UP the sticks drive through the firmware, where the driver's caps do not apply and the speed switch's 15 percent cap is the only limit. The switch is read once, before the run starts, so keep it UP until the run ends.
+
+While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/throttle.yaml`). `neoracer-autonomy.service` runs the same launch from the mode file `~/.config/racecar/autonomy.conf` and resumes a mapping run from its autosave after a crash; setup does not install it yet. Per-car values go in the car profile, `params/slam_mapping.yaml`, `params/amcl.yaml` and so on. Navigation comes with a later upstream release. The vendor SLAM and Nav2 stack stays in `~/osracer_ws` for OSRBOT's own tools (`racecar ws osracer`).
 
 Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
+
+### Map viewer
+
+The map viewer is a web page for mapping and localization. It shows the map the car is building or using, the car on it, the path the car has driven, and the live lidar scan. Its buttons run the same `racecar map` commands as the shell. The page never drives the car: it publishes no `/drive`, and you drive with the handset as usual.
+
+On the map, walls are white, free space is grey and unexplored space is dark. The car is a yellow arrow. It is faded while the car is not localized. The trail is a gold line and the scan is red dots. A short red line and a green line mark the x and y axes at the map's origin. A scale bar sits at the bottom left.
+
+`scripts/mapview.py` serves the page on port 8088. On a phone or laptop on the car's network, open `http://neoracer.local:8088`. If that name does not resolve, use the car's IP address instead, for example `http://10.42.0.1:8088` on the car's access point. The apps page on 8080 does not list the viewer yet.
+
+The top bar shows the mode (Mapping or Localization), the map's name, and Localized or Not localized. Details adds the scan fit, the pose spread, the car's pose, the CPU load, the Jetson's junction temperature, and the theme switch. A banner under the bar shows these:
+
+- While mapping: keep the speed switch UP (slow) and turn gently.
+- The Jetson is hot: the junction temperature is 85 C or more, the hot band of the System Health page.
+- Over-current throttling during this run: the Jetson's over-current counters rose since the run began. Check the battery and its connector.
+- Lost contact with the car: the page has had no answer from the viewer.
+
+| Button | What it does |
+|---|---|
+| Start mapping | Asks for a map name, then runs `racecar map start NAME`. Teleop must be running and the handset's speed switch UP (slow). |
+| Save | While mapping, runs `racecar map save`. |
+| Stop | Runs `racecar map stop`. While mapping, it offers Save and stop, or Stop without saving. A mapping run is autosaved either way. |
+| Maps | Opens the list of maps, each with a thumbnail, its state, when it was saved and its size. Each map has Load and Extend, and Keep when it has unsaved changes. |
+| Load | Runs `racecar map load NAME`. Choose to start from the car's last saved position on the map, or to search the whole map while you drive (`--global`). |
+| Extend | Shows the saved map. Drag on it from where the car is toward the way it faces. The page then runs `racecar map start NEW --from NAME --pose x,y,yaw`. Give the same name to extend the map in place. As for Start mapping, teleop must be running and the speed switch UP (slow). |
+| Keep | Runs `racecar map recover NAME`: the autosave of a run that was never saved becomes the saved map. |
+| Set pose | While localizing, drag on the map from where the car is toward the way it faces. The page publishes that pose on `/initialpose`, with the spread `racecar map load` uses. |
+| Find me | While localizing with AMCL, calls `/autonomy/global_localization`. AMCL then searches the whole map. Drive slowly until the bar shows Localized. |
+| Clear trail | Clears the car's drawn path on every open map page. |
+| Zoom in, Zoom out, Center on the car | Change the view only. You can also drag to pan, and pinch or scroll to zoom. |
+
+The commands run one at a time, and the page shows each one's output. A failed command's output stays until the next command. Save and Clear trail act at once. Every other button that runs a command or sets the pose asks you to confirm first. Start and Load stop the current autonomy run. They also stop a lab app that drives the car, after a confirmation that names it.
+
+With no browser open, the viewer holds no ROS subscriptions. It subscribes to `/autonomy/status`, `/autonomy/pose`, `/map` and `/scan` at the first request and drops them 10 s after the last one. The map list and the thumbnails come from the map folder, `~/neoracer_data/maps`.
+
+`neoracer-mapview.service` runs the viewer as the racecar user, independent of teleop. Setup does not install it yet. To run it until the next reboot:
+
+```sh
+sudo cp ~/ros2_ws/src/neoracer_ros2_driver/scripts/neoracer-mapview.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start neoracer-mapview
+```
+
+To stop it, run `sudo systemctl stop neoracer-mapview`.
+
+Or run `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py` in a terminal with the workspace sourced. Either way, the buttons need what `racecar map` needs: `neoracer-autonomy.service` and `/etc/sudoers.d/neoracer` installed, and teleop running.
 
 ## Web dashboard
 
@@ -475,7 +519,7 @@ ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=false
 
 The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
 
-Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `twist_bridge.yaml`, `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
+Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `slam_mapping.yaml`, `slam_localization.yaml` and `amcl.yaml` (the autonomy launch), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
 
 ## Troubleshooting
 

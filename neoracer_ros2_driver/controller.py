@@ -20,9 +20,9 @@ IMU, wheel odometry, FlySky RC receiver, and the motor/steering ESC. It:
   ``/rc/channels`` (std_msgs/Float32MultiArray), the scalar sensor topics
   ``rc.physics`` reads on the racecar_neo platform, and ``/rc/link``
   (std_msgs/Bool), whether the transmitter is present, and
-- publishes ``/odom/integrated`` (nav_msgs/Odometry) from each ``s`` frame,
-  either the ESP32's own pose or odometry.py's integration of the body speed
-  and the gyro yaw rate (``odometry.source``, config/odom.yaml).
+- publishes ``/odom/integrated`` (nav_msgs/Odometry) and TF odom -> base_link
+  from each ``s`` frame, either the ESP32's own pose or odometry.py's
+  integration of the speed and gyro yaw rate (``odometry.source``, odom.yaml).
 
 The exact FlySky channel order depends on the transmitter mixer and is exposed
 entirely as ROS parameters (see config/controller.yaml) for on-car tuning.
@@ -198,10 +198,10 @@ class ControllerNode(Node):
         )
 
         # ===== SET UP PUBLISHERS =====
-        # /imu/fused and /odom are RELIABLE: the EKF (robot_localization) and the
-        # complementary filter subscribe reliable, and a reliable publisher
-        # still satisfies every BEST_EFFORT subscriber (student library,
-        # dashboard, rviz).
+        # /imu/fused and /odom are RELIABLE. A reliable publisher satisfies
+        # RELIABLE subscribers and every BEST_EFFORT subscriber (student
+        # library, dashboard, rviz). The vendor EKF, which subscribed
+        # reliable, left the driver with plan D1.
         self.imu_pub = self.create_publisher(Imu, '/imu/fused', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
@@ -271,8 +271,8 @@ class ControllerNode(Node):
         """
         enable = bool(self.declare_parameter('odometry.enable', True).value)
         source = str(self.declare_parameter('odometry.source', 'firmware').value)
-        # Off by default: the autonomy launch's EKF publishes odom -> base_link.
-        publish_tf = bool(self.declare_parameter('odometry.publish_tf', False).value)
+        # On by default: slam_toolbox and AMCL read odom -> base_link from here.
+        publish_tf = bool(self.declare_parameter('odometry.publish_tf', True).value)
         topic = str(self.declare_parameter('odometry.topic', '/odom/integrated').value)
         axis = self.declare_parameter('odometry.yaw_rate_axis', 2).value
         yaw_rate_sign = declare_float_param(self, 'odometry.yaw_rate_sign', 1.0)

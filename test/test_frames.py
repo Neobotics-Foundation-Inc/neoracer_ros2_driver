@@ -298,21 +298,19 @@ class TestNeoRacer:
         assert "declare_parameter('base_frame', 'base_link')" in source
 
     def test_autonomy_launch_adds_no_second_parent(self):
-        # The vendor URDF roots at base_footprint, so it would form a loop with
-        # base_link -> base_footprint and give laser, imu_link and camera_link a
-        # second transform; the EKF must publish odom -> base_link, the root.
-        strings = _string_constants(_launch_ast('autonomy'))
-        assert 'osracer_description' not in strings
+        # The autonomy launch starts no description and no EKF: the teleop
+        # frames are the one static tree, and the controller publishes
+        # odom -> base_link (config/odom.yaml), so base_link keeps one parent.
+        strings = set(_string_constants(_launch_ast('autonomy')))
+        assert not strings & {'robot_state_publisher', 'robot_localization', 'osracer_description'}
         assert 'base_footprint' not in strings
-        tree = _launch_ast('autonomy')
-        frames_set = [
-            n.values[i]
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Dict)
-            for i, k in enumerate(n.keys)
-            if isinstance(k, ast.Constant) and k.value == 'base_link_frame'
-        ]
-        assert [ast.literal_eval(v) for v in frames_set] == ['base_link']
+        # Humble's slam_toolbox and AMCL default their base frame to
+        # base_footprint, so the configs name base_link (plan D5).
+        for name in ('slam_mapping.yaml', 'slam_localization.yaml'):
+            params = yaml.safe_load((CONFIG / name).read_text())['slam_toolbox']['ros__parameters']
+            assert params['base_frame'] == 'base_link', name
+        amcl = yaml.safe_load((CONFIG / 'amcl.yaml').read_text())['amcl']['ros__parameters']
+        assert amcl['base_frame_id'] == 'base_link'
 
     def test_the_urdf_and_its_tools_are_installed(self):
         setup = (ROOT / 'setup.py').read_text()

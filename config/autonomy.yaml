@@ -3,8 +3,8 @@
 # pose_source. Per-car overrides go in the car profile, params/autonomy.yaml.
 #
 # The numbers in the comments below were measured on upstream's car (a
-# RACECAR Neo with an RPLIDAR); they are the starting point until the NeoRacer
-# is tuned with the autonomy launch.
+# RACECAR Neo with an RPLIDAR) unless they say otherwise; they are the
+# starting point until the NeoRacer is tuned with the autonomy launch.
 autonomy_node:
   ros__parameters:
     pose_rate_hz: 20.0
@@ -26,7 +26,7 @@ autonomy_node:
     # localized, localized_enter_fit.
     fit_rate_hz: 2.0
     fit_beams: 180                    # of the LakiBeam's 1440 beams per scan
-    fit_min_range_m: 0.3              # upstream's self-return distance; not yet measured on the NeoRacer
+    fit_min_range_m: 0.12             # the car's outline; see slam_mapping.yaml
     fit_window_sec: 2.0
     localized_min_fit: 0.5
     localized_enter_fit: 0.65
