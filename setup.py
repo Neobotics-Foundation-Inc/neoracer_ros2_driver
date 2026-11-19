@@ -13,6 +13,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         ('share/' + package_name + '/config', glob('config/*.yaml')),
+        # The Lichtblick layout ships with the configs; a user imports it by hand.
+        ('share/' + package_name + '/config', glob('config/*.json')),
         ('share/' + package_name + '/urdf', glob('urdf/*.xacro')),
         # Weights are gitignored; this ships whatever a given car has dropped in.
         ('share/' + package_name + '/models', glob('models/*')),

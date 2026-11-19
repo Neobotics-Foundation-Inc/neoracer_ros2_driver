@@ -7,11 +7,13 @@ they run where ROS is installed (on the car) and are skipped elsewhere.
 
 import ast
 import importlib.util
+import json
 from pathlib import Path
 import re
 
 from neoracer_ros2_driver import maps
 import pytest
+import test_topic_contract as contract
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -416,6 +418,102 @@ def test_foxglove_stops_quickly(autonomy):
     specs = autonomy.node_specs('mapping', 'amcl', 'r', '', str(CONFIG), foxglove=True)
     assert autonomy._stop_timeouts(specs[-1]) == {'sigterm_timeout': '2', 'sigkill_timeout': '2'}
     assert autonomy._stop_timeouts(specs[0]) == {}
+
+
+def test_foxglove_layout_uses_only_bridged_topics():
+    layout = json.loads((CONFIG / 'foxglove_layout.json').read_text())
+    bridge = yaml.safe_load((CONFIG / 'foxglove.yaml').read_text())
+    allowed = bridge['foxglove_bridge']['ros__parameters']['topic_whitelist']
+    panels = layout['configById']
+    topics = set(panels['3D!map']['topics'])
+    topics.add(panels['Table!status']['topicPath'].split('.')[0])
+    topics |= {p['value'].split('.')[0] for p in panels['Plot!pose']['paths']}
+    for topic in topics:
+        assert any(re.match(pattern, topic) for pattern in allowed), f'{topic} not bridged'
+    client = bridge['foxglove_bridge']['ros__parameters']['client_topic_whitelist']
+    estimate = panels['3D!map']['publish']['poseEstimateTopic']
+    assert any(re.match(pattern, estimate) for pattern in client)
+    # Every configured panel appears in the mosaic layout.
+    text = json.dumps(layout['layout'])
+    assert all(f'"{panel}"' in text for panel in panels)
+
+
+# foxglove_bridge 3.4.3 defines these capability names in common.hpp (foxglove-sdk).
+BRIDGE_CAPABILITIES = {
+    'clientPublish',
+    'parameters',
+    'parametersSubscribe',
+    'services',
+    'connectionGraph',
+    'assets',
+    'time',
+}
+
+# The Foxglove layout reads these topics, which have no row in the topic
+# contract. Each entry names the driver sources that start their publishers on
+# the NeoRacer.
+LAYOUT_TOPICS_OUTSIDE_THE_CONTRACT = {
+    # AMCL publishes its particles in localization with localizer:=amcl.
+    '/particle_cloud': (contract.AMCL_NODE,),
+    # robot_state_publisher in the teleop frames publishes the URDF.
+    '/robot_description': (
+        ('launch/frames.launch.py', "executable='robot_state_publisher'"),
+        (contract.TELEOP, "'frames': 'true'"),
+    ),
+}
+
+
+def _layout_topics(node, key=''):
+    """Return the topics a layout's panels read; its publish settings name client topics."""
+    if key == 'publish':
+        return set()
+    if isinstance(node, dict):
+        found = {k.split('.')[0] for k in node if k.startswith('/')}
+        return found.union(*(_layout_topics(v, k) for k, v in node.items()))
+    if isinstance(node, list):
+        return set().union(*(_layout_topics(v, key) for v in node))
+    if isinstance(node, str) and node.startswith('/'):
+        return {node.split('.')[0]}
+    return set()
+
+
+class TestFoxgloveOnTheNeoRacer:
+    def test_the_layout_reads_only_topics_the_neoracer_publishes(self):
+        topics = _layout_topics(json.loads((CONFIG / 'foxglove_layout.json').read_text()))
+        assert {'/map', '/scan', '/autonomy/pose', '/autonomy/status'} <= topics
+        # The topic contract's live rows are what the NeoRacer publishes. Its
+        # own tests check every row against the driver sources.
+        published = {r.name for r in contract.LIVE if r.kind == 'topic' and r.publishers}
+        for topic in topics - published:
+            assert topic in LAYOUT_TOPICS_OUTSIDE_THE_CONTRACT, f'nothing publishes {topic}'
+            for path, text in LAYOUT_TOPICS_OUTSIDE_THE_CONTRACT[topic]:
+                source = contract._squash(contract._code_text(ROOT / path))
+                assert contract._squash(text) in source, f'{topic}: {path} lacks {text!r}'
+
+    def test_no_client_publishes_while_the_bridge_ignores_its_whitelist(self):
+        # foxglove_bridge 3.x reads client_topic_whitelist but does not apply it
+        # (foxglove-sdk PR #1508), so clientPublish would let a client publish
+        # /drive and /motor. Humble cannot load an empty list, so one name stays.
+        bridge = yaml.safe_load((CONFIG / 'foxglove.yaml').read_text())
+        capabilities = bridge['foxglove_bridge']['ros__parameters']['capabilities']
+        assert capabilities and not set(capabilities) & BRIDGE_CAPABILITIES
+
+    def test_the_setup_installs_the_layout_beside_the_bridge_config(self):
+        setup = (ROOT / 'setup.py').read_text()
+        assert "glob('config/*.yaml')" in setup and "glob('config/*.json')" in setup
+
+    def test_the_launch_starts_the_bridge_with_config_foxglove_yaml(
+        self, autonomy, car_profile_dir
+    ):
+        shipped = CONFIG / 'foxglove.yaml'
+        spec = autonomy.foxglove_spec(str(CONFIG))
+        assert spec['parameters'] == [str(shipped)]
+        # ROS applies a parameter file's values to the node named at its top.
+        assert list(yaml.safe_load(shipped.read_text())) == [spec['name']] == ['foxglove_bridge']
+        (car_profile_dir / 'params').mkdir(parents=True)
+        override = car_profile_dir / 'params' / 'foxglove.yaml'
+        override.write_text('foxglove_bridge: {ros__parameters: {}}\n')
+        assert autonomy.foxglove_spec(str(CONFIG))['parameters'] == [str(shipped), str(override)]
 
 
 def _declared_defaults():
