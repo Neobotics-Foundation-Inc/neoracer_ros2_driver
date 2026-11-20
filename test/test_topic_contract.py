@@ -181,7 +181,7 @@ TABLE = (
     Row(
         '/joy',
         'sensor_msgs/msg/Joy',
-        publishers=(End('controller_node', f'{CONTROLLER}:231', REL),),
+        publishers=(End('controller_node', f'{CONTROLLER}:232', REL),),
         subscribers=(
             End(LIB, 'library/real/controller_real.py:88 (depth 1)', REL),
             End('mux_node', 'neoracer_ros2_driver/mux_node.py:267', BE),
@@ -220,7 +220,7 @@ TABLE = (
     Row(
         '/mag',
         'sensor_msgs/msg/MagneticField',
-        publishers=(End('controller_node', f'{CONTROLLER}:233', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:234', BE),),
         subscribers=(
             End(LIB, PHYSICS, BE),
             _dash('webteleop', 'teleop', 324, 'qos_profile_sensor_data, raw'),
@@ -233,7 +233,7 @@ TABLE = (
     Row(
         '/encoder/speed',
         'std_msgs/msg/Float32',
-        publishers=(End('controller_node', f'{CONTROLLER}:220', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:221', BE),),
         subscribers=(End(LIB, PHYSICS, BE), _overview(63)),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/encoder/speed', qos_profile_sensor_data)"),
@@ -253,7 +253,7 @@ TABLE = (
     Row(
         '/rc/channels',
         'std_msgs/msg/Float32MultiArray',
-        publishers=(End('controller_node', f'{CONTROLLER}:223', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:224', BE),),
         subscribers=(End(LIB, PHYSICS, BE), MUX_RC),
         evidence=(
             (
@@ -519,7 +519,7 @@ TABLE = (
     Row(
         '/battery/voltage',
         'std_msgs/msg/Float32',
-        publishers=(End('controller_node', f'{CONTROLLER}:217', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:218', BE),),
         subscribers=(End('racecar status', 'scripts/diagnose.py:115 (best effort)', BE),),
         evidence=(
             (CONTROLLER, "create_publisher(Float32, '/battery/voltage', qos_profile_sensor_data)"),
@@ -532,7 +532,7 @@ TABLE = (
     Row(
         '/rc/link',
         'std_msgs/msg/Bool',
-        publishers=(End('controller_node', f'{CONTROLLER}:227', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:228', BE),),
         subscribers=(MUX_RC_LINK,),
         evidence=(
             (CONTROLLER, "create_publisher(Bool, '/rc/link', qos_profile_sensor_data)"),
@@ -550,7 +550,7 @@ TABLE = (
     Row(
         '/odom/integrated',
         'nav_msgs/msg/Odometry',
-        publishers=(End('controller_node', f'{CONTROLLER}:338', BE),),
+        publishers=(End('controller_node', f'{CONTROLLER}:339', BE),),
         subscribers=(
             End(
                 'calibrate_odom (F37)',
@@ -587,7 +587,7 @@ TABLE = (
         publishers=(
             End(
                 'TransformBroadcaster (controller_node, odom -> base_link)',
-                f'{CONTROLLER}:340',
+                f'{CONTROLLER}:341',
                 REL,
             ),
             End('slam_toolbox (map -> odom)', f'{AUTONOMY} mode:=mapping', REL),

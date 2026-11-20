@@ -206,12 +206,13 @@ class ControllerNode(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self) if self.publish_tf else None
         self.battery_pub = self.create_publisher(BatteryState, '/battery', qos_profile_sensor_data)
-        # /battery/state is the racecar_neo name, which library v0.9.0-bot reads;
+        # /battery/state is the racecar_neo name, which library v0.9.0-neobotics reads;
         # /battery carries the same message for one more release for the dashboard.
         self.battery_state_pub = self.create_publisher(BatteryState, '/battery/state', 10)
-        # The scalar racecar_neo sensor topics the student library reads. They
-        # carry no information /battery, /odom, and /joy do not already hold;
-        # they exist so rc.physics reads the same names on both platforms.
+        # The scalar racecar_neo sensor topics. They carry no information /battery,
+        # /odom, and /joy do not already hold; they exist so the same names work on
+        # both platforms. rc.physics reads /encoder/speed and /rc/channels, and
+        # `racecar status` reads /battery/voltage.
         # /battery/current has no counterpart: the OSRbot base has no current
         # shunt, so nothing publishes it and rc.physics raises there.
         self.voltage_pub = self.create_publisher(
