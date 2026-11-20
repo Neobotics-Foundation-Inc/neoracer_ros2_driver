@@ -5,6 +5,8 @@ All notable changes to this project. Format: Keep a Changelog
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-19
+
 This release v0.9.0 adds mapping and localization, guided calibration, a whole-car status check and bag recording to the NeoRacer. The 8080 page becomes an apps page, the seven lab dashboards now ship in the driver, and setup installs all of it.
 
 The version jumps from 0.6.1 to 0.9.0. From this release, the version number follows the upstream release the driver ports. A NeoRacer-only fix between two ports gets a `v0.9.0-neo.N` tag and a line under the current version, and the package version stays the same.
