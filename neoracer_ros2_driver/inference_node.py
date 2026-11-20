@@ -29,6 +29,12 @@ newest one behind it and drops the rest. Detections therefore track the present
 rather than falling further behind a backlog. ``max_rate_hz`` caps the work
 below that, leaving GPU headroom for whatever else the car is running.
 
+With ``pause_while_mapping``, the node drops its camera subscription while
+``/autonomy/status`` reports mode ``mapping`` and subscribes again on any other
+mode. While a map is built, the car then spends no CPU decoding frames and no
+GPU time on the model. The model stays loaded, so detections return with the
+first frame after mapping ends.
+
 Health goes to ``/diagnostics`` (``DiagnosticArray``) on a timer: inference
 latency, detection counts, and whether frames are still arriving.
 
@@ -43,7 +49,7 @@ from ament_index_python.packages import get_package_share_directory
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from vision_msgs.msg import (
     BoundingBox2D,
@@ -61,6 +67,11 @@ import numpy as np
 from neoracer_ros2_driver import inference_lib as il
 
 
+def pauses_for(mode, enabled):
+    """Report whether inference pauses for an /autonomy/status mode."""
+    return enabled and mode == 'mapping'
+
+
 def load_yolo(model_path, task='detect'):
     """
     Import Ultralytics and load ``model_path``, returning the model.
@@ -72,6 +83,7 @@ def load_yolo(model_path, task='detect'):
     """
     os.environ.setdefault('YOLO_VERBOSE', 'False')
     from ultralytics import YOLO
+
     return YOLO(model_path, task=task)
 
 
@@ -94,9 +106,11 @@ class InferenceNode(Node):
         image_topic = self.declare_parameter('image_topic', '/camera/color').value
         det_topic = self.declare_parameter('detections_topic', '/edgetpu/inference').value
         max_rate = self.declare_parameter('max_rate_hz', 15.0).value
+        self.pause_while_mapping = bool(self.declare_parameter('pause_while_mapping', True).value)
         self.publish_annotated = self.declare_parameter('publish_annotated', False).value
         annotated_topic = self.declare_parameter(
-            'annotated_topic', '/edgetpu/inference/image').value
+            'annotated_topic', '/edgetpu/inference/image'
+        ).value
         self.annotated_quality = self.declare_parameter('annotated_quality', 80).value
         diag_period = self.declare_parameter('diagnostics_period_sec', 1.0).value
         self.image_timeout = self.declare_parameter('image_timeout_sec', 5.0).value
@@ -116,6 +130,7 @@ class InferenceNode(Node):
         self.last_image_time = None
         self.last_infer_t = 0.0
         self.model_ok = True
+        self.paused = False
 
         # Depth 1 + best effort: the newest frame wins and a slow model sheds the
         # rest in the middleware instead of queueing stale work.
@@ -127,14 +142,24 @@ class InferenceNode(Node):
 
         self.det_pub = self.create_publisher(Detection2DArray, det_topic, 10)
         self.annot_pub = (
-            self.create_publisher(Image, annotated_topic, qos)
-            if self.publish_annotated else None)
+            self.create_publisher(Image, annotated_topic, qos) if self.publish_annotated else None
+        )
         self.diag_pub = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
-        self.create_subscription(Image, image_topic, self._image_cb, qos)
+        self.image_topic = image_topic
+        self.image_qos = qos
+        self.image_sub = None
+        self._subscribe_images()
+        # The status subscription is latched, as autonomy_node publishes it, so
+        # a node started while mapping reads the mode as soon as it subscribes.
+        latched = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(DiagnosticStatus, '/autonomy/status', self._status_cb, latched)
         self.create_timer(diag_period, self._publish_diagnostics)
 
-        self.get_logger().info(
-            f'[INFO] Inference node ready: {image_topic} -> {det_topic}')
+        self.get_logger().info(f'[INFO] Inference node ready: {image_topic} -> {det_topic}')
 
     def _load_model(self, model_path):
         """Resolve and load the weights, or exit with a one-line reason."""
@@ -154,18 +179,19 @@ class InferenceNode(Node):
         except ImportError as exc:
             self.get_logger().fatal(
                 f'[FATAL] ultralytics is not importable ({exc}); '
-                'run `racecar setup ml` to install the GPU stack.')
-            raise SystemExit(1)
+                'run `racecar setup ml` to install the GPU stack.'
+            )
+            raise SystemExit(1) from exc
         except Exception as exc:  # noqa: BLE001 - ultralytics raises bare Exception
             if not self._use_fallback(f'could not load {resolved}: {exc}'):
-                self.get_logger().fatal(
-                    f'[FATAL] Could not load model {resolved}: {exc}')
-                raise SystemExit(1)
+                self.get_logger().fatal(f'[FATAL] Could not load model {resolved}: {exc}')
+                raise SystemExit(1) from exc
             return self.model
 
         self.get_logger().info(
             f'[INFO] Model {os.path.basename(resolved)} on device {self.device} '
-            f'(imgsz {self.imgsz}, threshold {self.score_threshold})')
+            f'(imgsz {self.imgsz}, threshold {self.score_threshold})'
+        )
         return model
 
     def _use_fallback(self, reason):
@@ -184,12 +210,13 @@ class InferenceNode(Node):
         self.get_logger().warn(
             f'[WARN] TensorRT engine unusable on this car ({reason}); '
             f'falling back to {os.path.basename(fallback)} at roughly 2.4x the '
-            'latency. Rebuild the engine here with `racecar compile`.')
+            'latency. Rebuild the engine here with `racecar compile`.'
+        )
         try:
             self.model = load_yolo(fallback)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().fatal(f'[FATAL] Fallback {fallback} failed: {exc}')
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
         return True
 
     def _warmup(self):
@@ -207,16 +234,16 @@ class InferenceNode(Node):
         except Exception as exc:  # noqa: BLE001
             if not self._use_fallback(f'warmup inference failed: {exc}'):
                 self.get_logger().fatal(f'[FATAL] Warmup inference failed: {exc}')
-                raise SystemExit(1)
+                raise SystemExit(1) from exc
             t0 = time.monotonic()
             try:
                 self._predict(blank)
             except Exception as exc2:  # noqa: BLE001
                 self.get_logger().fatal(
-                    f'[FATAL] Warmup failed on the fallback weights too: {exc2}')
-                raise SystemExit(1)
-        self.get_logger().info(
-            f'[INFO] Warmup done in {(time.monotonic() - t0) * 1000:.0f} ms')
+                    f'[FATAL] Warmup failed on the fallback weights too: {exc2}'
+                )
+                raise SystemExit(1) from exc2
+        self.get_logger().info(f'[INFO] Warmup done in {(time.monotonic() - t0) * 1000:.0f} ms')
 
     def _predict(self, frame):
         """Run one BGR frame through the model and return the single result."""
@@ -232,6 +259,28 @@ class InferenceNode(Node):
             verbose=False,
         )[0]
 
+    def _subscribe_images(self):
+        """Subscribe to the camera topic with the newest-frame-wins queue."""
+        self.image_sub = self.create_subscription(
+            Image, self.image_topic, self._image_cb, self.image_qos
+        )
+
+    def _status_cb(self, msg):
+        """Drop the camera subscription while mapping and subscribe again after."""
+        mode = next((kv.value for kv in msg.values if kv.key == 'mode'), '')
+        pause = pauses_for(mode, self.pause_while_mapping)
+        if pause == self.paused:
+            return
+        self.paused = pause
+        if pause:
+            self.destroy_subscription(self.image_sub)
+            self.image_sub = None
+            self.get_logger().info('[INFO] Mapping: inference paused, camera unsubscribed.')
+        else:
+            self.last_image_time = None
+            self._subscribe_images()
+            self.get_logger().info('[INFO] Mapping ended: inference resumed.')
+
     def _image_cb(self, msg):
         """Decode one frame, run the model, publish what it found."""
         self.last_image_time = self.get_clock().now()
@@ -244,8 +293,7 @@ class InferenceNode(Node):
         try:
             frame = il.decode_image(msg.data, msg.encoding, msg.height, msg.width)
         except ValueError as exc:
-            self.get_logger().warn(
-                f'[WARN] Frame decode failed: {exc}', throttle_duration_sec=5.0)
+            self.get_logger().warn(f'[WARN] Frame decode failed: {exc}', throttle_duration_sec=5.0)
             return
 
         try:
@@ -254,8 +302,7 @@ class InferenceNode(Node):
             elapsed_ms = (time.monotonic() - t0) * 1000.0
         except Exception as exc:  # noqa: BLE001 - torch/TensorRT raise broadly
             self.model_ok = False
-            self.get_logger().error(
-                f'[ERROR] Inference failed: {exc}', throttle_duration_sec=5.0)
+            self.get_logger().error(f'[ERROR] Inference failed: {exc}', throttle_duration_sec=5.0)
             return
 
         self.model_ok = True
@@ -264,8 +311,10 @@ class InferenceNode(Node):
         # Exponential average; the raw per-frame figure is next to it in
         # /diagnostics for anyone chasing a stall rather than a trend.
         self.avg_inference_ms = (
-            elapsed_ms if self.avg_inference_ms == 0.0
-            else 0.9 * self.avg_inference_ms + 0.1 * elapsed_ms)
+            elapsed_ms
+            if self.avg_inference_ms == 0.0
+            else 0.9 * self.avg_inference_ms + 0.1 * elapsed_ms
+        )
 
         height, width = frame.shape[:2]
         boxes = result.boxes
@@ -317,8 +366,8 @@ class InferenceNode(Node):
     def _publish_annotated(self, result, header, width, height):
         """Publish the drawn overlay as JPEG, matching the camera topic's format."""
         ok, buf = cv2.imencode(
-            '.jpg', result.plot(),
-            [int(cv2.IMWRITE_JPEG_QUALITY), int(self.annotated_quality)])
+            '.jpg', result.plot(), [int(cv2.IMWRITE_JPEG_QUALITY), int(self.annotated_quality)]
+        )
         if not ok:
             return
 
@@ -344,6 +393,9 @@ class InferenceNode(Node):
         if not self.model_ok:
             status.level = DiagnosticStatus.ERROR
             status.message = 'Inference failed'
+        elif self.paused:
+            status.level = DiagnosticStatus.OK
+            status.message = 'Paused while mapping'
         elif self.last_image_time is None:
             status.level = DiagnosticStatus.WARN
             status.message = 'No images received yet'

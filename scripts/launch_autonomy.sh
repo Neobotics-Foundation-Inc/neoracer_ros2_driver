@@ -1,52 +1,47 @@
 #!/bin/bash
-# Launch wrapper for autonomy.launch.py (autonomy base: TF + twist bridge).
+# Launch wrapper for autonomy.launch.py, run by neoracer-autonomy.service.
 #
-# Same shape as launch_teleop.sh: timestamped log dir, output tee'd to a
-# plain-text log and journald, exec so systemd tracks the ros2 launch PID.
-# Differences: the osracer workspace is sourced UNDER the neoracer overlay
-# (the autonomy launch includes osracer_description/slam/navigation), and
-# the ~/logs/latest symlink is left alone - it belongs to teleop, and the
-# dashboard reads it for the watchdog tail.
+# The mode comes from ~/.config/racecar/autonomy.conf, which systemd loads
+# (EnvironmentFile); autonomy_args.py turns it into launch arguments and
+# resumes a mapping run from its autosave after a crash or teleop restart.
+# Output goes to autonomy_<time>/autonomy.log in the current teleop log
+# directory (~/logs/latest) and to the journal; node logs go beside it.
 #
 # Usage:
-#   ./scripts/launch_autonomy.sh [extra launch args...]
-#
-# neoracer-autonomy.service used to call this script. That unit is held and no
-# longer installed, so run this in a terminal of its own for now.
+#   systemctl start neoracer-autonomy   (calls this script)
 
 set -eo pipefail
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="$HOME/logs/autonomy_$TIMESTAMP"
+LOG_ROOT="$HOME/logs/latest"
+[[ -d "$LOG_ROOT" ]] || LOG_ROOT="$HOME/logs"
+LOG_DIR="$LOG_ROOT/autonomy_$TIMESTAMP"
 mkdir -p "$LOG_DIR"
+# tee ignores the stop signal systemd sends the whole group, so it keeps reading
+# until ros2 launch closes its output; dying first would end the launch with a
+# broken pipe (exit 120) and mark a clean stop as failed.
+exec &> >(trap '' INT TERM; exec tee -a "$LOG_DIR/autonomy.log")
 
-echo "=== Neoracer Autonomy - $(date) ==="
+echo "=== Neoracer Autonomy: $(date) ==="
 echo "Log directory: $LOG_DIR"
 
 export ROS_LOG_DIR="$LOG_DIR"
 export ROS_HOME="$LOG_DIR"
 
-# ---------------------------------------------------------------------------
-# Source ROS2, then the osracer underlay, then the neoracer overlay.
-# Order matters: later sources win lookup conflicts, and the one shared
-# lakibeam package must resolve from the neoracer side.
-# ---------------------------------------------------------------------------
 # shellcheck source=/opt/ros/humble/setup.bash
 source /opt/ros/humble/setup.bash
-
-if [ -f "$HOME/osracer_ws/install/setup.bash" ]; then
-    # shellcheck source=/home/racecar/osracer_ws/install/setup.bash
-    source "$HOME/osracer_ws/install/setup.bash"
-else
-    echo "osracer workspace not found at ~/osracer_ws - autonomy needs it" >&2
-    exit 1
-fi
-
 if [ -f "$HOME/ros2_ws/install/setup.bash" ]; then
     # shellcheck source=/home/racecar/ros2_ws/install/setup.bash
     source "$HOME/ros2_ws/install/setup.bash"
 fi
 
-exec &> >(tee -a "$LOG_DIR/autonomy.log")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mapfile -t ARGS < <(python3 "$SCRIPT_DIR/autonomy_args.py")
+if [[ ${#ARGS[@]} -eq 0 ]]; then
+    echo "No launch arguments; see the message above." >&2
+    exit 2
+fi
+echo "Arguments: ${ARGS[*]}"
 
-exec ros2 launch neoracer_ros2_driver autonomy.launch.py "$@"
+# `exec` so systemd tracks the ros2 launch PID, not this shell.
+exec ros2 launch neoracer_ros2_driver autonomy.launch.py "${ARGS[@]}"

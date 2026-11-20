@@ -10,4 +10,5 @@ def generate_launch_description():
         package='neoracer_ros2_driver',
         executable='controller',
         node_name='controller_node',
+        extra_yamls=(('odom_config', 'odom.yaml'),),
     )

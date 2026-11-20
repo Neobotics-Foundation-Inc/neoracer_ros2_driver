@@ -3,34 +3,23 @@
 # Not executed directly: it defines a `racecar` shell function so the build /
 # test / source subcommands can mutate the current shell (PWD, env).
 
-_rc_autonomy_env() {
-    # Chained env for the osracer layers: underlay beneath the neoracer
-    # overlay, same order as launch_autonomy.sh. Run inside a subshell so
-    # the caller's interactive shell keeps its own environment.
-    if [[ ! -f "$HOME/osracer_ws/install/setup.bash" ]]; then
-        echo "osracer workspace not found at ~/osracer_ws" >&2
-        return 1
+# Where the car's data goes (neoracer_ros2_driver/data_root.py). Login shells
+# get it from /etc/profile.d/neoracer-data.sh; this covers a shell that read
+# only .bashrc, such as a terminal inside JupyterLab.
+if [ -z "${RACECAR_DATA_DIR:-}" ]; then
+    if [ -r /run/racecar/data_root ]; then
+        RACECAR_DATA_DIR="$(cat /run/racecar/data_root)"
+    else
+        RACECAR_DATA_DIR="$HOME/neoracer_data"
     fi
-    # shellcheck disable=SC1091
-    source /opt/ros/humble/setup.bash
-    # shellcheck disable=SC1090
-    source "$HOME/osracer_ws/install/setup.bash"
-    # shellcheck disable=SC1090
-    [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
-    systemctl is-active --quiet neoracer-teleop 2>/dev/null || \
-        echo "warning: teleop service not active; /scan and /odom are missing" >&2
-    # The autonomy base ran as neoracer-autonomy.service until that unit was
-    # held; until it returns, the base is started in a terminal of its own.
-    pgrep -f launch_autonomy.sh >/dev/null 2>&1 || \
-        echo "warning: autonomy base not running (TF + bridge); start it with:" \
-             "bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh" >&2
-    return 0
-}
+    export RACECAR_DATA_DIR
+fi
 
 # Core stack, enabled at boot by setup_services.sh. neoracer-autonomy is not
-# here: the unit is held and setup no longer installs it.
+# here: setup installs it, but it rides on teleop and `racecar map` or the map
+# viewer starts it on demand.
 _RC_CORE_UNITS=(neoracer-teleop neoracer-watchdog neoracer-dashboard
-                neoracer-jupyter)
+                neoracer-jupyter neoracer-mapview)
 
 # Lab dashboards, installed disabled and started per session. Each holds the
 # camera or the GPU for its whole run, so they are opt-in rather than part of
@@ -38,33 +27,80 @@ _RC_CORE_UNITS=(neoracer-teleop neoracer-watchdog neoracer-dashboard
 _RC_DASH_UNITS=(neoracer-camlabel neoracer-wallfollow neoracer-pursuit
                 neoracer-eps neoracer-smartfollow neoracer-linefollow
                 neoracer-webteleop)
+# The lab dashboards that publish /drive, as DRIVING_APPS in
+# scripts/map_control.py. Two of them running would both send commands to the
+# mux, so starting or restarting one stops the others first. camlabel runs
+# alongside them.
+_RC_DRIVE_UNITS=(neoracer-wallfollow neoracer-pursuit neoracer-eps
+                 neoracer-smartfollow neoracer-linefollow neoracer-webteleop)
+
+# Running as the apps page and scripts/map_control.py count it: a unit that is
+# activating, such as one waiting to restart after a crash, comes back on its
+# own, so it counts as running.
+_rc_unit_running() {
+    case "$(systemctl is-active "$1" 2>/dev/null)" in
+        active|activating|reloading) return 0 ;;
+    esac
+    return 1
+}
 
 # Units that would come back on their own after a reboot. `restart` with no
-# unit named uses this so it never promotes a disabled service into a running
-# one; systemctl restart starts a stopped unit, which would otherwise put a
-# lab dashboard on the graph behind the student's back.
+# unit named and `racecar update` use this so they never promote a disabled
+# service into a running one; systemctl restart starts a stopped unit, which
+# would otherwise put a lab dashboard on the graph without the student asking.
+# At most one /drive dashboard is listed: the one running, or else the first
+# enabled one. Another enabled one stays stopped, and a line on stderr says so.
 _rc_enabled_units() {
-    local u
+    local u drive=""
+    for u in "${_RC_DRIVE_UNITS[@]}"; do
+        if _rc_unit_running "$u"; then
+            drive="$u"
+            break
+        fi
+    done
     for u in "${_RC_CORE_UNITS[@]}" "${_RC_DASH_UNITS[@]}"; do
-        systemctl is-enabled --quiet "$u" 2>/dev/null && echo "$u"
+        systemctl is-enabled --quiet "$u" 2>/dev/null || continue
+        if [[ " ${_RC_DRIVE_UNITS[*]} " == *" $u "* ]]; then
+            if [[ -n "$drive" && "$u" != "$drive" ]]; then
+                echo "  leaving $u stopped: $drive also publishes /drive" >&2
+                continue
+            fi
+            drive="$u"
+        fi
+        echo "$u"
     done
 }
 
 _rc_unit_installed() {
-    systemctl list-unit-files "$1.service" 2>/dev/null | grep -q "^$1.service"
+    [[ -n "$(systemctl list-unit-files "$1.service" --no-legend 2>/dev/null)" ]]
+}
+
+# One unit per call, named in full: /etc/sudoers.d/neoracer allows exactly
+# `systemctl start|stop|restart neoracer-<name>.service`, so these need no
+# password. enable and disable still ask for it.
+_rc_systemctl() {
+    local action="$1" u
+    shift
+    for u in "$@"; do
+        sudo systemctl "$action" "${u%.service}.service" || return
+    done
 }
 
 # One status line. An absent unit reports as such rather than passing
-# systemd's "Failed to get unit file state" through to the column.
+# systemd's "Failed to get unit file state" through to the column. A unit
+# whose description names a port gets the page's address.
 _rc_unit_status_line() {
-    local u="$1" state enabled
+    local u="$1" state enabled port
     if ! _rc_unit_installed "$u"; then
         printf "  %-22s  not installed\n" "$u"
         return
     fi
     state=$(systemctl is-active "$u" 2>&1 || true)
     enabled=$(systemctl is-enabled "$u" 2>&1 || true)
-    printf "  %-22s  active=%-12s enabled=%s\n" "$u" "$state" "$enabled"
+    port=$(sed -n 's/^Description=.*(port \([0-9]*\)).*/\1/p' \
+        "${RACECAR_SYSTEMD_DIR:-/etc/systemd/system}/$u.service" 2>/dev/null | head -1)
+    printf "  %-22s  active=%-12s enabled=%-10s %s\n" "$u" "$state" "$enabled" \
+        "${port:+http://$(hostname).local:$port}"
 }
 
 racecar() {
@@ -76,6 +112,16 @@ racecar() {
 
     case "$cmd" in
         build)
+            # A source file deleted since the last --symlink-install build
+            # leaves a dangling link that setup.py's scripts/*.py glob picks up,
+            # and the build then fails when setuptools copies it.
+            local tree link
+            for tree in "$ws/build/$pkg" "$ws/install/$pkg"; do
+                [[ -d "$tree" ]] || continue
+                while IFS= read -r -d '' link; do
+                    rm -- "$link" && echo "  removed dangling symlink: $link"
+                done < <(find "$tree" -xtype l -print0)
+            done
             ( cd "$ws" && colcon build --packages-select "$pkg" --symlink-install "$@" ) \
                 && source "$ws/install/setup.bash"
             ;;
@@ -84,6 +130,53 @@ racecar() {
             ( cd "$ws" \
                 && colcon test --packages-select "$pkg" --event-handlers console_direct+ "$@" \
                 && colcon test-result --verbose )
+            ;;
+
+        lint)
+            # ruff, black and mypy read their settings from pyproject.toml.
+            local lint_bin="${RACECAR_LINT_BIN:-$HOME/.local/bin}"
+            local tool
+            local -a failed=()
+            for tool in ruff black mypy; do
+                if [[ ! -x "$lint_bin/$tool" ]]; then
+                    echo "racecar lint: $lint_bin/$tool not found; run scripts/setup_dev_tools.sh" >&2
+                    return 3
+                fi
+            done
+            echo "==> ruff check"
+            ( cd "$pkg_dir" && "$lint_bin/ruff" check . ) || failed+=("ruff")
+            echo "==> black --check"
+            ( cd "$pkg_dir" && "$lint_bin/black" --check . ) || failed+=("black")
+            echo "==> mypy"
+            ( cd "$pkg_dir" && "$lint_bin/mypy" ) || failed+=("mypy")
+            echo
+            if [[ ${#failed[@]} -gt 0 ]]; then
+                echo "racecar lint: failed: ${failed[*]}" >&2
+                return 1
+            fi
+            echo "racecar lint: ruff, black and mypy passed"
+            ;;
+
+        profile)
+            # This car's settings outside the driver folder; see
+            # scripts/neoracer_profile.py and neoracer_ros2_driver/car_profile.py.
+            python3 "${RACECAR_PROFILE_SCRIPT:-$pkg_dir/scripts/neoracer_profile.py}" "$@"
+            ;;
+
+        data)
+            # Where the car's data goes; see neoracer_ros2_driver/data_root.py.
+            python3 "$pkg_dir/neoracer_ros2_driver/data_root.py" "$@"
+            ;;
+
+        log)
+            # ROS 2 bag recording and analysis. Thin wrapper: the work and its
+            # tests live in scripts/neoracer_log.py.
+            python3 "${RACECAR_LOG_SCRIPT:-$pkg_dir/scripts/neoracer_log.py}" "$@"
+            ;;
+
+        calibrate)
+            # Guided calibration; see scripts/calibration/calibrate.py.
+            python3 "${RACECAR_CALIBRATE_SCRIPT:-$pkg_dir/scripts/calibration/calibrate.py}" "$@"
             ;;
 
         source)
@@ -158,99 +251,10 @@ racecar() {
             bash "$pkg_dir/scripts/launch_teleop.sh" "$@"
             ;;
 
-        mapping)
-            # On-demand SLAM. Mapping is an activity, not a daemon: run it
-            # while building a map, Ctrl-C when done. Needs teleop (for /scan
-            # and /odom) and the autonomy base service (TF + bridge).
-            local sub="${1:-slam_toolbox}"
-            shift || true
-            local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
-            [[ "$sub" == "run" ]] && sub="slam_toolbox"
-            case "$sub" in
-                slam_toolbox|gmapping|cartographer)
-                    (
-                        _rc_autonomy_env || exit 1
-                        echo "SLAM up ($sub). Drive under RC; Ctrl-C when the map is complete."
-                        echo "Save from another terminal: racecar mapping save <name>"
-                        exec ros2 launch osracer_slam "$sub.launch.py" "$@"
-                    )
-                    ;;
-                save)
-                    local name="${1:-map}"
-                    (
-                        _rc_autonomy_env || exit 1
-                        mkdir -p "$maps_dir"
-                        ros2 run nav2_map_server map_saver_cli -f "$maps_dir/$name" && \
-                            echo "Saved: $maps_dir/$name.yaml  (drive it with: racecar navigation $name)"
-                    )
-                    ;;
-                rviz)
-                    # The vendor's pre-configured mapping RViz. Needs a display:
-                    # run from the car desktop (monitor or RustDesk), not SSH.
-                    # Cartographer has its own debug view: racecar mapping rviz cartographer
-                    local view="debug_mapping"
-                    [[ "${1:-}" == "cartographer" ]] && view="debug_cartographer"
-                    (
-                        _rc_autonomy_env || exit 1
-                        if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-                            echo "racecar mapping rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
-                            exit 1
-                        fi
-                        exec ros2 launch osracer_debug "$view.launch.py"
-                    )
-                    ;;
-                -h|--help|help)
-                    echo "usage: racecar mapping [backend]     start SLAM: slam_toolbox (default), gmapping, cartographer"
-                    echo "       racecar mapping save <name>   save the current map (works with any backend)"
-                    echo "       racecar mapping rviz [cartographer]  watch the map form (car desktop only)"
-                    ;;
-                *)
-                    echo "racecar mapping: unknown action '$sub'" >&2
-                    return 2
-                    ;;
-            esac
-            ;;
-
-        navigation)
-            # On-demand Nav2 against a saved map. Foreground; Ctrl-C stops it.
-            # slam and nav are mutually exclusive (both would publish
-            # map->odom), so don't run this while `racecar mapping` is up.
-            # Optional first arg picks the local planner: teb (default) or dwb.
-            # `racecar navigation rviz` opens the navigation RViz view instead
-            # (set a goal, watch the plan); needs the car desktop.
-            if [[ "${1:-}" == "rviz" ]]; then
-                (
-                    _rc_autonomy_env || exit 1
-                    if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-                        echo "racecar navigation rviz needs a display; run it from the car desktop (RustDesk or monitor)" >&2
-                        exit 1
-                    fi
-                    exec rviz2 -d "$HOME/osracer_ws/src/osracer/osracer_debug/config/navigation.rviz"
-                )
-                return
-            fi
-            local planner="teb"
-            case "${1:-}" in
-                teb|dwb) planner="$1"; shift ;;
-            esac
-            local map_name="${1:-map}"
-            shift || true
-            local maps_dir="$HOME/osracer_ws/src/osracer/osracer_slam/maps"
-            if [[ ! -f "$maps_dir/$map_name.yaml" ]]; then
-                echo "racecar navigation: no map named '$map_name' in $maps_dir" >&2
-                local avail=""
-                for f in "$maps_dir"/*.yaml; do
-                    [[ -e "$f" ]] && avail+="$(basename "${f%.yaml}") "
-                done
-                echo "  available maps: ${avail:-none (build one with: racecar mapping)}" >&2
-                return 2
-            fi
-            (
-                _rc_autonomy_env || exit 1
-                exec ros2 launch osracer_navigation nav2.launch.py \
-                    use_planner:="$planner" use_map:="$map_name" \
-                    use_rviz:='False' use_namespace:='False' "$@"
-            )
+        map)
+            # SLAM mapping and localization through neoracer-autonomy.service;
+            # see scripts/neoracer_map.py and scripts/map_control.py.
+            python3 "${RACECAR_MAP_SCRIPT:-$pkg_dir/scripts/neoracer_map.py}" "$@"
             ;;
 
         update)
@@ -268,7 +272,7 @@ racecar() {
             echo "Restarting services..."
             local -a live
             mapfile -t live < <(_rc_enabled_units)
-            [[ ${#live[@]} -gt 0 ]] && sudo systemctl restart "${live[@]}"
+            [[ ${#live[@]} -gt 0 ]] && _rc_systemctl restart "${live[@]}"
             echo "Update complete. Open a new terminal (or run: racecar source)"
             echo "so this shell picks up the new environment and racecar tool."
             ;;
@@ -369,9 +373,9 @@ __RC_COMPILE_HELP__
                 local busy=""
                 systemctl is-active --quiet neoracer-teleop 2>/dev/null \
                     && busy+="neoracer-teleop "
-                # The autonomy base holds GPU memory too, and now runs as a
-                # plain process rather than a unit.
-                pgrep -f launch_autonomy.sh >/dev/null 2>&1 && busy+="autonomy "
+                # SLAM holds memory the GPU shares, whether neoracer-autonomy
+                # or `racecar launch autonomy` started it.
+                pgrep -f autonomy.launch.py >/dev/null 2>&1 && busy+="autonomy "
                 if [[ -n "$busy" ]]; then
                     echo "racecar compile: ${busy% } running; the export peaks near 3 GB." >&2
                     echo "Stop the stack first (racecar service stop), or pass --force." >&2
@@ -460,13 +464,25 @@ __RC_COMPILE__
                     ;;
                 start|stop|restart)
                     if [[ -n "$1" ]]; then
-                        local unit="neoracer-$1"
+                        local unit="neoracer-${1%.service}" u
                         if ! _rc_unit_installed "$unit"; then
                             echo "racecar service: $unit is not installed." >&2
                             echo "Run 'racecar service install' first." >&2
                             return 1
                         fi
-                        sudo systemctl "$action" "$unit"
+                        if [[ "$action" != stop && " ${_RC_DRIVE_UNITS[*]} " == *" $unit "* ]]; then
+                            for u in "${_RC_DRIVE_UNITS[@]}"; do
+                                [[ "$u" == "$unit" ]] && continue
+                                if _rc_unit_running "$u"; then
+                                    echo "  stopping $u (only one /drive publisher)"
+                                    if ! _rc_systemctl stop "$u"; then
+                                        echo "racecar service: $u did not stop, so $unit was not ${action}ed." >&2
+                                        return 1
+                                    fi
+                                fi
+                            done
+                        fi
+                        _rc_systemctl "$action" "$unit"
                     elif [[ "$action" == restart ]]; then
                         # Restart what is already enabled, dashboards included,
                         # and leave every disabled unit where it is.
@@ -475,11 +491,11 @@ __RC_COMPILE__
                         if [[ ${#live[@]} -eq 0 ]]; then
                             echo "No enabled services to restart." >&2
                         else
-                            sudo systemctl restart "${live[@]}"
+                            _rc_systemctl restart "${live[@]}" || return
                             printf 'restarted: %s\n' "${live[*]}"
                         fi
                     else
-                        sudo systemctl "$action" "${units[@]}"
+                        _rc_systemctl "$action" "${units[@]}"
                     fi
                     ;;
                 enable|disable)
@@ -487,22 +503,24 @@ __RC_COMPILE__
                     # dashboard is turned on by name, so a car that wants one
                     # at boot says so: `racecar service enable camlabel`.
                     if [[ -n "$1" ]]; then
-                        sudo systemctl "$action" "neoracer-$1"
+                        sudo systemctl "$action" "neoracer-${1%.service}.service"
                     else
                         for u in "${units[@]}"; do
-                            sudo systemctl "$action" "$u"
+                            sudo systemctl "$action" "$u.service"
                         done
                     fi
                     ;;
                 logs)
                     local unit="${1:-teleop}"
-                    sudo journalctl -u "neoracer-$unit" -f
+                    sudo journalctl -u "neoracer-${unit%.service}" -f
                     ;;
                 status|"")
                     local u
                     for u in "${_RC_CORE_UNITS[@]}"; do
                         _rc_unit_status_line "$u"
                     done
+                    echo "  -- autonomy (started by racecar map or the map viewer) --"
+                    _rc_unit_status_line neoracer-autonomy
                     echo "  -- lab dashboards (off unless started) --"
                     for u in "${_RC_DASH_UNITS[@]}"; do
                         _rc_unit_status_line "$u"
@@ -512,25 +530,37 @@ __RC_COMPILE__
                     cat <<'__RC_SVC_HELP__'
 usage: racecar service <action> [unit]
 actions:
-  install        Install units: core stack enabled, lab dashboards disabled
-  start [name]   Start neoracer-<name>; no name = the core stack
+  install        Install units: core stack enabled, autonomy on demand,
+                 lab dashboards disabled
+  start [name]   Start neoracer-<name>; no name = the core stack.
+                 Starting or restarting a lab dashboard that drives the car
+                 stops the others that do first.
   stop [name]    Stop neoracer-<name>; no name = the core stack
   restart [name] Restart neoracer-<name>; no name = every enabled unit,
-                 dashboards included. Never starts a disabled one.
+                 dashboards included, and at most one that drives the car.
+                 Never starts a disabled one.
   enable [name]  Enable neoracer-<name>; no name = the core stack
   disable [name] Disable neoracer-<name>; no name = the core stack
   logs [name]    journalctl -u neoracer-<name> -f; default = teleop
   status         active/enabled snapshot for every unit (default)
-core units:      teleop, watchdog, dashboard, jupyter
+core units:      teleop, watchdog, dashboard (8080), jupyter (8888),
+                 mapview (8088)
 lab dashboards:  camlabel (8082), wallfollow (8081), pursuit (8083),
                  eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
+wallfollow, pursuit, eps, smartfollow, linefollow and webteleop publish
+/drive, so only one of them runs at a time. camlabel runs alongside them.
 
-neoracer-autonomy is held and no longer installed. Run the base in a terminal:
-  bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+neoracer-autonomy (SLAM on top of teleop) is installed but not enabled.
+`racecar map` and the map viewer start and stop it. `racecar launch autonomy`
+runs the same launch in a terminal instead.
+
+start, stop and restart need no password (/etc/sudoers.d/neoracer).
+enable and disable ask for it.
 
 Dashboards install disabled and are started for a session:
   racecar service start camlabel
-Each holds the camera or the GPU while it runs, so run one at a time.
+Each holds the camera or the GPU while it runs, so start only the ones the
+session needs.
 __RC_SVC_HELP__
                     ;;
                 *)
@@ -546,11 +576,16 @@ __RC_SVC_HELP__
             case "$phase" in
                 "")
                     echo "usage: racecar setup <phase>" >&2
-                    echo "  phases: all, ml, networking" >&2
+                    echo "  phases: all, dashboards, ml, networking" >&2
                     return 2
                     ;;
                 all)
                     bash "$pkg_dir/scripts/setup_all.sh" "$@"
+                    ;;
+                dashboards)
+                    # Installs the seven lab dashboards' units, stopped and
+                    # disabled; setup_services.sh also runs it.
+                    bash "$pkg_dir/scripts/setup_dashboards.sh" "$@"
                     ;;
                 ml|gpu)
                     bash "$pkg_dir/scripts/setup_ml.sh" "$@"
@@ -662,7 +697,7 @@ __RC_NET_HELP__
                     ;;
                 *)
                     echo "racecar setup: unknown phase '$phase'" >&2
-                    echo "  phases: all, networking" >&2
+                    echo "  phases: all, dashboards, ml, networking" >&2
                     return 2
                     ;;
             esac
@@ -950,24 +985,11 @@ __RC_SELFTEST_HELP__
             ;;
 
         status)
-            echo "=== USB peripherals ==="
-            lsusb | grep -iE "303a|1209|1bcf|2993|05a3|espressif|decxin|camera" || echo "  (none of the expected USB devices found)"
-            echo
-            echo "=== Stable device symlinks ==="
-            for s in osrbot_base osrbot_led_matrix osrbot_usb_cam; do
-                if [[ -e "/dev/$s" ]]; then
-                    printf "  /dev/%-18s -> %s\n" "$s" "$(readlink -f /dev/$s)"
-                else
-                    printf "  /dev/%-18s MISSING (run: racecar udev)\n" "$s"
-                fi
-            done
-            echo
-            echo "=== ros2 nodes running ==="
-            if command -v ros2 >/dev/null; then
-                ros2 node list 2>/dev/null || echo "  (no ROS daemon / no nodes)"
-            else
-                echo "  ros2 not on PATH"
-            fi
+            # Whole-car diagnostic. Read-only: it observes topics and reads
+            # sysfs, and never commands the hardware. Exits non-zero when a
+            # check fails (--strict: unless every check passed), so it is
+            # usable from a script.
+            python3 "${RACECAR_DIAGNOSE_SCRIPT:-$pkg_dir/scripts/diagnose.py}" "$@"
             ;;
 
         help|-h|--help|"")
@@ -980,6 +1002,62 @@ Usage:
 Commands:
     build               Build neoracer_ros2_driver (--symlink-install) and source overlay.
     test                Run the package test suite with verbose results.
+    lint                Run ruff, black --check and mypy on the package.
+    profile [action]    This car's settings, kept in ~/.config/racecar so a
+                        driver update or re-clone keeps the calibration.
+                          (none)        path, car name, files and dates
+                          path          the profile folder
+                          migrate       move config/*.local.yaml and dashboard
+                                        tuning out of the driver folder
+                          export FILE   write the profile to FILE (.tar.gz)
+                          import FILE   read a profile written by export
+    data                Where the car's data goes (the data root): ~/neoracer_data,
+                        outside the folders the installer removes. Programs
+                        read it from $RACECAR_DATA_DIR.
+    log <action>        Record and analyze ROS 2 bags. Actions:
+                          start [name]        record; bag is <timestamp>_<name>
+                                                --topics A B    default: all
+                                                --exclude REGEX
+                                                --dir PATH      default: bags/ under
+                                                                the data root
+                                                --name NAME     full bag name
+                                                --storage mcap|sqlite3
+                                                --force         record anyway when
+                                                                the rate outruns the disk
+                          stop                SIGINT, so rosbag2 finalizes the bag
+                          status [--json]     size, rate, elapsed, time until full
+                          list                recorded bags, newest first
+                          analyze [bag]       duration, size, per-topic counts and
+                                              rates; defaults to the newest bag
+                          config              show or set persisted defaults
+                        Every topic together is about 4.5 MB/s, most of it the
+                        camera.
+    calibrate [steps]   Calibrate the car in a guided session. Steps:
+                          lidar       lidar yaw from the direction of travel;
+                                      the car drives itself
+                          odom        gyro yaw scale (circles) and encoder
+                                      speed scale (straight drive), both
+                                      against the lidar; you drive the car
+                                      with the handset, mode switch UP
+                                      (manual)
+                          steering    steering trim, set in the ESP32
+                                      firmware (trim set), with a copy in the
+                                      car profile; the car drives itself
+                          dynamics    steering angles, servo time, speeds
+                                      and stop distances for the simulator;
+                                      the car drives itself; no check
+                        A step that drives the car by itself drives only
+                        while the handset's mode switch is DOWN (autonomy).
+                        Start with the switch UP and flip it DOWN when the
+                        step asks. Flip it UP to stop. Turning the handset
+                        off does not stop the car.
+                        No arguments: all but dynamics.
+                        `racecar calibrate status` lists what is calibrated
+                        on this car, when, and the stored values.
+                        `racecar calibrate check [steps]` verifies each
+                        calibration against the live sensors.
+                        To prepare a car: calibrate, restart teleop, then
+                        run the check.
     source              Source the workspace overlay into the current shell.
     ws [name]           Switch this shell between workspaces: neoracer or
                         osracer (the vendor stack preinstalled in ~/osracer_ws).
@@ -990,14 +1068,34 @@ Commands:
     teleop              Launch the full teleop stack via launch_teleop.sh wrapper
                         (timestamped ~/logs/<ts>/ + FastRTPS SHM cleanup).
                         Forwards args, e.g. `racecar teleop camera_enable:=false`.
-    mapping [backend]   Start SLAM to build a map (foreground; Ctrl-C to stop).
-                        Backends: slam_toolbox (default), gmapping, cartographer.
-                        `racecar mapping save <name>` saves from any backend.
-    navigation [teb|dwb] [map]
-                        Start Nav2 on a saved map (foreground; Ctrl-C to stop).
-                        Planner: teb (default) or dwb. Default map name: map.
-                        `racecar navigation rviz` opens the goal-setting RViz
-                        view (car desktop only).
+    map <action>        Build, save, and load maps (SLAM on top of teleop).
+                        Teleop must be running; drive with the handset as
+                        usual. Maps are in maps/ under the data root.
+                          start NAME          start mapping; needs the handset's
+                                              speed switch UP (slow), and /drive
+                                              is held to the mapping cap
+                                                --from SAVED    extend SAVED
+                                                --pose x,y,yaw  with --from: the
+                                                                car's pose on SAVED
+                                                --force         replace NAME (the
+                                                                old one is kept)
+                          save                save the map; waits for the files
+                          stop                stop (a mapping run is autosaved)
+                          resume              start the last run again; a
+                                              mapping run needs the speed
+                                              switch UP
+                          load NAME           localize on NAME; starts from the
+                                              car's last pose on it
+                                                --pose x,y,yaw  start pose
+                                                --global        search the map
+                                                --localizer amcl|slam_toolbox
+                          recover NAME        keep an autosave as the saved map
+                          status              mode, map, localized, pose
+                          list                maps; unsaved ones marked
+                          info NAME           size, dates, poses, frames
+                          foxglove on|off     foxglove_bridge (port 8765) at the
+                                              next start or load
+                        Poses are in the map frame: meters, meters, radians.
     update              Field update in one command: repo to latest origin/main
                         (discards local repo edits), full `setup all`, restart
                         all services. Needs internet.
@@ -1021,6 +1119,9 @@ Commands:
                         ~/logs/latest/watchdog.log. Assumes teleop runs separately.
     setup <phase>       Run a setup script. Phases:
                           all          - setup_all.sh (the 8-phase orchestrator)
+                          dashboards   - install the lab dashboards' units
+                                         (stopped, disabled). Skip with
+                                         RACECAR_DASHBOARDS=0.
                           ml           - GPU stack: PyTorch/torchvision for Tegra,
                                          Ultralytics, ONNX export tooling; verifies
                                          the JetPack TensorRT bindings.
@@ -1041,11 +1142,15 @@ Commands:
                           enable|disable [name]  no name: the core stack
                           logs [name]          journalctl -f for neoracer-<name>
                           status               active/enabled summary (default)
-                        Core units: teleop, watchdog, dashboard, jupyter
-                        Lab dashboards, off until started, one at a time:
+                        Core units: teleop, watchdog, dashboard (8080),
+                          jupyter (8888), mapview (8088)
+                        Lab dashboards, off until started. One that drives
+                        the car runs at a time, and camlabel runs beside it:
                           camlabel (8082), wallfollow (8081), pursuit (8083),
                           eps (8084), smartfollow (8085), linefollow (8086), webteleop (8087)
-                        neoracer-autonomy is held; setup no longer installs it.
+                        neoracer-autonomy: SLAM on top of teleop, installed
+                        but not enabled; `racecar map` and the map viewer
+                        start and stop it.
     library <action>    Manage racecar_student.pth in user site-packages.
                           --select <folder>   point at ~/jupyter_ws/<folder>/library
                           --list              show valid folders in ~/jupyter_ws
@@ -1058,7 +1163,17 @@ Commands:
                           racecar selftest --led            (sends test text)
                           racecar selftest --led=HELLO      (sends custom text)
                         Requires led_matrix_node running (racecar launch led_matrix).
-    status              Show USB peripherals, device symlinks, and running ros2 nodes.
+    status [flags]      Whole-car diagnostic: devices, sensors, actuators,
+                        autonomy, system, services and network in one pass.
+                        Read-only. Exits non-zero when a check fails; WARN
+                        still exits 0.
+                          --quick             skip the ROS sampling phase
+                          --json              machine-readable output
+                          --strict            also exit non-zero on WARN/SKIP
+                          --section a,b       devices, sensors, actuators,
+                                              autonomy, system, services,
+                                              network
+                          --window SEC        ROS sample window (default 5.0)
     help                Show this message.
 
 Extra args are forwarded:
@@ -1082,11 +1197,24 @@ _racecar_complete() {
     local sub="${COMP_WORDS[1]:-}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "build test source ws cd teleop mapping navigation launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "build test profile data log calibrate lint source ws cd teleop map launch compile clear udev watchdog service setup update library cleanup selftest status help" -- "$cur") )
         return
     fi
 
     case "$sub" in
+        calibrate)
+            COMPREPLY=( $(compgen -W "status check lidar odom steering dynamics --help" -- "$cur") )
+            ;;
+        status)
+            COMPREPLY=( $(compgen -W "--quick --json --strict --section --window --help" -- "$cur") )
+            ;;
+        profile)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "path migrate export import" -- "$cur") )
+            else
+                COMPREPLY=( $(compgen -f -- "$cur") )
+            fi
+            ;;
         launch)
             local launch_dir="$HOME/ros2_ws/src/neoracer_ros2_driver/launch"
             if [[ -d "$launch_dir" ]]; then
@@ -1138,23 +1266,67 @@ _racecar_complete() {
             ;;
         setup)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "all networking" -- "$cur") )
+                COMPREPLY=( $(compgen -W "all dashboards ml networking" -- "$cur") )
             elif [[ "${COMP_WORDS[2]}" == "networking" ]]; then
-                COMPREPLY=( $(compgen -W "--ssid= --psk= --channel= --ap-addr= --eth-static= --show --reset --help" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--ssid= --psk= --channel= --ap-addr= --eth-static= --lidar-host= --wifi-iface= --eth-iface= --show --reset --help" -- "$cur") )
+            elif [[ "${COMP_WORDS[2]}" == "dashboards" ]]; then
+                COMPREPLY=( $(compgen -W "--help" -- "$cur") )
             fi
             ;;
-        mapping)
+        map)
+            local maps_dir="${RACECAR_MAP_ROOT:-${RACECAR_DATA_DIR:-$HOME/neoracer_data}/maps}"
+            local maps=""
+            if [[ -d "$maps_dir" ]]; then
+                maps=$(cd "$maps_dir" && ls -d */ 2>/dev/null | sed 's#/$##' | grep -vx replaced)
+            fi
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "slam_toolbox gmapping cartographer save rviz" -- "$cur") )
+                COMPREPLY=( $(compgen -W "start save stop resume load recover status list info foxglove" -- "$cur") )
+            elif [[ "$prev" == "--from" ]]; then
+                COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+            elif [[ "$prev" == "--localizer" ]]; then
+                COMPREPLY=( $(compgen -W "amcl slam_toolbox" -- "$cur") )
+            else
+                case "${COMP_WORDS[2]}" in
+                    start)
+                        COMPREPLY=( $(compgen -W "--from --pose --force" -- "$cur") )
+                        ;;
+                    load)
+                        if [[ $COMP_CWORD -eq 3 ]]; then
+                            COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+                        else
+                            COMPREPLY=( $(compgen -W "--pose --global --localizer" -- "$cur") )
+                        fi
+                        ;;
+                    recover|info)
+                        COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+                        ;;
+                    foxglove)
+                        COMPREPLY=( $(compgen -W "on off" -- "$cur") )
+                        ;;
+                esac
             fi
             ;;
-        navigation)
-            if [[ $COMP_CWORD -ge 2 ]]; then
-                local maps="teb dwb rviz "
-                for f in "$HOME"/osracer_ws/src/osracer/osracer_slam/maps/*.yaml; do
-                    [[ -e "$f" ]] && maps+="$(basename "${f%.yaml}") "
-                done
-                COMPREPLY=( $(compgen -W "$maps" -- "$cur") )
+        log)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "start stop status list analyze config help" -- "$cur") )
+            else
+                case "${COMP_WORDS[2]}" in
+                    start)
+                        COMPREPLY=( $(compgen -W "--topics --exclude --dir --name --storage --force --help" -- "$cur") )
+                        ;;
+                    stop)
+                        COMPREPLY=( $(compgen -W "--timeout --help" -- "$cur") )
+                        ;;
+                    status|analyze)
+                        COMPREPLY=( $(compgen -W "--json --help" -- "$cur") )
+                        ;;
+                    config)
+                        COMPREPLY=( $(compgen -W "--topics --dir --storage --reset --help" -- "$cur") )
+                        ;;
+                    list)
+                        COMPREPLY=( $(compgen -W "--dir --help" -- "$cur") )
+                        ;;
+                esac
             fi
             ;;
         service)
@@ -1164,7 +1336,7 @@ _racecar_complete() {
                 local action="${COMP_WORDS[2]}"
                 case "$action" in
                     start|stop|restart|logs|enable|disable)
-                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter camlabel wallfollow pursuit eps smartfollow linefollow webteleop" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "teleop watchdog dashboard jupyter mapview autonomy camlabel wallfollow pursuit eps smartfollow linefollow webteleop" -- "$cur") )
                         ;;
                 esac
             fi

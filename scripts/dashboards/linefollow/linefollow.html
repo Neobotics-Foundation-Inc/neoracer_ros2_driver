@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-app="Line follow">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Line Follow · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/lost.js?v=2" defer></script>
+<script src="/ui/charts.js?v=2"></script>
+<style>
+  /* This page only. The shared pieces are in /ui/neoracer.css. */
+  .view { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: contain; }
+  #state { font-family: var(--nr-font-title); font-size: 22px; font-weight: 700; letter-spacing: 0.06em; text-align: center; }
+  .offset-chart { height: 170px; }
+  .log-chart { height: 200px; }
+  .tunecols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 24px; }
+  @media (max-width: 1100px) { .tunecols { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) { .tunecols { grid-template-columns: 1fr; } }
+  .tunecols h3 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--nr-ink-2); margin-bottom: 6px; }
+  label.slider { display: block; margin-top: 8px; color: var(--nr-ink-2); font-weight: 700; font-size: 13px; }
+  label.slider b { color: var(--nr-ink); font-variant-numeric: tabular-nums; }
+  input[type=number].nr-input { width: 6rem; margin-left: 8px; }
+  select.nr-input { max-width: 220px; }
+  /* A two-thumb range: two sliders on one track. Their tracks ignore the
+     pointer, so only the thumbs catch it; the fill between them sits under. */
+  .dual { position: relative; height: 32px; margin-top: 4px; }
+  .dual .track { position: absolute; left: 0; right: 0; top: 11px; height: 10px; border-radius: 5px; background: var(--nr-surface-2); }
+  .dual .track.hue { background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%); }
+  .dual .fill { position: absolute; top: 11px; height: 10px; background: var(--nr-red); border-radius: 5px; pointer-events: none; }
+  .dual .track.hue + .fill { background: rgb(9 9 11 / 0.45); border: 1px solid #FFFFFF; top: 10px; height: 12px; }
+  .dual input[type=range] { position: absolute; left: 0; right: 0; top: 0; width: 100%; height: 32px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; pointer-events: none; }
+  .dual input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 32px; }
+  .dual input[type=range]::-moz-range-track { background: transparent; height: 32px; }
+  .dual input[type=range]::-moz-range-progress { background: transparent; }
+  .dual input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; pointer-events: auto; width: 20px; height: 20px; margin-top: 6px; border-radius: var(--nr-radius-sm); background: var(--nr-red); border: 3px solid var(--nr-surface); cursor: pointer; }
+  .dual input[type=range]::-moz-range-thumb { pointer-events: auto; width: 16px; height: 16px; border-radius: var(--nr-radius-sm); background: var(--nr-red); border: 3px solid var(--nr-surface); cursor: pointer; }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" id="home" href="/" aria-label="NeoRacer, back to the apps page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">Line Follow</h1>
+  <div class="nr-meta">
+    <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
+    <button type="button" class="nr-btn quiet small" onclick="reset()" title="Reload saved settings.">Reset</button>
+    <button type="button" class="nr-btn danger small" onclick="stopCar()" title="Set speed to 0.">Stop</button>
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main" id="main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:5"><b id="mode">-</b><span>Line</span></div>
+      <div class="nr-stat" style="--len:6"><b id="err">-</b><span>Offset</span></div>
+      <div class="nr-stat" style="--len:6"><b id="steer">-</b><span>Steer</span></div>
+      <div class="nr-stat" style="--len:6"><b id="thr">-</b><span>Throttle</span></div>
+      <div class="nr-stat" style="--len:6"><b id="enc">-</b><span>Encoder m/s</span></div>
+      <div class="nr-stat" style="--len:4"><b id="fps">-</b><span>Camera fps</span></div>
+      <div class="nr-stat" style="--len:4"><b id="pfps">-</b><span>Processed fps</span></div>
+      <div class="nr-stat" style="--len:16"><b id="res">-</b><span>Frame</span></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-camera">
+    <h2 class="nr-panel-title" id="t-camera">Camera</h2>
+    <div class="nr-view"><img id="color" class="view" alt="Camera" title="Gold: crop area. Red: largest contour. Gray: setpoint."></div>
+  </section>
+  <section class="nr-panel nr-span-4" aria-labelledby="t-mask">
+    <h2 class="nr-panel-title" id="t-mask">Mask</h2>
+    <div class="nr-view"><img id="mask" class="view" alt="Mask" title="White: inside the HSV threshold."></div>
+  </section>
+  <section class="nr-panel nr-span-4" aria-labelledby="t-state">
+    <h2 class="nr-panel-title" id="t-state">State</h2>
+    <div class="nr-status off" id="state">-</div>
+    <div class="nr-chart offset-chart" id="chart" title="Offset from the setpoint. -1: left edge. +1: right edge."></div>
+    <div class="nr-legend" id="chartLegend"></div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-tune">
+    <h2 class="nr-panel-title" id="t-tune">Tune</h2>
+    <div class="tunecols">
+      <div>
+        <h3 title="Drag both thumbs of each bar.">1. HSV threshold</h3>
+        <div id="hsvform"></div>
+      </div>
+      <div>
+        <h3 title="Throttle and proportional steering gain.">2. Speed and angle</h3>
+        <div id="driveform"></div>
+      </div>
+      <div>
+        <h3 title="Crop area edges, from the top of the frame.">3. Crop area</h3>
+        <div id="cropform"></div>
+        <label class="slider" title="Smallest contour that counts, in pixels.">min_area
+          <input id="in_min_area" class="nr-input" type="number" step="1" min="1" onchange="post('/params', {min_area: parseInt(this.value)})"></label>
+      </div>
+      <div>
+        <h3 title="Proportional speed gain and derivative steering gain.">4. Proportional speed and derivative angle</h3>
+        <div id="pdform"></div>
+      </div>
+    </div>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn primary small" onclick="post('/save').then(() => toast('Saved to the car profile.'))">Save</button>
+      <button type="button" class="nr-btn small" onclick="reset()">Load</button>
+    </div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-logs">
+    <h2 class="nr-panel-title" id="t-logs">Logs</h2>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn small" onclick="saveLog()">Save log</button>
+      <select class="nr-input" id="logsel" aria-label="Log file"></select>
+      <button type="button" class="nr-btn small" onclick="loadLog()">Load log</button>
+      <span class="nr-note" id="loginfo"></span>
+    </div>
+    <div class="nr-chart log-chart" id="logChart"></div>
+    <div class="nr-legend" id="logLegend"></div>
+  </section>
+</main>
+<div id="nr-toast" role="status"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const { timeChart, legendHtml, recentTicks, niceTicks } = NrCharts;
+$('home').href = `${location.protocol}//${location.hostname}:8080/`;
+// Single-thumb sliders, in the order each group shows them.
+const SLIDERS = {
+  driveform: [
+    { key: 'speed', tip: 'Throttle, 0 to 1.', min: 0, max: 1, step: 0.01 },
+    { key: 'angle_kp', tip: 'Proportional steering gain.', min: 0, max: 4, step: 0.01 },
+  ],
+  cropform: [
+    { key: 'crop_top', tip: 'Top edge, 0 to 1.', min: 0, max: 1, step: 0.01 },
+    { key: 'crop_bottom', tip: 'Bottom edge, 0 to 1.', min: 0, max: 1, step: 0.01 },
+  ],
+  pdform: [
+    { key: 'speed_kp', tip: 'Proportional speed gain. 0: constant speed.', min: 0, max: 1, step: 0.01 },
+    { key: 'angle_kd', tip: 'Derivative steering gain. Raise it if the car weaves.', min: 0, max: 2, step: 0.01 },
+  ],
+};
+// Two-thumb bars: one per color channel.
+const DUALS = [
+  { lo: 'h_low', hi: 'h_high', label: 'hue', tip: '0 to 179. Low above high wraps, for red.', max: 179, cls: 'hue' },
+  { lo: 's_low', hi: 's_high', label: 'saturation', tip: '0 to 255.', max: 255, cls: '' },
+  { lo: 'v_low', hi: 'v_high', label: 'value', tip: '0 to 255.', max: 255, cls: '' },
+];
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null });
+}
+function toast(msg) {
+  const t = $('nr-toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// A slider fires on every pixel of a drag: send at most one update per
+// SEND_MS, always the newest value.
+const SEND_MS = 60;
+let pending = {}, sendTimer = null;
+function queue(key, value) {
+  pending[key] = value;
+  if (sendTimer) return;
+  sendTimer = setTimeout(() => { const body = pending; pending = {}; sendTimer = null; post('/params', body); }, SEND_MS);
+}
+function reset() { post('/load').then(() => { $('hsvform').dataset.built = ''; toast('Loaded.'); }); }
+function stopCar() { post('/params', { speed: 0 }).then(() => { $('hsvform').dataset.built = ''; }); }
+function showVal(key, v) { const el = $(`val_${key}`); if (el) el.textContent = v; }
+// The slider's red fill follows its value.
+function fill(el) { el.style.setProperty('--v', `${(el.value - el.min) / (el.max - el.min) * 100}%`); }
+
+function setFill(d) {
+  const lo = parseInt($(`in_${d.lo}`).value), hi = parseInt($(`in_${d.hi}`).value);
+  const bar = $(`fill_${d.lo}`);
+  if (lo <= hi) {
+    bar.style.left = `${lo / d.max * 100}%`;
+    bar.style.width = `${(hi - lo) / d.max * 100}%`;
+    bar.style.background = '';
+  } else {
+    // Wrapped: fill outside the two thumbs.
+    bar.style.left = '0%'; bar.style.width = '100%';
+    bar.style.background = `linear-gradient(to right, currentColor ${hi / d.max * 100}%, transparent ${hi / d.max * 100}%, transparent ${lo / d.max * 100}%, currentColor ${lo / d.max * 100}%)`;
+  }
+  $(`val_${d.lo}`).textContent = `${lo} to ${hi}${lo > hi ? ' (wraps)' : ''}`;
+}
+
+function buildForm(p) {
+  // Rebuild only on Reset, Load and Stop, so polling never interrupts a drag.
+  const anchor = $('hsvform');
+  if (anchor.dataset.built) return;
+  anchor.dataset.built = '1';
+  anchor.innerHTML = DUALS.map((d) => `
+    <label class="slider" title="${d.tip}">${d.label} <b id="val_${d.lo}"></b></label>
+    <div class="dual" title="${d.tip}">
+      <div class="track ${d.cls}"></div>
+      <div class="fill" id="fill_${d.lo}" style="color: var(--nr-red)"></div>
+      <input id="in_${d.lo}" type="range" min="0" max="${d.max}" step="1" value="${p[d.lo]}" aria-label="${d.label} low">
+      <input id="in_${d.hi}" type="range" min="0" max="${d.max}" step="1" value="${p[d.hi]}" aria-label="${d.label} high">
+    </div>`).join('');
+  for (const d of DUALS) {
+    for (const k of [d.lo, d.hi]) $(`in_${k}`).oninput = (e) => { setFill(d); queue(k, parseInt(e.target.value)); };
+    setFill(d);
+  }
+  for (const [form, list] of Object.entries(SLIDERS)) {
+    $(form).innerHTML = list.map((s) => `
+      <label class="slider" title="${s.tip}">${s.key} <b id="val_${s.key}">${p[s.key]}</b>
+        <input id="in_${s.key}" type="range" min="${s.min}" max="${s.max}" step="${s.step}" value="${p[s.key]}"></label>`).join('');
+    for (const s of list) {
+      const el = $(`in_${s.key}`);
+      fill(el);
+      el.oninput = (e) => { fill(e.target); showVal(s.key, e.target.value); queue(s.key, parseFloat(e.target.value)); };
+    }
+  }
+  $('in_min_area').value = p.min_area;
+}
+
+// The service clamps what it is sent, so after a drag the thumbs move to
+// what applied; a thumb being held is left alone.
+function syncForm(p) {
+  if (document.querySelector('input:active')) return;
+  for (const list of Object.values(SLIDERS)) {
+    for (const s of list) {
+      const el = $(`in_${s.key}`);
+      if (el && parseFloat(el.value) !== p[s.key]) { el.value = p[s.key]; fill(el); showVal(s.key, p[s.key]); }
+    }
+  }
+  for (const d of DUALS) {
+    let moved = false;
+    for (const k of [d.lo, d.hi]) {
+      const el = $(`in_${k}`);
+      if (el && parseInt(el.value) !== p[k]) { el.value = p[k]; moved = true; }
+    }
+    if (moved) setFill(d);
+  }
+}
+
+// One frame in flight per view; pauses while the tab is hidden.
+function liveLoop(id, path, period) {
+  const img = $(id);
+  (function tick() {
+    if (document.hidden) { setTimeout(tick, 250); return; }
+    const t = Date.now();
+    const done = () => {
+      img.removeEventListener('load', done); img.removeEventListener('error', done);
+      setTimeout(tick, Math.max(20, period - (Date.now() - t)));
+    };
+    img.addEventListener('load', done); img.addEventListener('error', done);
+    img.src = `${path}?${t}`;
+  })();
+}
+liveLoop('color', '/frame/color', 120);
+liveLoop('mask', '/frame/mask', 120);
+
+const shown = new Map();
+function setLegend(id, html) { if (shown.get(id) !== html) { shown.set(id, html); $(id).innerHTML = html; } }
+const LOST = '<span><svg viewBox="0 0 22 8"><rect x="1" y="1" width="20" height="6" fill="var(--nr-red)"/></svg>Line lost</span>';
+
+// Live while the car answers; No answer after a second of missed polls.
+let misses = 0, lastBeat = 0;
+function beat(ok) {
+  const el = $('live'), word = el.querySelector('span');
+  if (ok) {
+    misses = 0;
+    $('main').classList.remove('nr-lost-data');
+    if (Date.now() - lastBeat < 1000) return;
+    lastBeat = Date.now();
+    el.className = 'nr-live beat'; word.textContent = 'Live';
+    setTimeout(() => { el.className = 'nr-live'; }, 120);
+  } else if (++misses >= 8) {
+    el.className = 'nr-live lost'; word.textContent = 'No answer';
+    $('main').classList.add('nr-lost-data');
+  }
+}
+
+let busy = false;
+function update() {
+  if (busy) return;
+  busy = true;
+  fetch('/state').then((r) => r.json()).then((d) => {
+    busy = false;
+    beat(true);
+    $('mode').textContent = d.found ? 'found' : 'lost';
+    $('err').textContent = d.error;
+    $('steer').textContent = d.steer;
+    $('thr').textContent = d.speed_cmd;
+    $('enc').textContent = d.enc_speed;
+    $('fps').textContent = d.cam_fps;
+    $('pfps').textContent = d.proc_fps;
+    $('res').textContent = d.res[0] ? `${d.res[0]}x${d.res[1]} -> ${d.proc_res[0]}x${d.proc_res[1]}` : 'none';
+
+    const box = $('state');
+    box.textContent = d.found ? 'LINE FOUND' : 'LINE LOST';
+    box.className = 'nr-status ' + (d.found ? 'ok' : 'err');
+    box.title = d.found
+      ? `Contour center: column ${d.cx}, row ${d.cy}. Area: ${d.area} px.`
+      : `No contour for ${d.lost_for === null ? 'the whole run' : d.lost_for + ' s'}. Holding the last command.`;
+
+    buildForm(d.params);
+    syncForm(d.params);
+    const hist = d.hist || [];
+    const now = hist.length ? hist[hist.length - 1][0] : 0;
+    // The offset is already -1 to 1, so the axis is fixed: a small wobble looks small.
+    timeChart($('chart'), now - 30, now,
+      [{ name: 'Offset', style: 'a', axis: 'l', unit: '', digits: 2, pts: hist.map((r) => [r[0], r[1]]) }],
+      recentTicks(now, 10), { gapSec: 0.5, fixed: { l: [-1, 1] }, marks: d.marks, bands: hist.map((r) => [r[0], r[2]]) });
+    setLegend('chartLegend', legendHtml([{ name: 'Offset vs setpoint 0 (-1 left edge, +1 right edge)', style: 'a' }]) + LOST);
+  }).catch(() => { busy = false; beat(false); });
+}
+
+// ---- logs ----
+const logTicks = (t0) => Object.assign((a, b) => {
+  const step = niceTicks(0, b - a, 5)[1] || 1, out = [];
+  for (let s = 0; s <= b - a + 1e-6; s += step) out.push([a + s, `${(a + s - t0).toFixed(0)} s`]);
+  return out;
+}, { label: (t) => `${(t - t0).toFixed(1)} s` });
+function loadLog() {
+  const f = $('logsel').value;
+  if (!f) return;
+  fetch('/logs/' + f).then((r) => r.text()).then((txt) => {
+    const lines = txt.trim().split('\n');
+    const marks = lines.filter((l) => l.startsWith('# mark')).map((l) => { const p = l.split(','); return [parseFloat(p[1]), p.slice(2).join(',')]; });
+    const rows = lines.filter((l) => !l.startsWith('#')).slice(1).map((l) => l.split(',').map(Number));
+    const lostRows = rows.filter((r) => r[5]).length;
+    $('loginfo').textContent = `${f}: ${rows.length} frames, ${marks.length} changes, ${lostRows} with the line lost`;
+    if (!rows.length) return;
+    const t0 = rows[0][0], t1 = rows[rows.length - 1][0];
+    timeChart($('logChart'), t0, t1, [
+      { name: 'Offset', style: 'a', axis: 'l', unit: '', digits: 2, pts: rows.map((r) => [r[0], r[1]]) },
+      { name: 'Steer', style: 'b', axis: 'l', unit: '', digits: 2, pts: rows.map((r) => [r[0], r[2]]) },
+    ], logTicks(t0), { gapSec: 0.5, fixed: { l: [-1, 1] }, marks, bands: rows.map((r) => [r[0], r[5]]) });
+    setLegend('logLegend', legendHtml([{ name: 'Offset', style: 'a' }, { name: 'Steer', style: 'b' }]) + LOST);
+  });
+}
+function saveLog() { post('/logs/save').then(() => { refreshLogs(true); toast('Log saved.'); }); }
+function refreshLogs(loadLatest) {
+  fetch('/logs').then((r) => r.json()).then((names) => {
+    const sel = $('logsel');
+    sel.innerHTML = names.map((n) => `<option>${n}</option>`).join('');
+    sel.selectedIndex = names.length - 1;
+    if (loadLatest && names.length) loadLog();
+  });
+}
+refreshLogs(false);
+
+update();
+setInterval(update, 120);
+</script>
+</body>
+</html>

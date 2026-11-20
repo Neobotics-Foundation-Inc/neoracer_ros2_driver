@@ -1,5 +1,7 @@
 [Unit]
 Description=Neoracer Node Watchdog (restart-on-failure supervisor)
+Wants=neoracer-data.service
+After=neoracer-data.service
 After=neoracer-teleop.service
 BindsTo=neoracer-teleop.service
 
@@ -7,6 +9,7 @@ BindsTo=neoracer-teleop.service
 Type=exec
 User=racecar
 Group=racecar
+EnvironmentFile=-/run/racecar/environment
 ExecStartPre=/bin/sleep 15
 ExecStart=/bin/bash -c '\
     source /opt/ros/humble/setup.bash && \

@@ -83,7 +83,9 @@ echo "  TensorRT $(python3 -c 'import tensorrt; print(tensorrt.__version__)')"
 # before resolving anything. Invoke as `python3 -m pip` throughout so the
 # upgraded copy is the one that runs, whatever `pip3` resolves to on PATH.
 PIP_FLAGS=(--user)
-if python3 -m pip install --help 2>/dev/null | grep -q -- '--break-system-packages'; then
+# The help text is read whole. Under pipefail, a pipe into `grep -q` can
+# fail pip on a closed pipe although the flag was found.
+if [[ "$(python3 -m pip install --help 2>/dev/null)" == *--break-system-packages* ]]; then
     PIP_FLAGS+=(--break-system-packages)
 fi
 

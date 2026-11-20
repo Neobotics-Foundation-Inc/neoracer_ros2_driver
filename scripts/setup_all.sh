@@ -10,6 +10,23 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The systemd units and the sudoers file name the racecar user and
+# /home/racecar/ros2_ws; set up anywhere else, every service would fail.
+EXPECTED_DIR="/home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts"
+if [ "$EUID" -eq 0 ]; then
+    echo "Run as the racecar user, not with sudo or as root: bash scripts/setup_all.sh" >&2
+    exit 1
+fi
+if [ "$(id -un)" != "racecar" ]; then
+    echo "Run as the racecar user (this is $(id -un)). The services expect racecar." >&2
+    exit 1
+fi
+if [ "$SCRIPT_DIR" != "$EXPECTED_DIR" ]; then
+    echo "The driver must be at /home/racecar/ros2_ws/src/neoracer_ros2_driver" >&2
+    echo "(this copy is at ${SCRIPT_DIR%/scripts})." >&2
+    exit 1
+fi
+
 if [ "$(lsb_release -cs)" != "jammy" ]; then
     echo "WARNING: this script targets Ubuntu 22.04 (Jammy); detected '$(lsb_release -cs)'."
     echo "Continue anyway? [y/N]"
@@ -42,6 +59,16 @@ echo
 echo "==> [5/8] Workspace build (driver + pinned Lakibeam lidar clone)"
 bash "$SCRIPT_DIR/setup_workspace.sh"
 
+echo "    moving per-car files into the car profile (~/.config/racecar)"
+(
+    set +u
+    # shellcheck disable=SC1091
+    source /opt/ros/humble/setup.bash
+    # shellcheck disable=SC1091
+    source "$HOME/ros2_ws/install/setup.bash"
+    python3 "$SCRIPT_DIR/neoracer_profile.py" migrate
+)
+
 echo
 echo "==> [6/8] GPU stack (PyTorch, Ultralytics, TensorRT check)"
 bash "$SCRIPT_DIR/setup_ml.sh"
@@ -51,7 +78,7 @@ echo "==> [7/8] JupyterLab + workspace"
 bash "$SCRIPT_DIR/setup_jupyter.sh"
 
 echo
-echo "==> [8/8] systemd services (core stack enabled, lab dashboards installed off)"
+echo "==> [8/8] systemd services (core stack and map viewer enabled, autonomy on demand, lab dashboards off)"
 bash "$SCRIPT_DIR/setup_services.sh"
 
 echo
@@ -59,4 +86,4 @@ echo "Setup complete."
 echo "Networking (Wi-Fi AP + Lakibeam subnet) is configured separately:"
 echo "  racecar setup networking        # or: bash scripts/setup_networking.sh"
 echo "Log out and back in (or 'newgrp dialout') so group changes apply, then:"
-echo "  racecar teleop                  # or: sudo systemctl start neoracer-teleop"
+echo "  racecar teleop                  # or: sudo systemctl start neoracer-teleop.service"

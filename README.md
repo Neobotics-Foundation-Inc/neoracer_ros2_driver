@@ -9,7 +9,7 @@ ROS 2 driver for the NeoRacer V1, a 1:12-scale autonomous Ackermann-steering rac
 - [Quickstart (fresh JetPack 6.2 install)](#quickstart-fresh-jetpack-62-install)
 - [The `racecar` shell tool](#the-racecar-shell-tool)
 - [Networking (optional)](#networking-optional)
-- [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2)
+- [Autonomy: SLAM](#autonomy-slam)
 - [Web dashboard](#web-dashboard)
 - [Lab dashboards](#lab-dashboards)
 - [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library)
@@ -44,33 +44,34 @@ One ESP32 carries the IMU, wheel odometry, the FlySky receiver, and the motor ES
 ```
 FlySky RC ──(ESP32)──> controller ──/joy──> gamepad_node ──/gamepad_drive──┐
                           │                                                ├──> mux_node ──/mux_out──> throttle_node ──/motor──┐
-                          │        student library / Nav2 ──────/drive─────┘   (FlySky switch: idle | manual | autonomy)       │
+                          │        student library ─────────────/drive─────┘   (ESP32 mode switch: up manual, down auto)       │
                           │                                                                                                   │
                           └──> /imu/fused, /odom, /battery                    controller writes "v <m/s> <deg>" to the ESP32 <───────┘
 
 LakiBeam1 ──(UDP)──> lakibeam1_scan_node ──/scan
 USB webcam ────────> camera ──/camera/color  (JPEG-in-Image) ──> inference_node ──/edgetpu/inference
-Nav2 ──/cmd_vel──> twist_bridge ──/drive
 student library ──/dotmatrix/text──> led_matrix ──(USB-UART)──> 8×8 display
 ```
 
 Published topics:
 
-- `/imu/fused` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery`: from the ESP32 V1.1 firmware state frame
+- `/imu/fused` (sensor_msgs/Imu), `/odom` (nav_msgs/Odometry), `/battery/state` (and `/battery`, the same message, for one more release): from the ESP32 V1.1 firmware state frame
 - `/joy` (sensor_msgs/Joy): synthesized from FlySky RC channels
 - `/mag` (sensor_msgs/MagneticField): ESP32 magnetometer, Gauss converted to Tesla
 - `/encoder/speed`, `/battery/voltage` (std_msgs/Float32), `/rc/channels` (std_msgs/Float32MultiArray): the scalar racecar_neo sensor topics the student library's `rc.physics` reads. Same data as `/odom`, `/battery`, and `/joy`, under the names the reference platform publishes
+- `/rc/link` (std_msgs/Bool): whether the transmitter is present, from the raw FlySky channels; for the mux, not the student library
+- `/odom/integrated` (nav_msgs/Odometry): the car's pose at 50 Hz from the state frame, for the calibration tools. `odometry.source` in `config/odom.yaml` picks the ESP32's own pose (`firmware`, the default) or an integration of the body speed and the gyro yaw rate (`integrated`). The controller also publishes its `odom -> base_link` transform, which SLAM and AMCL in the autonomy launch read
 - `/scan` (sensor_msgs/LaserScan): LakiBeam1
 - `/camera/color` (sensor_msgs/Image, `encoding: jpeg`): native MJPG passthrough at 60 fps. The `data` field is the raw JPEG byte stream, which the student library decodes with `cv2.imdecode`; the node does not decode and re-encode.
-- `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. On by default; see [Object detection](#object-detection).
+- `/edgetpu/inference` (vision_msgs/Detection2DArray): YOLO boxes for the frames on `/camera/color`, stamped with that frame's header. Off at boot by default; see [Object detection](#object-detection).
 
-The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) enforces speed caps, arming, and manual/autonomy arbitration, so RC driving and autonomous code share one speed-limited path. A 3-position FlySky switch selects **idle / manual / autonomy**, mapped to the `/joy` buttons the mux reads. Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
+The control pipeline (`gamepad` → `mux` → `throttle` → `/motor`) carries the Jetson's commands through one speed-limited path. The handset's mode switch selects who drives: **up** is manual, and the ESP32 drives from the sticks; **down** is autonomy, and the ESP32 follows the Jetson. The mux forwards any fresh `/drive` and publishes zero once it goes stale (`autonomy_passthrough`, the default; see `config/mux.yaml`). Every topic in the pipeline is normalized to `[-1, 1]`; top speed and steering limits live in `config/throttle.yaml`, and the normalized→m/s mapping in `config/controller.yaml`.
 
 Safety and uptime layers:
 
-- **Mux** gates commands behind the arming switch and zeroes output when the RC link drops.
+- **Mux** forwards fresh `/drive` and publishes zero once it is older than `command_timeout_sec` (0.5 s), so a stopped program stops the car. A lost handset does not zero it; see `config/mux.yaml`.
 - **Watchdog** (`scripts/watchdog.py`) supervises the control and sensor nodes, restarts a dead node, and monitors `/imu/fused` and `/scan` freshness.
-- **Four systemd units** (`neoracer-{teleop,watchdog,dashboard,jupyter}.service`) wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` is held and not installed; see [Autonomy: SLAM and Nav2](#autonomy-slam-and-nav2).
+- **Six systemd units at boot** (`neoracer-{data,teleop,watchdog,dashboard,jupyter,mapview}.service`), wired with `BindsTo=`/`Wants=` so the watchdog follows teleop up and down. `neoracer-autonomy.service` runs SLAM on top of teleop on demand. Setup installs it but does not enable it; see [Autonomy: SLAM](#autonomy-slam).
 - **Launch wrapper** (`scripts/launch_teleop.sh`) creates `~/logs/<timestamp>/`, updates `~/logs/latest`, sweeps FastRTPS SHM orphans, and `exec`s `ros2 launch` so systemd tracks the launch PID.
 
 ## Quickstart (fresh JetPack 6.2 install)
@@ -125,7 +126,7 @@ sudo reboot
 After reboot, verify and start the stack:
 
 ```sh
-racecar status              # USB peripherals + /dev/osrbot_* symlinks + running nodes
+racecar status --quick      # host checks only, without the ROS sampling window
 racecar service status      # units enabled by setup, teleop not yet running
 racecar service start       # starts neoracer-teleop (watchdog follows)
 ```
@@ -152,12 +153,14 @@ Eight phases, all under `scripts/`:
 4. **`setup_udev.sh`**: installs `/etc/udev/rules.d/99-racecar.rules` (stable `/dev/osrbot_*`)
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
 6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
-7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library + labs
-8. **`setup_services.sh`**: installs the systemd units; core stack enabled, lab dashboards cloned into `scripts/dashboards/` and left disabled
+7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library at a pinned tag + labs
+8. **`setup_services.sh`**: installs the systemd units and `/etc/sudoers.d/neoracer`; core stack and map viewer enabled, `neoracer-autonomy` installed but not enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
 The lidar driver (package `lakibeam1`) is third-party and is not vendored in this repo. Phase 5 clones it from the [Neobotics fork](https://github.com/Neobotics-Foundation-Inc/Lakibeam_ROS2_Driver) at tag `v1.0-neobotics`, which carries the scan-health fixes described in [docs/lidar_scan_health.md](docs/lidar_scan_health.md). Override with `LAKI_REPO=` / `LAKI_PIN=` to test an unreleased revision.
+
+Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. If the clone fails, setup stops at phase 7 and leaves the car's library as it was.
 
 ## The `racecar` shell tool
 
@@ -182,10 +185,16 @@ racecar service restart     # every enabled unit; never starts a disabled one
 racecar service start camlabel   # a lab dashboard, for this session
 racecar service logs teleop # journalctl -u neoracer-teleop -f
 
-racecar mapping             # SLAM to build a map (slam_toolbox default)
-racecar mapping save <name> # save the current map
-racecar navigation          # Nav2 on a saved map (teb default)
-racecar navigation rviz     # goal-setting RViz view (car desktop only)
+racecar map start <name>    # build a map; the handset's speed switch UP
+racecar map save            # save the map being built
+racecar map load <name>     # localize on a saved map
+racecar map stop            # stop mapping or localization
+racecar map list            # saved maps; unsaved ones marked
+racecar launch autonomy map:=<name>   # the same SLAM launch in a terminal
+
+racecar calibrate           # guided calibration: lidar, odom, steering (dynamics by name)
+racecar calibrate status    # what is calibrated on this car, when, and the values
+racecar calibrate check     # each calibration against the live sensors
 
 racecar setup all           # the 7-phase orchestrator
 racecar setup networking    # WiFi AP + Ethernet + lidar subnet
@@ -197,12 +206,18 @@ racecar library --select <dir>  # point the student library at a notebook tree
 racecar selftest --led[=TEXT]   # send test text to the 8x8 display
 racecar clear --led             # blank the display until something writes to it
 racecar udev                    # re-install the udev rules
-racecar status                  # peripherals + symlinks + running nodes
+racecar status                  # whole-car diagnostic (--quick, --json, --strict)
 racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
 
 `racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
+
+`racecar test` leaves out the on-car hardware tests in `test/test_hardware.py`. Run them on the car with teleop running and the handset on: `racecar cd`, then `python3 -m pytest -m hardware test/test_hardware.py -v`. Each failure names the device and gives a fix.
+
+`racecar calibrate` keeps its results in the car profile under `~/.config/racecar`. The steering trim is set in the ESP32 firmware with `trim set`, which also trims manual driving, and the profile keeps a copy. You drive the car for the odometry step with the handset, mode switch up (manual). A step that drives the car by itself drives only while the handset's mode switch is down (autonomy). Start with the switch up and flip it down when the step asks. Flip it up to stop. Turning the handset off does not stop the car. A step whose tool is not installed shows as not installed. The lidar step drives the car forward and back at 0.5 m/s and measures the lidar yaw from the direction of travel. It needs the odometry and dynamics tools as well. `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/calibration/calibrate_lidar.py --wall` measures the yaw with the car still and squared to a flat wall, and `--wall --check` reports without writing. Calibration speeds are given in m/s and converted with the car's `max_speed_mps` and throttle caps. The dynamics step drives straight at 0.62, 0.75 and 1.0 m/s and in full-lock circles at 0.62 m/s, and writes the measured values for the simulator to `params/dynamics.yaml`. It needs a clear straight path of about 4 meters and a clear area of about 3 by 3 meters. Each of its runs starts only after the mode switch has been seen up and then down. The car starts about 5 seconds after that flip. A run that sees no flip within 60 seconds ends the step, and nothing is written. The steering step drives one short run per steering command at 0.62 m/s and measures the drift at steering 0 against the lidar. It writes the board's trim through `board.steering_trim_deg` on `controller_node`, which sends `trim set` and confirms it with `trim get`, and keeps the old and new values in `params/steering.yaml`. It needs a clear area of about 3 by 3 meters. `racecar calibrate status` shows the board's trim beside that copy, so a new board or a full flash shows as a difference. The lidar, steering and dynamics steps first compare the speed and steering limits of the running nodes with the files, and drive only when they match.
+
+The odometry step measures the gyro yaw scale from three circles and the speed scale from a straight run of at least 2 m toward a wall or furniture 3 to 5 m away. The lidar is the reference for both. You drive both runs with the handset, mode switch up (manual). The step writes `odometry.yaw_rate_scale` and `odometry.speed_scale` for `controller_node` to `params/odom.yaml` in the car profile. The scales act on `/odom/integrated` only with `odometry.source: integrated`. Every run and `--check` report two poses against the lidar: the ESP32's own pose, on `/odom`, and the integrated estimate, what `odometry.source: integrated` gives with the scales in use. On the default `firmware` source the tool computes the integrated estimate from the run's `/odom` speed and `/imu/fused` gyro with the driver's integrator. `--check` judges the source in use and lists the other one for comparison. `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/calibration/calibrate_odom.py` runs the step on its own, and `--check` reports without writing.
 
 ## Networking (optional)
 
@@ -239,50 +254,103 @@ racecar setup networking --reset    # disable the AP + clear the saved car ID
 
 Run `--reset` before capturing a golden image, so the clone ships with no active AP and no baked-in SSID.
 
-## Autonomy: SLAM and Nav2
+## Autonomy: SLAM
 
-SLAM and navigation run on demand, not as services. The autonomy base (`autonomy.launch.py`) runs only TF, the EKF, and the twist bridge.
-
-`neoracer-autonomy.service` is **held**: the unit file stays in `scripts/`, but setup does not install it, and a setup run removes it from a car that has it from an earlier release. The service does not work yet and development is paused until further notice. Start the base by hand while it is held:
+`launch/autonomy.launch.py` runs SLAM on top of teleop. Mapping runs slam_toolbox. Localization on a saved map runs AMCL with map_server, or the slam_toolbox localizer. `autonomy_node` runs in every mode; it publishes `/autonomy/status` and `/autonomy/pose` and serves `/autonomy/save_map`, which the student library uses. Teleop provides `/scan` and the `odom -> base_link -> laser` transforms. Maps go under `~/neoracer_data/maps/<name>/`.
 
 ```sh
-bash ~/ros2_ws/src/neoracer_ros2_driver/scripts/launch_autonomy.sh
+racecar launch autonomy map:=room                                # build a map named room
+ros2 service call /autonomy/save_map std_srvs/srv/Trigger        # save it (another terminal)
+racecar launch autonomy mode:=localization map:=room             # AMCL on the saved map
+racecar launch autonomy mode:=localization map:=room pose:=global   # AMCL searches the whole map
 ```
 
-```sh
-racecar mapping                 # slam_toolbox (also: gmapping, cartographer)
-racecar mapping save my_track   # save the map under that name
-racecar navigation              # Nav2 with the teb planner (also: dwb)
-racecar navigation rviz         # RViz goal-setting view, on the car's desktop
-```
+`racecar map` (`scripts/neoracer_map.py`, logic in `scripts/map_control.py`) runs the same launch through `neoracer-autonomy.service`. `start <name>` maps, `save` writes the map, `load <name>` localizes on it, and `stop` ends the run, autosaving a mapping run. `resume`, `recover`, `status`, `list` and `info` cover the rest; `racecar map --help` lists them. Teleop must be running. Starting, loading or resuming stops the lab apps that publish `/drive`. The unit is started and stopped with `sudo -n systemctl`, which `/etc/sudoers.d/neoracer` allows with no password. Setup installs both.
 
-`twist_bridge` converts Nav2's `/cmd_vel` (Twist, m/s and rad/s) into the normalized `/drive` topic the mux arbitrates, dividing out the same `max_speed_mps` / `max_steering_angle_deg` constants the controller multiplies back in, so a commanded 1.5 m/s reaches the firmware as 1.5 m/s regardless of the throttle caps in between. Steering comes from the bicycle model.
+`racecar map start` and a mapping `racecar map resume` read the handset's speed switch (radio Ch8) and start mapping only with it UP (slow). With the mode switch UP the sticks drive through the firmware, where the driver's caps do not apply and the speed switch's 15 percent cap is the only limit. The switch is read once, before the run starts, so keep it UP until the run ends.
 
-Autonomy commands enter through the same mux as manual driving, so the FlySky arming switch still governs the car.
+While mapping, the throttle node holds the car to `mapping_speed_cap` (`config/throttle.yaml`). `neoracer-autonomy.service` runs the same launch from the mode file `~/.config/racecar/autonomy.conf` and resumes a mapping run from its autosave after a crash. Setup installs it, and it starts only on demand. Per-car values go in the car profile, `params/slam_mapping.yaml`, `params/amcl.yaml` and so on. Navigation comes with a later upstream release. The vendor SLAM and Nav2 stack stays in `~/osracer_ws` for OSRBOT's own tools (`racecar ws osracer`).
+
+Autonomy commands enter through the same mux as other `/drive` commands, so the handset's mode switch still selects whether the car follows them.
+
+Lichtblick and Foxglove are apps for viewing live ROS data on a laptop, much like RViz, with no ROS install on the laptop. Lichtblick is a free, open-source fork of Foxglove Studio, maintained by BMW, and needs no account. Both are optional: nothing on the car needs them, and the bridge they connect to runs only with `foxglove:=true`.
+
+`foxglove:=true` also starts `foxglove_bridge` on port 8765, for Lichtblick (a desktop app that works offline) or the Foxglove app, which requires an account and an internet connection. The bridge serves the map, the scan, the TF frames, the robot description, the odometry, the AMCL pose and particles, and `/autonomy/*`. It leaves the camera out, because camera frames can saturate the car's 2.4 GHz access point. No client can publish through it. foxglove_bridge 3.x does not apply its client topic list, so `config/foxglove.yaml` turns client publishing off. The bridge has no password, so any device that reaches the car on port 8765 can view those topics. Per-car settings go in the car profile, `params/foxglove.yaml`.
+
+To view a mapping run in Lichtblick:
+
+1. Start mapping with the bridge: `racecar launch autonomy map:=room foxglove:=true`.
+2. On a laptop on the car's network, open Lichtblick: the desktop app from https://github.com/Lichtblick-Suite/lichtblick/releases, or the web app at https://lichtblick-suite.github.io/lichtblick/. Lichtblick 1.22 or later is needed, because foxglove_bridge 3.x accepts only the `foxglove.sdk.v1` protocol.
+3. Choose "Open connection", then "Foxglove WebSocket". Enter `ws://neoracer.local:8765`, or the car's IP address in place of `neoracer.local`, and connect.
+4. Load the layout. A layout is a file that sets Lichtblick's panels and the topics in each; this repository's is `config/foxglove_layout.json`, and the car keeps a copy in `~/ros2_ws/install/neoracer_ros2_driver/share/neoracer_ros2_driver/config/`. In the left sidebar's Layouts tab, choose "Import layout", or open the app menu (the Lichtblick logo at the top left) and choose View, then "Import layout from file…". The web app's import needs a browser file picker that Brave, Safari and Firefox do not offer; in those, drag the file from Finder or the file manager onto the Lichtblick window instead.
+
+The layout shows a top-down 3D view of the map, the scan and the pose, following the car. It also shows a table of `/autonomy/status` and a plot of the pose. Its pose estimate tool publishes nothing while client publishing is off.
+
+`scripts/validation/` holds test tools for this launch. `slam_session.py` runs a whole mapping or localization session from one terminal and writes a report under `~/neoracer_data/slam_eval/sessions/`, and its `replay` runs a session's bag through slam_toolbox or AMCL with changed settings, for tuning the SLAM and AMCL configs offline. See `scripts/validation/README.md`.
+
+### Map viewer
+
+The map viewer is a web page for mapping and localization. It shows the map the car is building or using, the car on it, the path the car has driven, and the live lidar scan. Its buttons run the same `racecar map` commands as the shell. The page never drives the car: it publishes no `/drive`, and you drive with the handset as usual.
+
+On the map, walls are white, free space is grey and unexplored space is dark. The car is a yellow arrow. It is faded while the car is not localized. The trail is a gold line and the scan is red dots. A short red line and a green line mark the x and y axes at the map's origin. A scale bar sits at the bottom left.
+
+`scripts/mapview.py` serves the page on port 8088. On a phone or laptop on the car's network, open `http://neoracer.local:8088`. If that name does not resolve, use the car's IP address instead, for example `http://10.42.0.1:8088` on the car's access point. The apps page on 8080 links to it.
+
+The top bar shows the mode (Mapping or Localization), the map's name, and Localized or Not localized. Details adds the scan fit, the pose spread, the car's pose, the CPU load, the Jetson's junction temperature, and the theme switch. A banner under the bar shows these:
+
+- While mapping: keep the speed switch UP (slow) and turn gently.
+- The Jetson is hot: the junction temperature is 85 C or more, the hot band of the System Health page.
+- Over-current throttling during this run: the Jetson's over-current counters rose since the run began. Check the battery and its connector.
+- Lost contact with the car: the page has had no answer from the viewer.
+
+| Button | What it does |
+|---|---|
+| Start mapping | Asks for a map name, then runs `racecar map start NAME`. Teleop must be running and the handset's speed switch UP (slow). |
+| Save | While mapping, runs `racecar map save`. |
+| Stop | Runs `racecar map stop`. While mapping, it offers Save and stop, or Stop without saving. A mapping run is autosaved either way. |
+| Maps | Opens the list of maps, each with a thumbnail, its state, when it was saved and its size. Each map has Load and Extend, and Keep when it has unsaved changes. |
+| Load | Runs `racecar map load NAME`. Choose to start from the car's last saved position on the map, or to search the whole map while you drive (`--global`). |
+| Extend | Shows the saved map. Drag on it from where the car is toward the way it faces. The page then runs `racecar map start NEW --from NAME --pose x,y,yaw`. Give the same name to extend the map in place. As for Start mapping, teleop must be running and the speed switch UP (slow). |
+| Keep | Runs `racecar map recover NAME`: the autosave of a run that was never saved becomes the saved map. |
+| Set pose | While localizing, drag on the map from where the car is toward the way it faces. The page publishes that pose on `/initialpose`, with the spread `racecar map load` uses. |
+| Find me | While localizing with AMCL, calls `/autonomy/global_localization`. AMCL then searches the whole map. Drive slowly until the bar shows Localized. |
+| Clear trail | Clears the car's drawn path on every open map page. |
+| Zoom in, Zoom out, Center on the car | Change the view only. You can also drag to pan, and pinch or scroll to zoom. |
+
+The commands run one at a time, and the page shows each one's output. A failed command's output stays until the next command. Save and Clear trail act at once. Every other button that runs a command or sets the pose asks you to confirm first. Start and Load stop the current autonomy run. They also stop a lab app that drives the car, after a confirmation that names it.
+
+With no browser open, the viewer holds no ROS subscriptions. It subscribes to `/autonomy/status`, `/autonomy/pose`, `/map` and `/scan` at the first request and drops them 10 s after the last one. The map list and the thumbnails come from the map folder, `~/neoracer_data/maps`.
+
+`neoracer-mapview.service` runs the viewer as the racecar user, independent of teleop. Setup installs it and enables it at boot. `racecar service stop mapview` stops it until the next boot, and `racecar service disable mapview` keeps it off.
+
+Or run `python3 ~/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py` in a terminal with the workspace sourced. Either way, the buttons need what `racecar map` needs: `neoracer-autonomy.service` and `/etc/sudoers.d/neoracer`, which setup installs, and teleop running.
 
 ## Web dashboard
 
 With `neoracer-dashboard` running, browse to `http://neoracer.local:8080`:
 
-- **Nodes**: one card per monitored subsystem, coloured by liveness
-- **System health**: Jetson thermals, battery, kernel type
-- **Topic rates**: live Hz for the control and sensor topics, yellow when stale, red when missing
-- **Node graph**: live rqt-style view of the running graph
-- **Watchdog log**: tail of `~/logs/latest/watchdog.log`, so restart events are visible
+- **Apps**: JupyterLab and the map viewer, then the seven lab dashboards. A tile opens its app in a new tab and starts its service when it is stopped. Six of the lab dashboards publish `/drive`, so opening one of them stops the other five, and it also stops a mapping or localization run after the page asks (a mapping run is saved first). Clear apps stops every lab dashboard.
+- **Features**: the camera, detections and autonomy. Turning the camera or detections on or off restarts teleop. Camera Label and Line Follow need the camera, Pure Pursuit and Smart Follow need detections, and the page offers to turn them on.
+- **System status**: the battery, each node's state and topic rate, the junction temperature, throttling, the data root, the autonomy service, and the tail of `~/logs/latest/watchdog.log`.
+- **System Health** (`/health`): the camera, lidar, IMU and encoder panels, the Jetson's load, temperatures and power, and the battery history.
+
+The page starts and stops services with `sudo -n systemctl`, so it needs the sudoers drop-in `/etc/sudoers.d/neoracer`, which lets the `racecar` user start, stop and restart each `neoracer-*` unit with no password. Setup installs it from `scripts/sudoers.d-neoracer` once `visudo -c` passes. Without it, a tile reports that it has no permission.
 
 ## Lab dashboards
 
-Seven lab tools ship as repositories of their own and are cloned into `scripts/dashboards/` by phase 8, each tracking its default branch:
+Seven lab tools ship in the driver, one folder each in `scripts/dashboards/`, and phase 8 installs their units with `scripts/setup_dashboards.sh`:
 
-| Dashboard | Port | Repository | Purpose |
+| Dashboard | Port | Folder | Purpose |
 | --- | --- | --- | --- |
-| camlabel | 8082 | [camlabel_dashboard](https://github.com/Neobotics-Foundation-Inc/camlabel_dashboard) | capture frames and drag boxes; writes a YOLO dataset to `~/data/camlabel` |
-| wallfollow | 8081 | [wallfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/wallfollow_dashboard) | wall following on `/scan` with live PD tuning |
-| pursuit | 8083 | [pursuit_dashboard](https://github.com/Neobotics-Foundation-Inc/pursuit_dashboard) | target following on `/edgetpu/inference` |
-| eps | 8084 | [eps_dashboard](https://github.com/Neobotics-Foundation-Inc/eps_dashboard) | episodic policy search; a (1+1)-ES tunes the gap follower's gains from one success or fail press per run |
-| smartfollow | 8085 | [smartfollow_dashboard](https://github.com/Neobotics-Foundation-Inc/smartfollow_dashboard) | wallfollow and pursuit combined; follows a detected car, falls back to wall following |
-| linefollow | 8086 | [linefollow_dashboard](https://github.com/Neobotics-Foundation-Inc/linefollow_dashboard) | line following on `/camera/color`; HSV threshold, crop band, and PD steering tuned from trackbars, with a mask view and a stability trace |
-| webteleop | 8087 | [teleop_dashboard](https://github.com/Neobotics-Foundation-Inc/teleop_dashboard) | manual driving from the browser: WASD, arrow keys, or buttons, two at once; camera, lidar, and encoder views; a command timeout drives zero when the browser goes quiet |
+| wallfollow | 8081 | `scripts/dashboards/wallfollow/` | wall following on `/scan` with live PD tuning |
+| camlabel | 8082 | `scripts/dashboards/camlabel/` | capture frames and drag boxes; writes a YOLO dataset to `datasets/camlabel` under the data root |
+| pursuit | 8083 | `scripts/dashboards/pursuit/` | target following on `/edgetpu/inference` |
+| eps | 8084 | `scripts/dashboards/eps/` | episodic policy search; a (1+1)-ES tunes the gap follower's gains from one success or fail press per run |
+| smartfollow | 8085 | `scripts/dashboards/smartfollow/` | wallfollow and pursuit combined; follows a detected car, falls back to wall following |
+| linefollow | 8086 | `scripts/dashboards/linefollow/` | line following on `/camera/color`; HSV threshold, crop area, and PD steering tuned from trackbars, with a mask view and a stability trace |
+| webteleop | 8087 | `scripts/dashboards/webteleop/` | manual driving from the browser: WASD, arrow keys, or buttons, two at once; camera, lidar, encoder, IMU, battery and compass views; a command timeout drives zero when the browser goes quiet |
+
+Save on a dashboard writes the car's tuning to the car profile, `~/.config/racecar/dashboards/<name>.yaml`, over the shipped defaults, and logs go to `dashboards/<name>/` under the data root, so a driver update keeps both. pursuit, smartfollow, and webteleop's detection overlay need detections, which are off at boot. Internals: [docs/dashboards.md](docs/dashboards.md).
 
 Setup installs each unit but leaves it disabled. A dashboard holds the camera or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow, linefollow, and webteleop all publish `/drive`, so they are started one at a time for a session:
 
@@ -292,9 +360,11 @@ racecar service stop camlabel
 racecar service enable camlabel    # only if this car should boot into it
 ```
 
-`racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone.
+Starting or restarting one of the six that publish `/drive` first stops any other of them that is running, as the 8080 page does. camlabel runs alongside them.
 
-The checkouts are gitignored rather than vendored: a car's tuned `wallfollow.yaml`, `pursuit.yaml`, `eps.yaml`, `smartfollow.yaml`, `linefollow.yaml`, or `teleop.yaml` lives there, so setup fast-forwards them and reports a checkout it cannot advance instead of resetting over the tuning. Each repository's own README documents its dashboard.
+`racecar service restart` restarts what is enabled and never promotes a disabled dashboard into a running one, so a field update leaves the car's lab selection alone. It restarts at most one of the six that publish `/drive`, and so does `racecar update`: while one of them runs, another that is enabled stays stopped.
+
+Each dashboard's folder has a README that documents it.
 
 ## Jupyter notebooks and the student library
 
@@ -374,12 +444,12 @@ Two things worth knowing before training on the car:
 
 ```sh
 racecar launch inference                                   # on its own
-racecar teleop                                             # with the rest of the stack (on by default)
-racecar teleop inference_enable:=false                     # without it
+racecar teleop                                             # the rest of the stack (inference off by default)
+racecar teleop inference_enable:=true                      # with it
 ros2 topic echo /edgetpu/inference
 ```
 
-It defaults to **on** in `teleop.launch.py`, so detections are on the graph without a launch argument. It is still the most expensive subsystem: the model holds GPU memory for the life of the stack. Launch with `inference_enable:=false` on a car whose student code never reads `/edgetpu/inference`, or to free the GPU for a `racecar compile` build.
+It is **off** at boot. `scripts/launch_teleop.sh`, which the teleop service and `racecar teleop` both run, reads the per-boot choice in `scripts/features.py`: the camera on and inference off, because inference is the most expensive subsystem (the model holds GPU memory for the life of the stack). The choice is kept in `~/.config/racecar/features.conf` for the current boot only; after a reboot the defaults apply again. A launch argument given on the command line wins, so `racecar teleop inference_enable:=true` runs it for that launch. The stored choice keeps inference with the camera: turning inference on turns the camera on, and turning the camera off turns inference off. Launch arguments given on the command line are used as given and are not checked against each other.
 
 The node exits at startup if `racecar setup ml` has never run on the car (it logs `ultralytics is not importable`). The rest of the stack comes up regardless; only the detection card goes red.
 
@@ -400,6 +470,7 @@ Settings live in `config/inference.yaml`:
 | `max_detections` | 10 | Cap per frame |
 | `class_filter` | all | Class indices to keep, e.g. `[0, 2]`; omit the key for every class |
 | `max_rate_hz` | 15.0 | Ceiling on inference rate |
+| `pause_while_mapping` | true | Drops the camera subscription while `/autonomy/status` reports mapping; the model stays loaded |
 | `publish_annotated` | false | Overlay on `/edgetpu/inference/image`, encoded only while subscribed |
 
 Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo26n.pt` averages 50.1 ms per frame; the TensorRT engine cuts that to 20.9 ms, which clears the `max_rate_hz` ceiling of 15 Hz with headroom to spare.
@@ -453,7 +524,7 @@ racecar launch inference
 racecar launch autonomy
 ```
 
-Any subsystem can be toggled at launch. `lidar`, `camera`, `led_matrix`, and `inference` all default to on:
+Any subsystem can be toggled at launch. In `teleop.launch.py`, `lidar`, `camera`, `led_matrix`, and `inference` all default to on. The teleop service and `racecar teleop` pass `inference_enable:=false` unless inference is turned on for this boot (see [Object detection](#object-detection)):
 
 ```sh
 ros2 launch neoracer_ros2_driver teleop.launch.py camera_enable:=false
@@ -462,23 +533,23 @@ ros2 launch neoracer_ros2_driver teleop.launch.py inference_enable:=false
 
 The systemd service is the normal way to run the car: headless, started on every boot once enabled. `racecar teleop` runs the same stack in the foreground for interactive debugging. Startup logs stream, then it goes quiet and holds the terminal while the car is live; the quiet period is normal operation, not a hang. Ctrl+C stops it. Stop the service first, as the two cannot share the serial ports.
 
-Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `twist_bridge.yaml`, `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
+Configuration lives in `config/`, loaded by each node's launch file: `controller.yaml` (serial port, m/s mapping, FlySky channel map), `throttle.yaml` (speed and steering caps, and the lower caps used while mapping), `gamepad.yaml` and `mux.yaml` (axis indices, arming buttons), `autonomy.yaml` (the localized limits and the scan fit for `autonomy_node`), `slam_mapping.yaml`, `slam_localization.yaml` and `amcl.yaml` (the autonomy launch), `foxglove.yaml` (the Foxglove bridge, with `foxglove:=true`), `camera.yaml`, `led_matrix.yaml`, `inference.yaml` (weights, thresholds, inference rate).
 
 ## Troubleshooting
 
-**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. Check IDs with `racecar status` or `udevadm info -n /dev/ttyACM0`.
+**`/dev/osrbot_*` symlink missing.** Re-run `racecar udev` and re-plug the device. `racecar status` shows which links are present; check a device's IDs with `lsusb` or `udevadm info -n /dev/ttyACM0`.
 
 **No `/scan`.** Confirm the lidar answers: `ping 192.168.8.2`. If it doesn't, the USB-C link should bring up an interface at `192.168.8.1`; see [Networking](#networking-optional). Then read [Checking lidar health](#checking-lidar-health) before concluding the sensor is dead.
 
-**Car won't drive.** The mux only forwards commands when the FlySky switch arms manual or autonomy mode. Verify with `ros2 topic echo /joy`. Direction and the m/s mapping are tuned in `config/controller.yaml`.
+**Car won't drive.** The ESP32 follows the Jetson only with the handset's mode switch down (autonomy); with it up, the sticks drive. The mux forwards `/drive` only while it is fresh, so check `ros2 topic echo /mux_out --qos-reliability best_effort` while the program runs. Direction and the m/s mapping are tuned in `config/controller.yaml`.
 
 **`/camera/color` won't decode.** The node publishes JPEG-in-`Image`. Confirm the webcam offers MJPG: `v4l2-ctl --list-formats-ext -d /dev/osrbot_usb_cam`.
 
-**No `/edgetpu/inference`.** The node is on by default; confirm it was not disabled with `inference_enable:=false`. If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
+**No `/edgetpu/inference`.** The node is off at boot. `cat ~/logs/latest/launch_args` shows `inference_enable:=false` when teleop was launched without it; see [Object detection](#object-detection). If it is running, `ros2 topic echo /diagnostics` reports what it is doing: `No images received yet` means `/camera/color` is dead, an `Inference failed` message names the model error. A node that exits at startup logs its one reason: `ultralytics is not importable` means phase 6 never ran (`racecar setup ml`), and a load failure names the weights path it tried.
 
-**A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never cloned it, which happens on a car that had no internet during setup: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
+**A lab dashboard won't come up.** It is disabled on purpose; start it with `racecar service start camlabel`. `racecar service status` shows `not installed` if phase 8 never installed it: re-run `racecar service install`. A dashboard that starts and dies is usually a port already held by a sibling dashboard, so stop the other one; `racecar service logs camlabel` names the bind failure.
 
-**FlySky channels are wrong.** Channel order depends on your transmitter mixer. Start the controller, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel` / `steering_channel` / `mode_channel` in `config/controller.yaml`. A no-signal channel (`-1`, transmitter off) maps to neutral so the car idles.
+**FlySky channels are wrong.** The shipped mapping fits the FlySky handset the NeoRacer ships with. For another handset, run `ros2 topic echo /joy` while moving each stick and switch, then set `throttle_channel`, `steering_channel` and `mode_channel` in the car profile, `~/.config/racecar/params/controller.yaml`. With the mode switch up, a handset that goes off reads `-1` on every channel within a second, which maps to neutral. With the switch down the loss is not reported: the channels repeat their last values.
 
 **JetPack dpkg errors.** Reset the dpkg info directory:
 

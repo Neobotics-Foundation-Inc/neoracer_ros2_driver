@@ -98,6 +98,17 @@ done
 source /opt/ros/humble/setup.bash
 
 cd "$WS_DIR"
+# A source file deleted since the last --symlink-install build leaves a
+# dangling link that setup.py's scripts/*.py glob picks up, and the build then
+# fails when setuptools copies it. `racecar update` onto a release that removed
+# files hits this; `racecar build` clears the same links.
+for tree in "$WS_DIR/build/neoracer_ros2_driver" "$WS_DIR/install/neoracer_ros2_driver"; do
+    [ -d "$tree" ] || continue
+    while IFS= read -r -d '' link; do
+        rm -- "$link" && echo "  removed dangling symlink: $link"
+    done < <(find "$tree" -xtype l -print0)
+done
+
 # --symlink-install lets YAML / launch / Python edits land without a rebuild.
 colcon build --symlink-install
 
