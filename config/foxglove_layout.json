@@ -1,0 +1,64 @@
+{
+  "configById": {
+    "3D!map": {
+      "cameraState": {
+        "perspective": false,
+        "distance": 12,
+        "phi": 0,
+        "thetaOffset": 90,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-position",
+      "followTf": "base_link",
+      "scene": {"transforms": {"showLabel": false, "axisScale": 0.5}},
+      "transforms": {},
+      "topics": {
+        "/map": {"visible": true, "colorMode": "map", "alpha": 1},
+        "/scan": {"visible": true, "pointSize": 3, "colorMode": "flat", "flatColor": "#e91e63"},
+        "/particle_cloud": {"visible": true, "type": "arrow", "arrowScale": [0.15, 0.03, 0.03]},
+        "/autonomy/pose": {"visible": true, "type": "arrow", "covariance": true, "color": "#1e88e5"},
+        "/robot_description": {"visible": true}
+      },
+      "layers": {
+        "grid": {"visible": true, "layerId": "foxglove.Grid", "frameId": "map", "size": 20, "divisions": 20}
+      },
+      "publish": {
+        "type": "pose_estimate",
+        "poseTopic": "/goal_pose",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.25,
+        "poseEstimateYDeviation": 0.25,
+        "poseEstimateThetaDeviation": 0.17
+      },
+      "imageMode": {}
+    },
+    "Table!status": {
+      "topicPath": "/autonomy/status.values"
+    },
+    "Plot!pose": {
+      "paths": [
+        {"value": "/autonomy/pose.pose.pose.position.x", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/autonomy/pose.pose.pose.position.y", "enabled": true, "timestampMethod": "receiveTime"}
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 60
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {"speed": 1},
+  "layout": {
+    "first": "3D!map",
+    "second": {"first": "Table!status", "second": "Plot!pose", "direction": "column", "splitPercentage": 55},
+    "direction": "row",
+    "splitPercentage": 68
+  }
+}

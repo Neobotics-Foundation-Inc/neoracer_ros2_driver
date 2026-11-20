@@ -1,24 +1,46 @@
 """Unit tests for the ESP32 bridge helpers in controller_lib (no ROS required)."""
 
+import math
+from pathlib import Path
+import re
+
 from neoracer_ros2_driver import controller_lib as cl
+import yaml
 
+ROOT = Path(__file__).resolve().parent.parent
 
-# Mapping config matching the config/controller.yaml defaults.
+# Mapping config matching the config/controller.yaml defaults. The firmware
+# sends raw SBUS counts: sticks 240 to 1807, centre 1023, -1 on failsafe.
 DEFAULT_CFG = {
-    'rc_min': 1000, 'rc_center': 1500, 'rc_max': 2000,
-    'rc_deadband': 0.05, 'rc_failsafe_below': 500,
-    'num_axes': 6, 'num_buttons': 11, 'trigger_axes': [2, 5],
-    'throttle_axis': 1, 'throttle_channel': 2, 'throttle_sign': 1,
-    'steering_axis': 3, 'steering_channel': 0, 'steering_sign': 1,
-    'mode_channel': 4, 'mode_mid_thresh': -0.5, 'mode_high_thresh': 0.5,
-    'mode_idle_button': -1, 'mode_manual_button': 4, 'mode_autonomy_button': 5,
-    'aux_button_channels': [], 'aux_button_indices': [], 'aux_button_thresh': 0.5,
+    'rc_min': 240,
+    'rc_center': 1023,
+    'rc_max': 1807,
+    'rc_deadband': 0.05,
+    'rc_failsafe_below': 0,
+    'num_axes': 6,
+    'num_buttons': 11,
+    'trigger_axes': [2, 5],
+    'throttle_axis': 1,
+    'throttle_channel': 2,
+    'throttle_sign': 1,
+    'steering_axis': 3,
+    'steering_channel': 0,
+    'steering_sign': -1,
+    'mode_channel': 6,
+    'mode_mid_thresh': -1.0,
+    'mode_high_thresh': 0.608,
+    'mode_idle_button': -1,
+    'mode_manual_button': 4,
+    'mode_autonomy_button': 5,
+    'aux_button_channels': [],
+    'aux_button_indices': [],
+    'aux_button_thresh': 0.5,
 }
 
 
 def _channels(**overrides):
-    """Build a 10-channel RC list defaulting every channel to center (1500)."""
-    ch = [1500] * 10
+    """Build a 10-channel RC list defaulting every channel to center (1023)."""
+    ch = [1023] * 10
     for i, v in overrides.items():
         ch[int(i)] = v
     return ch
@@ -26,9 +48,11 @@ def _channels(**overrides):
 
 # ---------- parse_serial_data ----------
 
+
 def test_parse_imu():
     data, tag = cl.parse_serial_data(
-        'i -0.0072 -0.0061 0.7560 0.6545 -0.0179 -0.1542 9.8467 0.1297 0.0441 -0.0715')
+        'i -0.0072 -0.0061 0.7560 0.6545 -0.0179 -0.1542 9.8467 0.1297 0.0441 -0.0715'
+    )
     assert tag == 'i'
     assert data['q_w'] == 0.6545
     assert data['a_z'] == 9.8467
@@ -63,6 +87,7 @@ def test_parse_blank_and_unknown():
 
 # ---------- normalize_channel ----------
 
+
 def test_normalize_center_min_max():
     assert cl.normalize_channel(1500, 1000, 1500, 2000, 0.0) == 0.0
     assert cl.normalize_channel(2000, 1000, 1500, 2000, 0.0) == 1.0
@@ -80,6 +105,7 @@ def test_normalize_failsafe_and_deadband():
 
 # ---------- motor_to_command ----------
 
+
 def test_motor_to_command_scaling_and_format():
     assert cl.motor_to_command(1.0, 0.0, 6.0, 30.0, 0.0) == 'v 6.000 0.00\n'
     assert cl.motor_to_command(-1.0, 1.0, 6.0, 30.0, 0.0) == 'v -6.000 30.00\n'
@@ -88,6 +114,7 @@ def test_motor_to_command_scaling_and_format():
 
 
 # ---------- rc_to_joy ----------
+
 
 def test_rc_to_joy_shape_and_trigger_rest():
     axes, buttons = cl.rc_to_joy(_channels(), DEFAULT_CFG)
@@ -99,21 +126,27 @@ def test_rc_to_joy_shape_and_trigger_rest():
 
 
 def test_rc_to_joy_throttle_and_steering():
-    axes, _ = cl.rc_to_joy(_channels(**{'2': 2000, '0': 1000}), DEFAULT_CFG)
-    assert axes[1] == 1.0   # throttle channel 2 full -> axis 1
-    assert axes[3] == -1.0  # steering channel 0 min -> axis 3
+    axes, _ = cl.rc_to_joy(_channels(**{'2': 1807, '0': 240}), DEFAULT_CFG)
+    assert axes[1] == 1.0  # throttle channel 2 full -> axis 1
+    assert axes[3] == 1.0  # steering channel 0 min, stick left -> axis 3 reads +1
 
 
-def test_rc_to_joy_mode_switch_manual_autonomy_idle():
-    # mode channel 4 high -> autonomy button 5
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 2000}), DEFAULT_CFG)
+def test_rc_to_joy_mode_switch_follows_the_firmware():
+    # The firmware: a count below 1500 on index 6 is manual, 1500 or more autonomy.
+    # Switch up (240) and middle (1023) -> manual button 4.
+    for count in (240, 1023):
+        _, buttons = cl.rc_to_joy(_channels(**{'6': count}), DEFAULT_CFG)
+        assert buttons[4] == 1 and buttons[5] == 0, count
+    # Switch down (1807) -> autonomy button 5.
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1807}), DEFAULT_CFG)
     assert buttons[5] == 1 and buttons[4] == 0
-    # mid -> manual button 4
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 1500}), DEFAULT_CFG)
+
+
+def test_rc_to_joy_mode_split_is_the_firmwares_1500():
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1499}), DEFAULT_CFG)
     assert buttons[4] == 1 and buttons[5] == 0
-    # low -> neither
-    _, buttons = cl.rc_to_joy(_channels(**{'4': 1000}), DEFAULT_CFG)
-    assert buttons[4] == 0 and buttons[5] == 0
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1500}), DEFAULT_CFG)
+    assert buttons[5] == 1 and buttons[4] == 0
 
 
 def test_rc_to_joy_failsafe_is_neutral():
@@ -126,15 +159,16 @@ def test_rc_to_joy_failsafe_is_neutral():
 
 def test_rc_to_joy_aux_buttons():
     cfg = dict(DEFAULT_CFG, aux_button_channels=[6], aux_button_indices=[0])
-    _, buttons = cl.rc_to_joy(_channels(**{'6': 2000}), cfg)
+    _, buttons = cl.rc_to_joy(_channels(**{'6': 1807}), cfg)
     assert buttons[0] == 1
 
 
 # ---------- rc_to_channels ----------
 
+
 def test_rc_to_channels_preserves_firmware_order_and_length():
     # Centered stick reads 0.0; full deflection reads +-1.0, in channel order.
-    out = cl.rc_to_channels(_channels(**{'0': 2000, '9': 1000}), DEFAULT_CFG)
+    out = cl.rc_to_channels(_channels(**{'0': 1807, '9': 240}), DEFAULT_CFG)
     assert len(out) == 10
     assert out[0] == 1.0
     assert out[9] == -1.0
@@ -148,3 +182,209 @@ def test_rc_to_channels_failsafe_is_neutral():
 def test_rc_to_channels_empty_and_none():
     assert cl.rc_to_channels(None, DEFAULT_CFG) == []
     assert cl.rc_to_channels([], DEFAULT_CFG) == []
+
+
+# ---------- battery_fraction ----------
+
+
+def test_battery_fraction_3s():
+    assert cl.battery_fraction(12.6) == 1.0
+    assert cl.battery_fraction(10.8) == 0.0
+    assert abs(cl.battery_fraction(11.7) - 0.5) < 1e-9
+    assert cl.battery_fraction(13.0) == 1.0
+    assert cl.battery_fraction(9.0) == 0.0
+
+
+# ---------- rc_link_up ----------
+
+
+# Frames read on the dev car on 2026-11-11: at rest with the switches low, the
+# first frame after the handset comes back on, and the frame while it is off.
+CAR_REST_FRAME = [1023, 1023, 1023, 1023, 240, 240, 240, 240, 1023, 1023]
+CAR_RECONNECT_FRAME = [1023] * 10
+CAR_NO_SIGNAL_FRAME = [-1] * 10
+
+
+def test_rc_link_up_for_sbus_counts():
+    assert cl.rc_link_up(_channels())
+    assert cl.rc_link_up(_channels(**{'0': 240, '1': 1807}))
+    assert cl.rc_link_up(_channels(**{'0': 0, '1': 2047}))  # both band edges inclusive
+
+
+def test_rc_link_up_on_the_cars_frames():
+    assert cl.rc_link_up(CAR_REST_FRAME)
+    assert cl.rc_link_up(CAR_RECONNECT_FRAME)
+
+
+def test_rc_link_down_when_the_transmitter_is_off():
+    assert not cl.rc_link_up(CAR_NO_SIGNAL_FRAME)
+
+
+def test_rc_link_down_on_one_dead_channel():
+    assert not cl.rc_link_up(_channels(**{'3': -1}))
+
+
+def test_rc_link_down_on_an_impossible_count():
+    assert not cl.rc_link_up(_channels(**{'3': 2600}))
+    assert not cl.rc_link_up(_channels(**{'3': 2048}))
+    assert not cl.rc_link_up(_channels(**{'3': -2}))
+
+
+def test_rc_link_down_with_no_channels():
+    assert not cl.rc_link_up([])
+    assert not cl.rc_link_up(None)
+
+
+# ---------- SBUS calibration ----------
+
+
+def test_sbus_centre_and_ends():
+    assert cl.normalize_channel(1023, 240, 1023, 1807, 0.05, 0) == 0.0
+    assert cl.normalize_channel(240, 240, 1023, 1807, 0.05, 0) == -1.0
+    assert cl.normalize_channel(1807, 240, 1023, 1807, 0.05, 0) == 1.0
+
+
+def test_a_real_240_is_a_value_not_failsafe():
+    assert cl.normalize_channel(240, 240, 1023, 1807, 0.05) == -1.0
+    axes, _ = cl.rc_to_joy(_channels(**{'2': 240}), DEFAULT_CFG)
+    assert axes[1] == -1.0
+
+
+def test_failsafe_minus_one_reads_neutral_with_no_buttons():
+    assert cl.normalize_channel(-1, 240, 1023, 1807, 0.05) == 0.0
+    axes, buttons = cl.rc_to_joy([-1] * 10, DEFAULT_CFG)
+    assert axes[1] == 0.0 and axes[3] == 0.0
+    assert not any(buttons)
+
+
+def test_centred_sticks_read_zero_on_both_topics():
+    axes, _ = cl.rc_to_joy(_channels(), DEFAULT_CFG)
+    assert axes[1] == 0.0 and axes[3] == 0.0
+    assert cl.rc_to_channels(_channels(), DEFAULT_CFG) == [0.0] * 10
+
+
+def test_a_count_of_zero_is_the_low_end_not_failsafe():
+    assert cl.normalize_channel(0, 240, 1023, 1807, 0.05) == -1.0
+    axes, _ = cl.rc_to_joy(_channels(**{'2': 0}), DEFAULT_CFG)
+    assert axes[1] == -1.0
+
+
+def test_only_the_mode_channel_in_failsafe_sets_no_buttons():
+    # The sticks still read; only the mode button is withheld.
+    axes, buttons = cl.rc_to_joy(_channels(**{'6': -1, '2': 1807, '0': 240}), DEFAULT_CFG)
+    assert not any(buttons)
+    assert axes[1] == 1.0 and axes[3] == 1.0
+
+
+def test_the_cars_rest_frame_reads_centred_and_manual():
+    # F08's frame from the dev car at rest: sticks centred, mode switch up.
+    axes, buttons = cl.rc_to_joy(CAR_REST_FRAME, DEFAULT_CFG)
+    assert axes == [0.0, 0.0, 1.0, 0.0, 0.0, 1.0]
+    assert buttons[4] == 1 and sum(buttons) == 1
+
+
+def test_stick_right_reads_minus_one_on_joy_as_a_ros_gamepad():
+    # The student library negates axes[3] for its x, so right must read -1
+    # here for the library to report +1. /rc/channels keeps the wiring.
+    right = list(CAR_REST_FRAME)
+    right[0] = 1807
+    axes, _ = cl.rc_to_joy(right, DEFAULT_CFG)
+    assert axes[3] == -1.0
+    assert cl.rc_to_channels(right, DEFAULT_CFG)[0] == 1.0
+    forward = list(CAR_REST_FRAME)
+    forward[2] = 1807
+    axes, _ = cl.rc_to_joy(forward, DEFAULT_CFG)
+    assert axes[1] == 1.0
+
+
+def test_shipped_yaml_and_code_defaults_match_the_test_config():
+    yaml_cfg = yaml.safe_load((ROOT / 'config' / 'controller.yaml').read_text())
+    params = yaml_cfg['controller_node']['ros__parameters']
+    source = (ROOT / 'neoracer_ros2_driver' / 'controller.py').read_text()
+    for key in (
+        'rc_min',
+        'rc_center',
+        'rc_max',
+        'rc_failsafe_below',
+        'mode_channel',
+        'mode_mid_thresh',
+        'mode_high_thresh',
+        'throttle_sign',
+        'steering_sign',
+    ):
+        assert params[key] == DEFAULT_CFG[key], key
+        match = re.search(rf"p\('{key}', ([-0-9.]+)\)", source)
+        assert match and float(match.group(1)) == DEFAULT_CFG[key], key
+
+
+# ---- Board steering trim (`trim get` / `trim set`) ----
+
+TRIM_GET_REPLY = 'TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg'
+
+
+def test_the_trim_reply_gives_the_trim_and_the_range():
+    assert cl.parse_trim_reply(TRIM_GET_REPLY) == (-1.0, -5.0, 5.0)
+    assert cl.parse_trim_reply('TRIM: 2.35deg center_pwm=1539us range=-5.0..5.0deg') == (
+        2.35,
+        -5.0,
+        5.0,
+    )
+
+
+def test_other_lines_are_not_a_trim_reply():
+    for line in ('OK: steering trim=-1.50deg save queued', 'ERROR: trim set needs degrees', ''):
+        assert cl.parse_trim_reply(line) is None
+    assert cl.parse_trim_reply('TRIM: xdeg center_pwm=1500us range=-5.0..5.0deg') is None
+
+
+def test_board_replies_are_told_apart_from_the_data_stream():
+    assert cl.is_board_reply(TRIM_GET_REPLY)
+    assert cl.is_board_reply('OK: steering trim=-1.50deg save queued')
+    assert cl.is_board_reply('ERROR: use trim get|set <deg>|reset')
+    for line in ('s 0 0 0 0 0 0 0 0 0 0 1 0 0 9.8 0 0 0', 'b 11.7', 'r 1023', 'OK', 'ERROR'):
+        assert not cl.is_board_reply(line)
+
+
+def test_the_set_command_has_two_decimals():
+    assert cl.trim_set_command(-1.5) == 'trim set -1.50\n'
+    assert cl.trim_set_command(0.123) == 'trim set 0.12\n'
+
+
+def test_only_a_finite_number_inside_the_range_is_sent():
+    # The firmware saves NaN as it is, so the driver checks before sending.
+    assert cl.trim_problem(-1.5, -5.0, 5.0) == ''
+    assert cl.trim_problem(-2, -5.0, 5.0) == ''
+    assert cl.trim_problem(5.0, -5.0, 5.0) == ''
+    for bad in (float('nan'), float('inf'), -float('inf'), 9.0, -5.01, True, 'left', None):
+        assert cl.trim_problem(bad, -5.0, 5.0), bad
+
+
+def test_a_write_is_accepted_only_when_the_board_reads_it_back():
+    ok_reply = 'OK: steering trim=-1.50deg save queued'
+    read_back = 'TRIM: -1.50deg center_pwm=1475us range=-5.0..5.0deg'
+    assert cl.trim_write_outcome(-1.5, ok_reply, read_back) == (True, '')
+    # Two decimals, as the board prints them.
+    assert cl.trim_write_outcome(-1.504, ok_reply, read_back)[0]
+
+
+def test_a_write_is_rejected_without_ok_or_without_the_read_back():
+    read_back = 'TRIM: -1.50deg center_pwm=1475us range=-5.0..5.0deg'
+    full = 'ERROR: steering trim=-1.50deg active, NVS save queue full'
+    assert cl.trim_write_outcome(-1.5, full, read_back) == (False, f'the board answered: {full}')
+    assert not cl.trim_write_outcome(-1.5, None, read_back)[0]
+    assert not cl.trim_write_outcome(-1.5, 'OK: steering trim=-1.50deg save queued', None)[0]
+    stale = 'TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg'
+    accepted, reason = cl.trim_write_outcome(-1.5, 'OK: steering trim=-1.50deg', stale)
+    assert not accepted and '-1.00' in reason
+
+
+def test_a_board_holding_nan_reads_as_nan_with_its_range():
+    trim, low, high = cl.parse_trim_reply('TRIM: nandeg center_pwm=1000us range=-5.0..5.0deg')
+    assert math.isnan(trim) and (low, high) == (-5.0, 5.0)
+
+
+def test_only_a_motor_speed_of_zero_leaves_the_car_still():
+    assert not cl.motor_moving(0.0) and not cl.motor_moving(-0.0005)
+    assert cl.motor_moving(0.01) and cl.motor_moving(-1.0)
+    # clamp() turns NaN into full speed, so NaN drives.
+    assert cl.motor_moving(float('nan'))

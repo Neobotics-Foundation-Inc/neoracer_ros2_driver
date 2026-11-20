@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-app="EPS">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Episodic Policy Search · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/lost.js?v=2" defer></script>
+<style>
+  /* This page only. The shared pieces are in /ui/neoracer.css. */
+  .col { display: flex; flex-direction: column; gap: var(--nr-gap); min-width: 0; }
+  /* The plot surface stays a dark instrument panel in both themes: the
+     script draws these light-on-dark. */
+  canvas { background: #09090B; border: 1px solid #26262D; border-radius: 12px; width: 100%; display: block; }
+
+  /* Two-up parameter grids (starting point, hyperparameters). */
+  #init, #hp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+  #init label, #hp label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+  #hp h3 { grid-column: 1 / -1; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--nr-ink-2); margin-top: 6px; }
+  .rowline { display: flex; align-items: center; gap: 2px; }
+  @media (max-width: 560px) { #init, #hp { grid-template-columns: 1fr; } }
+
+  /* The run controls: the biggest targets on the page, because they are
+     pressed while watching the car rather than the screen. */
+  .phase { font-family: var(--nr-font-title); font-size: 22px; font-weight: 700; }
+  .runs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hint { text-align: center; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--nr-ink-3); margin-top: 6px; }
+  button:disabled + .hint { opacity: 0.4; }
+  .readout { font-size: 13px; color: var(--nr-ink-2); white-space: pre-line; }
+  #eqs, #gains { font-family: var(--nr-font-mono); font-size: 13px; line-height: 1.75; }
+  #durrule { font-weight: 700; }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" id="home" href="/" aria-label="NeoRacer, back to the apps page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">Episodic Policy Search</h1>
+  <div class="nr-meta">
+    <button type="button" class="nr-btn small" onclick="post('/learner', {action:'revert_best'})">Revert to best</button>
+    <button type="button" class="nr-btn danger small" onclick="if(confirm('Reset everything? Gains to nominal, speed to floor, charts and ledger cleared (old ledger is archived on the car).')) post('/learner', {action:'reset'})">Reset learner</button>
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:4"><b id="ep">0</b><span>Episode</span></div>
+      <div class="nr-stat" style="--len:5"><b id="spd">?</b><span>Speed</span></div>
+      <div class="nr-stat" style="--len:6"><b id="sig">?</b><span>Sigma</span></div>
+      <div class="nr-stat" style="--len:5"><b id="pstar">?</b><span>p*</span></div>
+      <div class="nr-stat" style="--len:5"><b id="obs">?</b><span>Observed</span></div>
+      <div class="nr-stat" style="--len:5"><b id="best">none</b><span>Best speed</span></div>
+      <div class="nr-stat" style="--len:6"><b id="bestlap">none</b><span>Best lap</span></div>
+    </div>
+  </section>
+
+  <div class="col nr-span-4">
+    <section class="nr-panel" aria-labelledby="t-start">
+      <h2 class="nr-panel-title" id="t-start">Starting Point</h2>
+      <div id="init">
+        <label>kp<input id="init_kp" class="nr-input" type="number" step="any"></label>
+        <label>kd<input id="init_kd" class="nr-input" type="number" step="any"></label>
+        <label>speed_kp<input id="init_speed_kp" class="nr-input" type="number" step="any"></label>
+        <label>speed_kd<input id="init_speed_kd" class="nr-input" type="number" step="any"></label>
+        <label>starting speed<input id="init_start_speed" class="nr-input" type="number" step="0.01" min="0" max="1"></label>
+        <label>width (deg)<input id="init_width" class="nr-input" type="number" step="1"></label>
+        <label>window (deg)<input id="init_window" class="nr-input" type="number" step="1"></label>
+        <label>side_weight<input id="init_side_weight" class="nr-input" type="number" step="0.005"></label>
+        <label>lookahead (m)<input id="init_lookahead" class="nr-input" type="number" step="0.5"></label>
+      </div>
+      <div class="nr-actions">
+        <button type="button" class="nr-btn small" id="b_init" onclick="setInit()">Set starting point</button>
+      </div>
+      <span class="readout" id="initnote"></span>
+    </section>
+
+    <section class="nr-panel" aria-label="Run">
+      <div class="phase" id="phase">IDLE</div>
+      <div>
+        <button type="button" id="b_start" class="nr-btn primary big" onclick="post('/episode/start')">START RUN</button>
+        <div class="hint">space</div>
+      </div>
+      <div class="runs">
+        <div>
+          <button type="button" id="b_succ" class="nr-btn ok big" onclick="label('success')">SUCCESS</button>
+          <div class="hint">s</div>
+        </div>
+        <div>
+          <button type="button" id="b_fail" class="nr-btn danger big" onclick="label('fail')">FAIL</button>
+          <div class="hint">f</div>
+        </div>
+      </div>
+      <div class="nr-actions">
+        <button type="button" class="nr-btn small" id="b_disc" onclick="label('discard')">Discard</button>
+        <button type="button" class="nr-btn small" id="b_undo" onclick="post('/episode/undo')">Undo</button>
+      </div>
+      <div class="readout" id="gains"></div>
+    </section>
+
+    <section class="nr-panel" aria-labelledby="t-hyper">
+      <h2 class="nr-panel-title" id="t-hyper">Hyperparameters</h2>
+      <div id="hp"></div>
+      <div class="nr-actions">
+        <button type="button" class="nr-btn primary small" onclick="applyHyper()">Apply</button>
+        <button type="button" class="nr-btn small" onclick="post('/save').then(() => { note('Saved to the car profile'); toast('Saved to the car profile'); })">Save</button>
+        <button type="button" class="nr-btn small" onclick="post('/load').then(() => { built = false; note('Loaded'); toast('Loaded'); })">Load</button>
+      </div>
+      <span class="readout" id="hpnote"></span>
+      <p class="nr-note">Press Apply before Save. Save writes the values the tuner is
+      running now, so anything typed but not applied will not be saved.</p>
+    </section>
+  </div>
+
+  <div class="col nr-span-8">
+    <section class="nr-panel" aria-labelledby="t-eqs">
+      <h2 class="nr-panel-title" id="t-eqs">Policy Equations</h2>
+      <div class="readout" id="eqs"></div>
+    </section>
+
+    <section class="nr-panel" aria-labelledby="t-stair">
+      <h2 class="nr-panel-title" id="t-stair">Speed Staircase</h2>
+      <canvas id="stair" width="900" height="220"></canvas>
+      <h2 class="nr-panel-title">Gains</h2>
+      <canvas id="gainc" width="900" height="220"></canvas>
+      <h2 class="nr-panel-title">Episode Duration</h2>
+      <div class="readout" id="durrule"></div>
+      <canvas id="durc" width="900" height="180"></canvas>
+    </section>
+
+    <section class="nr-panel" aria-labelledby="t-ledger">
+      <div class="nr-head">
+        <h2 class="nr-panel-title" id="t-ledger">Ledger</h2>
+        <a class="nr-btn small" href="/ledger" download="ledger.jsonl">Download</a>
+      </div>
+      <div class="nr-scrollx"><table class="nr-table"><thead><tr><th>ep</th><th>time</th><th>speed</th><th>outcome</th><th>sigma</th>
+        <th>kp</th><th>kd</th><th>speed_kp</th><th>speed_kd</th><th>dur s</th><th>dist m</th></tr></thead>
+        <tbody id="ledger"></tbody></table></div>
+    </section>
+  </div>
+</main>
+<div id="nr-toast" role="status"></div>
+
+<script>
+const HYPER_GROUPS = [
+  ['Learning Rate', ['sigma0', 'sigma_min', 'sigma_max', 'a_up', 'a_down', 'sigma_kick']],
+  ['Speed Staircase', ['speed_step', 'confirm_runs', 'speed_backoff', 'patience', 'speed_floor', 'speed_max']],
+  ['Cost Function', ['duration_slack']],
+];
+const HYPER = HYPER_GROUPS.flatMap(([, ks]) => ks);
+const GAIN_COLORS = { kp: '#FF0033', kd: '#FFC847', speed_kp: '#7EC8E3', speed_kd: '#FFFFFF' };
+// The charts are drawn light on the dark instrument surface, in both themes.
+const FONT = '600 11px "Space Grotesk", Arial, sans-serif';
+const TIPS = {
+  sigma0: 'Learning rate at the start (after Reset).',
+  a_up: 'Learning rate grows by this on every success.',
+  a_down: 'Learning rate shrinks by this on every fail. Near 1.0 = small steps.',
+  sigma_min: 'Learning rate floor. Raise if learning feels slow.',
+  sigma_max: 'Learning rate ceiling. Lower if proposals swing too far.',
+  speed_step: 'Speed goes up by this after confirm_runs successes in a row.',
+  speed_backoff: 'Speed goes down by this after patience fails in a row.',
+  patience: 'Fails in a row before the speed backs off.',
+  confirm_runs: 'Successes in a row before the speed goes up.',
+  sigma_kick: 'Learning rate bump each time the speed goes up.',
+  speed_floor: 'Lowest speed. Reset starts here.',
+  speed_max: 'Hard cap. The instructor sets this for the room.',
+  duration_slack: 'A pass slower than best lap times this counts as slow and is rejected.',
+};
+let built = false, last = null;
+
+document.getElementById('home').href = `${location.protocol}//${location.hostname}:8080/`;
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null })
+    .then(() => update());
+}
+
+// Confirms Save and Load, so an unsaved tune is never a guess.
+function toast(msg) {
+  const t = document.getElementById('nr-toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// One open tip at a time, and a tap outside closes it.
+document.addEventListener('click', (e) => {
+  const hit = e.target.closest ? e.target.closest('.nr-info') : null;
+  document.querySelectorAll('.nr-info.open').forEach((el) => { if (el !== hit) el.classList.remove('open'); });
+  if (hit) hit.classList.toggle('open');
+});
+function label(result) { return post('/episode/label', { result }); }
+
+const INIT_KEYS = ['kp', 'kd', 'speed_kp', 'speed_kd', 'start_speed',
+                   'width', 'window', 'side_weight', 'lookahead'];
+let initFilled = false;
+
+function setInit() {
+  const out = {};
+  for (const k of INIT_KEYS) out[k] = parseFloat(document.getElementById('init_' + k).value);
+  post('/init', out).then(() => { built = false; initFilled = false; });
+}
+
+function refreshInit(d) {
+  const locked = d.init_locked;
+  for (const k of INIT_KEYS) {
+    const el = document.getElementById('init_' + k);
+    el.disabled = locked;
+    if (!initFilled && document.activeElement !== el) el.value = d.init[k];
+  }
+  if (!locked) initFilled = true;
+  document.getElementById('b_init').disabled = locked;
+  document.getElementById('initnote').textContent = locked
+    ? 'Locked. Reset to change.'
+    : 'Set before the first run. Locks once set.';
+}
+
+function note(msg) {
+  document.getElementById('hpnote').textContent = msg + ' at ' + new Date().toLocaleTimeString();
+}
+
+function applyHyper() {
+  const out = {};
+  for (const k of HYPER) out[k] = parseFloat(document.getElementById('hp_' + k).value);
+  fetch('/hyper', { method: 'POST', body: JSON.stringify(out) })
+    .then(r => r.json()).then(d => {
+      const corrected = HYPER.filter(k => d.hyper[k] !== out[k]);
+      built = false;  // re-render with the values the server actually holds
+      note(corrected.length
+        ? 'Applied, corrected: ' + corrected.map(k => `${k}=${d.hyper[k]}`).join(', ')
+        : 'Applied');
+      update();
+    });
+}
+
+function buildHyper(h) {
+  if (built) return;
+  built = true;
+  document.getElementById('hp').innerHTML = HYPER_GROUPS.map(([g, ks]) =>
+    `<h3>${g}</h3>` +
+    ks.map(k =>
+      `<label><span class="rowline">${k}<span class="nr-info" tabindex="0">i<span class="tip">${TIPS[k]}</span></span></span><input id="hp_${k}" class="nr-input" type="number" step="any" value="${h[k]}"></label>`
+    ).join('')).join('');
+}
+
+function drawStaircase(hist) {
+  const c = document.getElementById('stair'), x = c.getContext('2d');
+  x.clearRect(0, 0, c.width, c.height);
+  if (!hist.length) return;
+  const eps = hist.map(h => h.ep);
+  const e0 = eps[0], e1 = eps[eps.length - 1];
+  const smax = Math.max(...hist.map(h => h.speed)) * 1.15 || 1;
+  const px = ep => (ep - e0) / (e1 - e0 || 1) * (c.width - 40) + 30;
+  const py = v => c.height - 20 - v / smax * (c.height - 40);
+  x.strokeStyle = 'rgba(245,245,247,0.5)'; x.lineWidth = 1.5;
+  x.beginPath();
+  hist.forEach((h, i) => { i ? x.lineTo(px(h.ep), py(h.speed)) : x.moveTo(px(h.ep), py(h.speed)); });
+  x.stroke();
+  for (const h of hist) {
+    x.fillStyle = h.outcome === 'success' ? '#22C55E'
+                : h.outcome === 'slow' ? '#FFC847' : '#FF0033';
+    x.beginPath(); x.arc(px(h.ep), py(h.speed), 4, 0, 7); x.fill();
+  }
+  x.fillStyle = '#F5F5F7'; x.font = FONT;
+  x.fillText(`green = success, gold = passed but slow, red = fail (0..${smax.toFixed(2)})`, 8, 14);
+}
+
+function drawGains(hist) {
+  const c = document.getElementById('gainc'), x = c.getContext('2d');
+  x.clearRect(0, 0, c.width, c.height);
+  if (!hist.length || !last) return;
+  const nom = { kp: 0.5, kd: 4.0, speed_kp: 0.18, speed_kd: 0.05 };
+  const eps = hist.map(h => h.ep);
+  const e0 = eps[0], e1 = eps[eps.length - 1];
+  let vmax = 1;
+  for (const h of hist) for (const k in nom) vmax = Math.max(vmax, h.gains[k] / nom[k]);
+  const px = ep => (ep - e0) / (e1 - e0 || 1) * (c.width - 40) + 30;
+  const py = v => c.height - 20 - v / (vmax * 1.1) * (c.height - 40);
+  // nominal reference line at 1.0
+  x.strokeStyle = 'rgba(245,245,247,0.3)'; x.setLineDash([4, 4]);
+  x.beginPath(); x.moveTo(0, py(1)); x.lineTo(c.width, py(1)); x.stroke();
+  x.setLineDash([]);
+  for (const k in GAIN_COLORS) {
+    x.strokeStyle = GAIN_COLORS[k]; x.lineWidth = 1.5; x.beginPath();
+    hist.forEach((h, i) => {
+      const v = h.gains[k] / nom[k];
+      i ? x.lineTo(px(h.ep), py(v)) : x.moveTo(px(h.ep), py(v));
+    });
+    x.stroke();
+  }
+  x.font = FONT;
+  let lx = 8;
+  for (const k in GAIN_COLORS) {
+    x.fillStyle = GAIN_COLORS[k]; x.fillText(k, lx, 14); lx += x.measureText(k).width + 14;
+  }
+  x.fillStyle = '#F5F5F7';
+  x.fillText('dashed = nominal', lx + 10, 14);
+}
+
+function drawDurations(hist) {
+  // Fails surviving longer = steering improving before the first lap.
+  // Successes getting faster = pace improving at the held speed.
+  const c = document.getElementById('durc'), x = c.getContext('2d');
+  x.clearRect(0, 0, c.width, c.height);
+  const rows = hist.filter(h => h.duration != null);
+  if (!rows.length) return;
+  const eps = rows.map(h => h.ep);
+  const e0 = eps[0], e1 = eps[eps.length - 1];
+  const thr = (last && last.best_lap) ? last.best_lap * last.hyper.duration_slack : null;
+  const dmax = Math.max(...rows.map(h => h.duration), thr || 0) * 1.15;
+  const px = ep => (ep - e0) / (e1 - e0 || 1) * (c.width - 40) + 30;
+  const py = v => c.height - 18 - v / dmax * (c.height - 36);
+  for (const h of rows) {
+    x.fillStyle = h.outcome === 'success' ? '#22C55E'
+                : h.outcome === 'slow' ? '#FFC847' : '#FF0033';
+    x.beginPath(); x.arc(px(h.ep), py(h.duration), 4, 0, 7); x.fill();
+  }
+  if (thr) {
+    x.setLineDash([6, 4]); x.lineWidth = 1.5;
+    x.strokeStyle = '#22C55E';
+    x.beginPath(); x.moveTo(0, py(last.best_lap)); x.lineTo(c.width, py(last.best_lap)); x.stroke();
+    x.strokeStyle = '#FFC847';
+    x.beginPath(); x.moveTo(0, py(thr)); x.lineTo(c.width, py(thr)); x.stroke();
+    x.setLineDash([]);
+    x.fillStyle = '#22C55E'; x.font = FONT;
+    x.fillText(`success target: ${last.best_lap}s (best lap this speed)`, 8, py(last.best_lap) - 5);
+    x.fillStyle = '#FFC847';
+    x.fillText(`slow if above: ${last.best_lap} x ${last.hyper.duration_slack} = ${thr.toFixed(1)}s`,
+               8, py(thr) + 13);
+  } else {
+    x.fillStyle = '#FFC847'; x.font = FONT;
+    x.fillText('no successful lap at this speed yet: the first success sets the bar', 8, 28);
+  }
+  x.fillStyle = '#F5F5F7'; x.font = FONT;
+  x.fillText(`seconds per episode (0..${dmax.toFixed(0)}s) | dist: far = progress, short = slow`, 8, 14);
+}
+
+function fmtGains(g) {
+  return g ? Object.entries(g).map(([k, v]) => `${k} ${v}`).join('  ') : '';
+}
+
+function update() {
+  return fetch('/state').then(r => r.json()).then(d => {
+    last = d;
+    document.getElementById('phase').textContent = d.phase +
+      (d.phase === 'RUNNING' ? '  (car driving)' : '') +
+      (!d.baselined && (d.phase === 'ARMED' || d.phase === 'RUNNING')
+        ? '  BASELINE RUN: your exact starting gains' : '');
+    document.getElementById('ep').textContent = d.episode;
+    document.getElementById('spd').textContent = d.speed;
+    document.getElementById('sig').textContent = d.sigma;
+    document.getElementById('pstar').textContent = d.pstar ?? '?';
+    document.getElementById('obs').textContent = d.observed ?? 'n/a';
+    document.getElementById('best').textContent = d.best_speed ?? 'none';
+    document.getElementById('bestlap').textContent = d.best_lap ? d.best_lap + 's' : 'none';
+    const p = d.phase;
+    document.getElementById('b_start').disabled = p !== 'IDLE';
+    document.getElementById('b_succ').disabled = !(p === 'RUNNING' || p === 'AWAITING_LABEL');
+    document.getElementById('b_fail').disabled = !(p === 'RUNNING' || p === 'AWAITING_LABEL');
+    document.getElementById('b_disc').disabled = !(p === 'ARMED' || p === 'RUNNING' || p === 'AWAITING_LABEL');
+    document.getElementById('b_undo').disabled = !(p === 'IDLE' && d.can_undo);
+    document.getElementById('gains').textContent =
+      `incumbent:  ${fmtGains(d.incumbent)}` +
+      (d.armed ? `\narmed:      ${fmtGains(d.armed)}  at speed ${d.armed_speed}` : '') +
+      (d.best_lap ? `\nbest lap at this speed: ${d.best_lap}s` : '') +
+      (d.telemetry && d.telemetry.scan_seen
+        ? `\nlive: error ${d.telemetry.error ?? '?'}  steer ${d.telemetry.steer}  throttle ${d.telemetry.speed_cmd}`
+        : '\nlive: no lidar data');
+    buildHyper(d.hyper);
+    refreshInit(d);
+    const g = d.armed || d.incumbent, hy = d.hyper;
+    const src = d.armed ? 'armed proposal' : 'incumbent';
+    const pl = d.plant, tv = d.telemetry || {};
+    const spd = d.armed_speed ?? d.speed;
+    const gate = d.best_lap
+      ? `lap <= ${d.best_lap} * ${hy.duration_slack} = ${(d.best_lap * hy.duration_slack).toFixed(1)}s`
+      : `first pass at this speed sets the bar`;
+    document.getElementById('eqs').textContent =
+      `CONTROLLER (every scan, using the ${src}):\n` +
+      `  steer    = kp*err + kd*derr          = ${g.kp}*err + ${g.kd}*derr\n` +
+      `  target   = speed * max_mps * road/lookahead = ${spd} * ${pl.max_mps} * road/${pl.lookahead}` +
+      `  (target m/s)\n` +
+      `  throttle += speed_kp*(target - v_odom) + speed_kd*dv = ${g.speed_kp}*(...) + ${g.speed_kd}*(...)` +
+      `,  v_odom = ${tv.v ?? '?'} m/s${tv.odom_fresh === false ? '  [ODOM STALE: car will not drive]' : ''}\n` +
+      `\nSEARCH (each episode):\n` +
+      `  propose:  gains_new = gains + sigma*N(0,1),  sigma = ${d.sigma}\n` +
+      `  COST:     success = SUCCESS pressed AND ${gate}\n` +
+      `  win:      keep gains_new,   sigma = min(sigma*${hy.a_up}, ${hy.sigma_max})\n` +
+      `  lose:     keep old gains,   sigma = max(sigma*${hy.a_down}, ${hy.sigma_min})`;
+    const hist = d.history.filter(h => h.outcome !== 'discard');
+    drawStaircase(hist);
+    drawGains(hist);
+    drawDurations(hist);
+    const _thr = d.best_lap ? (d.best_lap * d.hyper.duration_slack).toFixed(1) : null;
+    document.getElementById('durrule').textContent = _thr
+      ? `lap <= ${_thr}s = SUCCESS  |  above ${_thr}s = SLOW   (best ${d.best_lap}s x slack ${d.hyper.duration_slack}; a faster lap auto-updates the best)`
+      : 'no successful lap at this speed yet: the first success sets the bar';
+    document.getElementById('ledger').innerHTML = hist.slice(-12).reverse().map(h =>
+      `<tr><td>${h.ep}</td><td>${h.t ?? ''}</td><td>${h.speed}</td>
+       <td><span class="nr-badge ${h.outcome === 'success' ? 'ok' : h.outcome === 'slow' ? 'warn' : 'err'}">${h.outcome}</span></td>
+       <td>${h.sigma}</td><td>${h.gains.kp}</td><td>${h.gains.kd}</td>
+       <td>${h.gains.speed_kp}</td><td>${h.gains.speed_kd}</td><td>${h.duration ?? ''}</td><td>${h.distance ?? ''}</td></tr>`).join('');
+  }).catch(() => {});
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); post('/episode/start'); }
+  if (e.code === 'KeyS') label('success');
+  if (e.code === 'KeyF') label('fail');
+});
+
+update();
+setInterval(update, 500);
+</script>
+</body>
+</html>

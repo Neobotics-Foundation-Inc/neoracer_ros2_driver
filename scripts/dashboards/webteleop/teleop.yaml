@@ -1,0 +1,27 @@
+# NeoRacer web teleop parameters: how hard the drive buttons push. These are
+# the shipped defaults. Save on the dashboard writes this car's values to the
+# car profile, in ~/.config/racecar/dashboards/teleop.yaml, which loads on top
+# of this file; a driver update leaves that file alone. Reset or Load re-reads
+# both.
+
+speed: 0.0          # 0..1 throttle while forward or back is held. Ships at
+                    # 0.0: the NeoRacer mux has no ROS deadman (the handset's
+                    # mode switch is the gate), so the buttons do nothing
+                    # until you raise it.
+angle: 1.0          # 0..1 steering while left or right is held; 1 = full lock
+
+cmd_timeout: 0.5    # seconds without a command from the browser before the
+                    # service drives zero. Covers a closed tab, a dropped
+                    # link, or a key stuck down in a page that lost focus.
+
+# Which camera topic to read. Latest driver: /camera/color. Older cars: /camera.
+camera_topic: /camera/color
+
+# vision_msgs/Detection2DArray for the Detections toggle on the colour view.
+# The inference node publishes /edgetpu/inference while detections are on
+# (they are off at boot). Leave empty on a car with no detector: the toggle
+# then reports itself unavailable instead of waiting forever.
+detections_topic: /edgetpu/inference
+
+preview_width: 320    # live view width sent to the browser, pixels
+preview_quality: 45   # live view jpeg quality 1..100

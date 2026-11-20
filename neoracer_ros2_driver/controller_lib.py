@@ -7,25 +7,39 @@ mapping can be unit-tested without a running ROS graph (see test/test_controller
 The Seeed OSRbot ESP32 firmware emits newline-terminated ASCII lines:
 - ``i qx qy qz qw ax ay az gx gy gz``   IMU   (quaternion, accel m/s^2, gyro rad/s)
 - ``o px py pz vx vy vz yaw``           odom  (position m, velocity m/s, yaw rad)
-- ``r c1 c2 ... c10``                   FlySky RC channels (ints; -1 == no signal)
+- ``r c1 c2 ... c10``                   FlySky RC channels (SBUS counts; -1 == firmware failsafe)
 - ``m x y z``                           magnetometer (Gauss)
+- ``TRIM:`` / ``OK:`` / ``ERROR:``        replies to ``trim get`` and ``trim set``
 """
 
 import math
+import re
+from typing import Any
 
-# A raw RC channel reading below this is treated as "no signal" (failsafe).
-# The firmware reports -1 on every channel when the FlySky transmitter is off,
-# so anything below a valid pulse width (~1000us) maps to neutral, never full-scale.
-RC_FAILSAFE_BELOW = 500
+from neoracer_ros2_driver.limits import clamp
+
+# The ESP32 reports the receiver's channels as raw SBUS counts, 0 to 2047
+# (sticks 240 to 1807, centre 1023), and -1 on every channel on receiver
+# failsafe. A reading below RC_FAILSAFE_BELOW maps to neutral, so only that
+# -1 counts as no signal; a real 240, a stick or switch at its end, is a value.
+RC_COUNT_MIN = 0
+RC_COUNT_MAX = 2047
+RC_FAILSAFE_BELOW = RC_COUNT_MIN
+
+# 3S LiPo bounds for the charge fraction in /battery/state (the vendor stack's
+# battery_voltage_min/max).
+BATTERY_3S_V_MIN = 10.8
+BATTERY_3S_V_MAX = 12.6
 
 
-def clamp(value, low=-1.0, high=1.0):
-    """Clamp ``value`` to the inclusive ``[low, high]`` range."""
-    return max(low, min(high, value))
+def battery_fraction(volts, v_min=BATTERY_3S_V_MIN, v_max=BATTERY_3S_V_MAX):
+    """Return the pack's charge fraction in [0, 1], linear between v_min and v_max."""
+    return clamp((volts - v_min) / (v_max - v_min), 0.0, 1.0)
 
 
-def motor_to_command(speed, steering_angle, max_speed_mps,
-                     max_steering_angle_deg, steering_trim_deg=0.0):
+def motor_to_command(
+    speed, steering_angle, max_speed_mps, max_steering_angle_deg, steering_trim_deg=0.0
+):
     """
     Map a normalized ``/motor`` command to the firmware ``v <m/s> <deg>`` string.
 
@@ -34,7 +48,7 @@ def motor_to_command(speed, steering_angle, max_speed_mps,
     """
     speed_mps = clamp(speed) * max_speed_mps
     steer_deg = clamp(steering_angle) * max_steering_angle_deg + steering_trim_deg
-    return f"v {speed_mps:.3f} {steer_deg:.2f}\n"
+    return f'v {speed_mps:.3f} {steer_deg:.2f}\n'
 
 
 def parse_serial_data(line: str):
@@ -46,7 +60,7 @@ def parse_serial_data(line: str):
     lines so the caller can ignore them. Raises ``ValueError``/``IndexError``
     on malformed numeric fields, which the caller logs and skips.
     """
-    data = {}
+    data: dict[str, Any] = {}
 
     parts = line.split()
     if not parts:
@@ -89,8 +103,8 @@ def parse_serial_data(line: str):
     if cmd_type == 'i' and len(parts) == 11:
         # i qx qy qz qw ax ay az gx gy gz
         q_x, q_y, q_z, q_w = map(float, parts[1:5])  # quaternion
-        a_x, a_y, a_z = map(float, parts[5:8])       # accelerometer
-        g_x, g_y, g_z = map(float, parts[8:11])      # gyroscope
+        a_x, a_y, a_z = map(float, parts[5:8])  # accelerometer
+        g_x, g_y, g_z = map(float, parts[8:11])  # gyroscope
 
         data['q_x'] = q_x
         data['q_y'] = q_y
@@ -122,7 +136,7 @@ def parse_serial_data(line: str):
         return data, 'o'
 
     if cmd_type == 'r' and len(parts) >= 2:
-        # r c1 c2 ... cN   (FlySky RC channels, ints; -1 == no signal)
+        # r c1 c2 ... cN   (FlySky RC channels, ints; -1 == firmware failsafe)
         data['channels'] = [int(float(v)) for v in parts[1:]]
         return data, 'r'
 
@@ -137,6 +151,42 @@ def parse_serial_data(line: str):
         return data, 'b'
 
     return None, None
+
+
+# The identity axis remap: the firmware's IMU axes are already REP-103 body
+# axes (x forward, y left, z up), as measured on the dev car on 2026-11-12.
+IDENTITY_AXIS_ORDER = (0, 1, 2)
+IDENTITY_AXIS_SIGN = (1.0, 1.0, 1.0)
+
+
+def remap_axes(vec, order, sign, scale=1.0):
+    """Reorder, sign-flip and scale a 3-vector: out[i] = scale * sign[i] * vec[order[i]]."""
+    return tuple(scale * float(sign[i]) * float(vec[int(order[i])]) for i in range(3))
+
+
+def axis_remap_problem(order, sign):
+    """
+    Return why an axis remap is not a signed permutation of the axes, or ''.
+
+    order must hold 0, 1 and 2 once each; sign must hold three values, each
+    1.0 or -1.0. The controller falls back to the identity on a problem, so a
+    mistyped car profile cannot scramble /imu/fused.
+    """
+    try:
+        if len(order) != 3 or sorted(int(i) for i in order) != [0, 1, 2]:
+            return f'axis order {list(order)} is not a permutation of [0, 1, 2]'
+        if len(sign) != 3 or any(float(s) not in (1.0, -1.0) for s in sign):
+            return f'axis sign {list(sign)} must hold three values, each 1.0 or -1.0'
+    except (TypeError, ValueError):
+        return f'axis order {order!r} and sign {sign!r} must be lists of numbers'
+    return ''
+
+
+def is_identity_remap(order, sign):
+    """Report whether an axis remap leaves every axis where it is."""
+    return [int(i) for i in order] == list(IDENTITY_AXIS_ORDER) and [
+        float(s) for s in sign
+    ] == list(IDENTITY_AXIS_SIGN)
 
 
 def quaternion_from_euler(roll, pitch, yaw):
@@ -156,13 +206,12 @@ def quaternion_from_euler(roll, pitch, yaw):
     return q
 
 
-def normalize_channel(raw, rc_min, rc_center, rc_max, deadband,
-                      failsafe_below=RC_FAILSAFE_BELOW):
+def normalize_channel(raw, rc_min, rc_center, rc_max, deadband, failsafe_below=RC_FAILSAFE_BELOW):
     """
-    Map a raw RC pulse width to ``[-1.0, 1.0]`` about its center.
+    Map a raw RC reading (an SBUS count) to ``[-1.0, 1.0]`` about its center.
 
-    A reading below ``failsafe_below`` (e.g. the firmware's ``-1`` no-signal
-    sentinel) returns ``0.0`` so a powered-off transmitter never commands full
+    A reading below ``failsafe_below`` (the ``-1`` the firmware sends while in
+    failsafe) returns ``0.0``, so a failsafe never commands full
     scale. The two sides of center are scaled independently so an asymmetric
     ``rc_min``/``rc_max`` still yields a clean +-1 range. Values within
     ``deadband`` of center snap to ``0.0``.
@@ -173,7 +222,7 @@ def normalize_channel(raw, rc_min, rc_center, rc_max, deadband,
         span = max(1.0, float(rc_max - rc_center))
     else:
         span = max(1.0, float(rc_center - rc_min))
-    norm = max(-1.0, min(1.0, (raw - rc_center) / span))
+    norm = clamp((raw - rc_center) / span)
     if abs(norm) < deadband:
         return 0.0
     return norm
@@ -183,6 +232,18 @@ def _set_button(buttons, idx, value=1):
     """Set ``buttons[idx] = value`` when ``idx`` is a valid in-range index."""
     if idx is not None and 0 <= idx < len(buttons):
         buttons[idx] = value
+
+
+def rc_link_up(channels, count_min=RC_COUNT_MIN, count_max=RC_COUNT_MAX):
+    """
+    Report whether the transmitter link is up: every raw channel is an SBUS count.
+
+    The firmware sends -1 on every channel while it is in failsafe.
+    Use this, not the normalized channels, for transmitter presence: the
+    failsafe mapping turns a dead channel and a stick held low into the same
+    neutral value. One frame's verdict; freshness belongs to the consumer.
+    """
+    return bool(channels) and all(count_min <= c <= count_max for c in channels)
 
 
 def rc_to_channels(channels, cfg):
@@ -195,8 +256,14 @@ def rc_to_channels(channels, cfg):
     channel reads ``0.0``, matching the Joy failsafe.
     """
     return [
-        normalize_channel(raw, cfg['rc_min'], cfg['rc_center'], cfg['rc_max'],
-                          cfg['rc_deadband'], cfg['rc_failsafe_below'])
+        normalize_channel(
+            raw,
+            cfg['rc_min'],
+            cfg['rc_center'],
+            cfg['rc_max'],
+            cfg['rc_deadband'],
+            cfg['rc_failsafe_below'],
+        )
         for raw in (channels or [])
     ]
 
@@ -214,8 +281,8 @@ def rc_to_joy(channels, cfg):
                            and treats ``trigger_axes`` as resting at +1.0
       * student library -> Xbox-style axis/button layout
 
-    ``channels`` is the list from the ESP32 ``r`` line (``-1`` == no signal); a
-    failsafe/no-signal channel maps to neutral so the car stays idle.
+    ``channels`` is the list from the ESP32 ``r`` line (``-1`` == receiver
+    failsafe); a failsafe channel maps to neutral so the car stays idle.
     """
     n_axes = cfg['num_axes']
     axes = [0.0] * n_axes
@@ -231,8 +298,12 @@ def rc_to_joy(channels, cfg):
 
     def norm(i):
         return normalize_channel(
-            chan(i), cfg['rc_min'], cfg['rc_center'], cfg['rc_max'],
-            cfg['rc_deadband'], cfg['rc_failsafe_below'],
+            chan(i),
+            cfg['rc_min'],
+            cfg['rc_center'],
+            cfg['rc_max'],
+            cfg['rc_deadband'],
+            cfg['rc_failsafe_below'],
         )
 
     # --- Driving axes ---
@@ -245,8 +316,10 @@ def rc_to_joy(channels, cfg):
 
     buttons = [0] * cfg['num_buttons']
 
-    # --- 3-position mode switch -> manual / autonomy enable ---
+    # --- Mode switch -> manual / autonomy enable ---
     # below mid => idle, between mid and high => manual (LB), above high => autonomy (RB).
+    # controller.yaml sets the thresholds to the firmware's two states: a count
+    # below 1500 (switch up or middle) is manual, 1500 or more (down) autonomy.
     mc = cfg['mode_channel']
     if mc >= 0 and chan(mc) is not None and chan(mc) >= cfg['rc_failsafe_below']:
         m = norm(mc)
@@ -258,8 +331,100 @@ def rc_to_joy(channels, cfg):
             _set_button(buttons, cfg['mode_idle_button'])
 
     # --- Generic 2-position aux switches -> arbitrary Joy buttons ---
-    for ch_i, btn_i in zip(cfg['aux_button_channels'], cfg['aux_button_indices']):
+    for ch_i, btn_i in zip(cfg['aux_button_channels'], cfg['aux_button_indices'], strict=False):
         if norm(ch_i) >= cfg['aux_button_thresh']:
             _set_button(buttons, btn_i)
 
     return axes, buttons
+
+
+# ---- Board steering trim (`trim get` / `trim set`) ----
+# The firmware trim is added to every steering pulse, from the Jetson and from
+# the handset. Replies, as NEORACER_V1.2 sends them:
+#   trim get       -> "TRIM: -1.00deg center_pwm=1483us range=-5.0..5.0deg"
+#   trim set <deg> -> "OK: steering trim=-1.50deg save queued", or "ERROR: ..."
+#                     when the number does not parse or the NVS save queue is
+#                     full (the trim is then active but not saved).
+# The firmware clamps to its range but accepts NaN and saves it, so the value is
+# checked here before it is sent.
+BOARD_REPLY_PREFIXES = ('TRIM:', 'OK:', 'ERROR:')
+TRIM_RANGE_DEFAULT = (-5.0, 5.0)
+# The firmware prints the trim with two decimals.
+TRIM_CONFIRM_TOL_DEG = 0.01
+_TRIM_REPLY = re.compile(
+    r'^TRIM:\s*(?P<deg>\S+?)deg\s+center_pwm=(?P<pwm>-?\d+)us\s+'
+    r'range=(?P<low>-?\d+(?:\.\d+)?)\.\.(?P<high>-?\d+(?:\.\d+)?)deg'
+)
+
+
+def is_board_reply(line: str) -> bool:
+    """Return whether a serial line answers a board command rather than streaming data."""
+    return line.startswith(BOARD_REPLY_PREFIXES)
+
+
+# A /motor speed within this of 0 leaves the car still.
+STILL_SPEED = 1e-3
+
+
+def motor_moving(speed: float) -> bool:
+    """
+    Return whether a /motor speed drives the car.
+
+    NaN counts as driving: clamp() turns it into full speed.
+    """
+    return not abs(speed) <= STILL_SPEED
+
+
+def parse_trim_reply(line: str) -> tuple[float, float, float] | None:
+    """
+    Return (trim_deg, low_deg, high_deg) from a `trim get` reply, or None.
+
+    trim_deg is NaN when the board holds NaN; the range is always finite.
+    """
+    match = _TRIM_REPLY.match(line.strip())
+    if match is None:
+        return None
+    try:
+        deg, low, high = (float(match[k]) for k in ('deg', 'low', 'high'))
+    except ValueError:
+        return None
+    if not all(math.isfinite(v) for v in (low, high)) or low >= high:
+        return None
+    return deg, low, high
+
+
+def trim_set_command(trim_deg: float) -> str:
+    """Return the `trim set` line for a trim in degrees (positive steers left)."""
+    return f'trim set {trim_deg:.2f}\n'
+
+
+def trim_problem(value: Any, low: float, high: float) -> str:
+    """Return why `value` cannot be sent as the board trim, or '' when it can."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f'the trim must be a number of degrees, not {value!r}'
+    if not math.isfinite(value):
+        return f'the trim must be a finite number of degrees, not {value}'
+    if not low <= value <= high:
+        return f'the trim {value:g} deg is outside the board range {low:g} to {high:g} deg'
+    return ''
+
+
+def trim_write_outcome(
+    requested: float, set_reply: str | None, get_reply: str | None
+) -> tuple[bool, str]:
+    """
+    Return (accepted, reason) for a `trim set` followed by a `trim get`.
+
+    Accepted only when the board answered OK and reads back the requested
+    trim, to the two decimals it prints.
+    """
+    if set_reply is None:
+        return False, 'the board did not answer trim set'
+    if not set_reply.startswith('OK:'):
+        return False, f'the board answered: {set_reply}'
+    read = parse_trim_reply(get_reply) if get_reply is not None else None
+    if read is None:
+        return False, 'the board did not answer trim get after trim set'
+    if abs(read[0] - round(requested, 2)) > TRIM_CONFIRM_TOL_DEG:
+        return False, f'the board reads {read[0]:+.2f} deg after trim set {requested:+.2f}'
+    return True, ''

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-app="Camera label">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Label · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/lost.js?v=2" defer></script>
+<style>
+  /* This page only. The shared pieces are in /ui/neoracer.css. */
+  .step { display: inline-grid; place-items: center; width: 26px; height: 26px; background: var(--nr-red); color: var(--nr-ink-on-red); font: 700 14px/1 var(--nr-font-title); flex: none; }
+  /* A numbered step replaces the title's red dash. */
+  .stepped { display: flex; align-items: center; gap: 12px; }
+  .stepped::before { display: none; }
+  canvas.frame { width: 100%; height: auto; display: block; aspect-ratio: 4 / 3; }
+  #lab { cursor: crosshair; touch-action: none; }
+  label.field { display: grid; gap: 6px; font-weight: 700; font-size: 13px; }
+  label.field .nr-input { max-width: 320px; font-family: var(--nr-font-sans); }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 8px; color: var(--nr-ink-2); font-weight: 600; font-size: 13px; }
+  .thumbs img { width: 120px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--nr-radius-sm); border: 3px solid transparent; cursor: pointer; background: var(--nr-well); }
+  .thumbs img:hover { border-color: var(--nr-ink-3); }
+  .thumbs img.sel { border-color: var(--nr-red); }
+  #revview { max-width: 640px; }
+  abbr { text-decoration: underline dotted; cursor: help; }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" id="home" href="/" aria-label="NeoRacer, back to the apps page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">Camera Label</h1>
+  <div class="nr-meta">
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:4"><b id="ucount">0</b><span>Unlabeled</span></div>
+      <div class="nr-stat" style="--len:4"><b id="lcount">0</b><span>Labeled</span></div>
+      <div class="nr-stat" style="--len:8"><b id="res">-</b><span><abbr title="Snaps save at this resolution.">Camera</abbr></span></div>
+      <div class="nr-stat" style="--len:8"><b id="pres">-</b><span><abbr title="Live preview only.">Preview</abbr></span></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-6" aria-labelledby="t-collect">
+    <h2 class="nr-panel-title stepped" id="t-collect"><span class="step">1</span>Collect</h2>
+    <p class="nr-note">Point the car at what you want to label, then press Snap.</p>
+    <div class="nr-view"><canvas id="cam" class="frame" width="640" height="480"></canvas></div>
+    <div class="nr-actions"><button type="button" class="nr-btn primary small" onclick="snap()">Snap</button></div>
+    <p class="nr-note" id="snapinfo">Spacebar also snaps.</p>
+  </section>
+
+  <section class="nr-panel nr-span-6" aria-labelledby="t-label">
+    <h2 class="nr-panel-title stepped" id="t-label"><span class="step">2</span>Label</h2>
+    <p class="nr-note">Type the class name first. Then click one corner, move, and click again to place the box.</p>
+    <div class="nr-view"><canvas id="lab" class="frame" width="640" height="480"></canvas></div>
+    <label class="field" for="cls">Class name for new boxes
+      <input id="cls" class="nr-input" type="text" placeholder="cone" value=""></label>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn small" onclick="nav(-1)">Prev</button>
+      <button type="button" class="nr-btn small" onclick="nav(1)">Next</button>
+      <button type="button" class="nr-btn primary small" onclick="saveLabels()">Save labels</button>
+      <button type="button" class="nr-btn small" onclick="undo()">Undo box</button>
+      <button type="button" class="nr-btn danger small" onclick="delImg()">Delete image</button>
+    </div>
+    <p class="nr-note" id="boxlist">Pick an unlabeled image below. Arrow keys move between images. Enter saves.</p>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-unlabeled">
+    <h2 class="nr-panel-title" id="t-unlabeled">Unlabeled images (<span id="ucount2">0</span>)</h2>
+    <div class="thumbs" id="uthumbs">None yet. Snap some frames above.</div>
+  </section>
+
+  <section class="nr-panel" aria-labelledby="t-labeled">
+    <h2 class="nr-panel-title" id="t-labeled">Labeled images (<span id="lcount2">0</span>)</h2>
+    <div class="thumbs" id="lthumbs">None yet.</div>
+    <div class="nr-view" id="revview" hidden><canvas id="revcam" class="frame" width="640" height="480"></canvas></div>
+    <p class="nr-note" id="revinfo"></p>
+    <div class="nr-actions"><button type="button" class="nr-btn danger small" id="delbtn" hidden onclick="delLabeled()">Delete image</button></div>
+  </section>
+</main>
+
+<script>
+$('home').href = `${location.protocol}//${location.hostname}:8080/`;
+function $(id) { return document.getElementById(id); }
+// Boxes are red with white names in both themes: they sit on the photo.
+const BOX = '#FF0033', BOX_TEXT = '#FFFFFF', BOX_FONT = '600 14px "Space Grotesk", Arial, sans-serif';
+
+// ---- Live view (collect) ----
+const cam = $('cam'), camx = cam.getContext('2d');
+const limg = new Image();
+limg.onload = () => camx.drawImage(limg, 0, 0, cam.width, cam.height);
+// Pull frames one at a time so a congested link drops frame rate instead
+// of building a lag queue. Pauses when the tab is hidden.
+(function liveLoop() {
+  if (document.hidden) { setTimeout(liveLoop, 250); return; }
+  const t = Date.now();
+  const done = () => {
+    limg.removeEventListener('load', done); limg.removeEventListener('error', done);
+    setTimeout(liveLoop, Math.max(20, 160 - (Date.now() - t)));
+  };
+  limg.addEventListener('load', done); limg.addEventListener('error', done);
+  limg.src = '/frame?' + t;
+})();
+
+function snap() {
+  fetch('/snap', { method: 'POST' }).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(d => {
+    $('snapinfo').textContent = `Saved u${d.n}.jpg`;
+    refresh();
+  }).catch(err => {
+    $('snapinfo').textContent = err.message === 'HTTP 503'
+      ? 'Snap failed. No camera frame yet.'
+      : err.message === 'HTTP 404' ? 'Snap failed. Restart Camera label.' : 'Snap failed.';
+  });
+}
+
+// ---- Labeling ----
+const lab = $('lab'), labx = lab.getContext('2d');
+const uimg = new Image();
+let current = null, boxes = [], drag = null;
+uimg.onload = drawLab;
+uimg.onerror = () => { if (current !== null) refresh().then(advance); };
+
+function drawLab() {
+  labx.clearRect(0, 0, lab.width, lab.height);
+  if (current === null) return;
+  labx.drawImage(uimg, 0, 0, lab.width, lab.height);
+  labx.font = BOX_FONT; labx.lineWidth = 2; labx.strokeStyle = BOX;
+  for (const b of boxes) {
+    labx.strokeRect(b.x, b.y, b.w, b.h);
+    labx.fillStyle = BOX;
+    labx.fillRect(b.x, b.y - 18, labx.measureText(b.cls).width + 10, 18);
+    labx.fillStyle = BOX_TEXT;
+    labx.fillText(b.cls, b.x + 5, b.y - 5);
+  }
+  if (drag) {
+    labx.setLineDash([6, 4]);
+    labx.strokeRect(drag.x, drag.y, drag.w, drag.h);
+    labx.setLineDash([]);
+    const size = `${Math.round(drag.w)} x ${Math.round(drag.h)}`;
+    labx.fillStyle = BOX;
+    labx.fillRect(drag.x, drag.y + drag.h, labx.measureText(size).width + 10, 18);
+    labx.fillStyle = BOX_TEXT;
+    labx.fillText(size, drag.x + 5, drag.y + drag.h + 13);
+  }
+}
+
+function pick(n) {
+  current = n; boxes = []; drag = null;
+  uimg.src = `/uimg?n=${n}&v=${uv[n]}`;
+  list();
+  for (const el of document.querySelectorAll('#uthumbs img')) {
+    el.classList.toggle('sel', el.dataset.n == n);
+  }
+}
+
+function pos(e) {
+  const r = lab.getBoundingClientRect();
+  return [(e.clientX - r.left) * lab.width / r.width, (e.clientY - r.top) * lab.height / r.height];
+}
+
+// One gesture model for mouse and touch. Click once to drop a corner, move to
+// size the box, click again to keep it. On a touch screen the same press can
+// simply be dragged, which finishes the box when the finger lifts.
+let anchored = false, pressMoved = false, downPt = null;
+
+function sizePending(x, y) {
+  drag.x = Math.min(x, drag.x0); drag.y = Math.min(y, drag.y0);
+  drag.w = Math.abs(x - drag.x0); drag.h = Math.abs(y - drag.y0);
+}
+
+function keepPending() {
+  if (drag && drag.w > 5 && drag.h > 5) {
+    boxes.push({ x: drag.x, y: drag.y, w: drag.w, h: drag.h,
+                 cls: $('cls').value.trim() || 'unlabeled' });
+  }
+  drag = null;
+  drawLab();
+  list();
+}
+
+lab.onpointerdown = e => {
+  if (current === null) return;
+  e.preventDefault();
+  const [x, y] = pos(e);
+  downPt = [x, y];
+  pressMoved = false;
+  if (!drag) {
+    drag = { x0: x, y0: y, x, y, w: 0, h: 0 };
+    anchored = true;
+  } else {
+    anchored = false;
+    sizePending(x, y);
+  }
+  drawLab();
+};
+
+lab.onpointermove = e => {
+  if (!drag) return;
+  const [x, y] = pos(e);
+  const held = e.pointerType === 'mouse' ? e.buttons > 0 : true;
+  if (held && downPt && (Math.abs(x - downPt[0]) > 3 || Math.abs(y - downPt[1]) > 3)) {
+    pressMoved = true;
+  }
+  sizePending(x, y);
+  drawLab();
+};
+
+lab.onpointerup = e => {
+  if (!drag) return;
+  // Dragged: the box is finished on lift. Tapped a second time: also finished.
+  // A first tap that did not move stays open so the next move sizes it.
+  if (pressMoved || !anchored) keepPending();
+  downPt = null;
+};
+
+lab.onpointercancel = () => { downPt = null; };
+
+// Escape drops a box that is still being sized.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && drag) { drag = null; drawLab(); list(); }
+});
+
+function list() {
+  $('boxlist').textContent = current === null
+    ? 'Pick an unlabeled image below. Enter saves.'
+    : boxes.length
+      ? `u${current}: ` + boxes.map(b => b.cls).join(', ')
+      : `u${current}: click a corner, move, and click again. Save with no boxes for a negative.`;
+}
+
+function nav(d) {
+  if (!unlabeled.length) return;
+  const i = unlabeled.indexOf(current);
+  const j = i === -1 ? (d > 0 ? 0 : unlabeled.length - 1)
+                     : (i + d + unlabeled.length) % unlabeled.length;
+  pick(unlabeled[j]);
+}
+
+function advance() {
+  // Next remaining unlabeled image after the one just handled, if any.
+  const next = unlabeled.find(n => n > current) ?? unlabeled[0] ?? null;
+  if (next !== null) { pick(next); } else { current = null; drawLab(); list(); }
+}
+
+function saveLabels() {
+  if (current === null) return;
+  const out = boxes.map(b => ({ cls: b.cls,
+    cx: (b.x + b.w / 2) / lab.width, cy: (b.y + b.h / 2) / lab.height,
+    w: b.w / lab.width, h: b.h / lab.height }));
+  fetch('/label', { method: 'POST', body: JSON.stringify({ n: current, boxes: out }) })
+    .then(() => refresh().then(advance))
+    .catch(() => refresh().then(advance));
+}
+
+function delImg() {
+  if (current === null) return;
+  fetch('/delu', { method: 'POST', body: JSON.stringify({ n: current }) })
+    .then(() => refresh().then(advance));
+}
+
+function undo() { if (drag) drag = null; else boxes.pop(); drawLab(); list(); }
+
+document.addEventListener('keydown', e => {
+  const onBody = e.target === document.body;
+  if (e.code === 'Space' && onBody) { e.preventDefault(); snap(); }
+  if (e.code === 'Enter' && (onBody || e.target.id === 'cls')) saveLabels();
+  if (e.code === 'ArrowLeft' && onBody) nav(-1);
+  if (e.code === 'ArrowRight' && onBody) nav(1);
+});
+
+// ---- Lists, counts, resolution ----
+let unlabeled = [], labeled = [], uv = {}, lv = {};
+
+function refresh() {
+  return fetch('/info').then(r => r.json()).then(d => {
+    uv = {}; lv = {};
+    unlabeled = d.unlabeled.map(([n, v]) => (uv[n] = v, n));
+    labeled = d.labeled.map(([n, v]) => (lv[n] = v, n));
+    for (const id of ['ucount', 'ucount2']) $(id).textContent = unlabeled.length;
+    for (const id of ['lcount', 'lcount2']) $(id).textContent = labeled.length;
+    $('res').textContent = d.cam[0] ? `${d.cam[0]}x${d.cam[1]}` : '?';
+    $('pres').textContent =
+      d.cam[0] ? `${d.preview_width}x${Math.round(d.preview_width * d.cam[1] / d.cam[0])}` : `${d.preview_width}px`;
+    $('uthumbs').innerHTML = unlabeled.length
+      ? unlabeled.map(n => `<img src="/thumb?src=u&n=${n}&v=${uv[n]}" data-n="${n}" onclick="pick(${n})" title="u${n}.jpg" alt="u${n}.jpg">`).join('')
+      : 'None yet. Snap some frames above.';
+    $('lthumbs').innerHTML = labeled.length
+      ? labeled.map(n => `<img src="/thumb?src=l&n=${n}&v=${lv[n]}" onclick="showLabeled(${n})" title="img${n}.jpg" alt="img${n}.jpg">`).join('')
+      : 'None yet.';
+    for (const el of document.querySelectorAll('#uthumbs img')) {
+      el.classList.toggle('sel', el.dataset.n == current);
+    }
+    if (currentLabeled !== null && !labeled.includes(currentLabeled)) {
+      currentLabeled = null;
+      $('revview').hidden = true;
+      $('delbtn').hidden = true;
+      $('revinfo').textContent = '';
+    }
+  });
+}
+
+// ---- Labeled viewer ----
+const rc = $('revcam'), rctx = rc.getContext('2d');
+const rimg = new Image();
+let revBoxes = [], currentLabeled = null;
+rimg.onload = () => {
+  rctx.drawImage(rimg, 0, 0, rc.width, rc.height);
+  rctx.font = BOX_FONT; rctx.lineWidth = 2; rctx.strokeStyle = BOX;
+  for (const b of revBoxes) {
+    rctx.strokeRect(b.x, b.y, b.w, b.h);
+    rctx.fillStyle = BOX;
+    rctx.fillRect(b.x, b.y - 18, rctx.measureText(b.cls).width + 10, 18);
+    rctx.fillStyle = BOX_TEXT;
+    rctx.fillText(b.cls, b.x + 5, b.y - 5);
+  }
+};
+
+function showLabeled(n) {
+  currentLabeled = n;
+  $('delbtn').hidden = false;
+  fetch('/label?n=' + n).then(r => r.json()).then(d => {
+    revBoxes = d.boxes.map(b => ({ x: (b.cx - b.w / 2) * rc.width, y: (b.cy - b.h / 2) * rc.height,
+                                   w: b.w * rc.width, h: b.h * rc.height, cls: b.cls }));
+    $('revview').hidden = false;
+    const names = revBoxes.map(b => b.cls).join(', ');
+    $('revinfo').textContent = `img${n}${names ? ': ' + names : ': no boxes'}`;
+    rimg.src = `/img?n=${n}&v=${lv[n]}`;
+  });
+}
+
+function delLabeled() {
+  if (currentLabeled === null) return;
+  if (!confirm(`Delete img${currentLabeled} and its labels?`)) return;
+  fetch('/dell', { method: 'POST', body: JSON.stringify({ n: currentLabeled }) }).then(() => {
+    currentLabeled = null;
+    $('revview').hidden = true;
+    $('delbtn').hidden = true;
+    $('revinfo').textContent = '';
+    refresh();
+  });
+}
+
+refresh();
+</script>
+</body>
+</html>

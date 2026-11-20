@@ -1,0 +1,362 @@
+/* NeoRacer styles, shared by every page the car serves. Served at
+   /ui/neoracer.css by scripts/webui.py; fonts, logos and icons beside it.
+
+   The look is the Neobotics design system's dashboards: glass panels over the
+   website's garage held still, a light and a dark theme, red as the one accent.
+   Titles, panel titles, big numbers and buttons are Space Grotesk bold: the
+   design system's title face is licensed and does not ship in this public
+   repository. The class names follow
+   the upstream stylesheet with an nr- prefix, so a page ported from upstream
+   maps across one name for one name.
+
+   A status is a whole box in its color, never a dot and never a tint:
+   ok (Running, Success green), warn (Check, Warning yellow: anything not
+   detected), err (Fault, Red: real faults only), off (Off, card glass).
+   The color says it; a word is written only for a problem, and every status
+   is still in the text for a screen reader (.nr-sr) and in Windows High
+   Contrast. Marks are squares, bars and dashes. */
+
+@font-face { font-family: "Space Grotesk"; font-weight: 300 700; font-style: normal; font-display: swap; src: url("fonts/space-grotesk-var.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400 800; font-style: normal; font-display: swap; src: url("fonts/jetbrains-mono-var.woff2") format("woff2"); }
+
+:root {
+  /* Brand and status (design system: red, status-success, status-warning) */
+  --nr-red: #FF0033;
+  --nr-red-deep: #B80025;
+  --nr-ok: #22C55E;
+  --nr-ok-deep: #189446;
+  --nr-warn: #FFC847;
+  --nr-warn-deep: #DFA92B;
+  --nr-ink-on-ok: #0B0B0F;    /* dash-ok-ink */
+  --nr-ink-on-warn: #1D1D27;  /* carbon */
+  --nr-ink-on-red: #FFFFFF;
+
+  --nr-font-title: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --nr-font-sans: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --nr-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+
+  /* radius-panel, radius-card, radius-input, radius-small, radius-pill */
+  --nr-radius-panel: 28px;
+  --nr-radius-card: 20px;
+  --nr-radius-md: 12px;
+  --nr-radius-sm: 8px;
+  --nr-radius-pill: 999px;
+
+  --nr-bar-h: 64px;
+  --nr-gap: 24px;
+  --nr-hit: 40px;
+  --nr-space-1: 4px;
+  --nr-space-2: 8px;
+  --nr-space-3: 12px;
+  --nr-space-4: 16px;
+  --nr-space-6: 24px;
+  --nr-space-8: 32px;
+}
+
+/* Dark: the dash-dark tokens and the dark glass recipes. The default. */
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  --nr-page: #09090B;
+  --nr-surface: #131317;
+  --nr-surface-2: #1D1D23;
+  --nr-edge: #26262D;
+  --nr-ink: #FFFFFF;
+  /* on glass the secondary clears 4.5:1 over the brightest of the garage;
+     text set straight on a panel is never tertiary */
+  --nr-ink-2: #CCCDD2;
+  --nr-ink-3: #A3A4AC;
+  --nr-quiet: #4A4B53;
+  --nr-well: #000000;
+  --nr-mark: #FFC847;
+  --nr-bar-glass: rgb(9 9 11 / 0.72);           /* glass-bar-dark */
+  --nr-veil: rgb(9 9 11 / 0.6);
+  --nr-garage-veil: rgb(6 7 10 / 0.42);         /* glass-backdrop */
+  --nr-glass: rgb(0 0 0 / 0.22);                /* glass-panel */
+  --nr-glass-flat: rgb(10 10 14 / 0.74);        /* glass-flat */
+  --nr-glass-card: rgb(0 0 0 / 0.48);           /* glass-card */
+  --nr-glass-edge: rgb(255 255 255 / 0.10);     /* line-on-dark */
+  --nr-glass-edge-card: rgb(255 255 255 / 0.08);
+  --nr-on-glass: 0 1px 3px rgb(0 0 0 / 0.5), 0 1px 14px rgb(0 0 0 / 0.75);  /* shadow-text-glass */
+}
+
+/* Light: the dash-light tokens and the light glass recipes. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --nr-page: #EDEDF0;
+  --nr-surface: #FFFFFF;
+  --nr-surface-2: #E4E4E8;
+  --nr-edge: #D9D9DE;
+  --nr-ink: #1D1D27;
+  --nr-ink-2: #55565F;
+  --nr-ink-3: #636469;
+  --nr-quiet: #C4C4CA;
+  --nr-well: #F6F6F8;
+  --nr-mark: #A86E00;                           /* dash-light-mark */
+  --nr-bar-glass: rgb(255 255 255 / 0.72);      /* glass-bar-light */
+  --nr-veil: rgb(237 237 240 / 0.6);
+  --nr-garage-veil: rgb(237 237 240 / 0.62);    /* glass-backdrop-light */
+  --nr-glass: rgb(255 255 255 / 0.72);          /* glass-panel-light */
+  --nr-glass-flat: rgb(255 255 255 / 0.9);      /* glass-flat-light */
+  --nr-glass-card: rgb(29 29 39 / 0.06);        /* glass-card-light */
+  --nr-glass-edge: rgb(29 29 39 / 0.10);        /* glass-line-light */
+  --nr-glass-edge-card: rgb(29 29 39 / 0.08);   /* glass-line-card-light */
+  --nr-on-glass: none;
+}
+@media (pointer: coarse) { :root { --nr-hit: 44px; } }
+
+/* ── Base ── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { font-family: var(--nr-font-sans); background: var(--nr-page); color: var(--nr-ink); font-size: 15px; line-height: 1.45; min-height: 100dvh; }
+/* the website's garage held still: the backdrop recipe, its 14 px blur baked
+   into the picture so no browser blurs a whole screen, the theme's veil over it */
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(var(--nr-garage-veil), var(--nr-garage-veil)), url("brand/garage.webp") center / cover no-repeat, var(--nr-page); }
+h1, h2, h3 { font-family: var(--nr-font-title); font-weight: 700; line-height: 1.1; }
+h1 { font-size: 28px; }
+h2 { font-size: 20px; }
+h3 { font-size: 16px; }
+a { color: inherit; text-decoration-color: var(--nr-red); text-underline-offset: 3px; }
+code, pre, .nr-mono { font-family: var(--nr-font-mono); }
+.nr-muted { color: var(--nr-ink-2); }
+.nr-num { font-variant-numeric: tabular-nums; }
+.nr-small { font-size: 13px; }
+.nr-eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.3em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 10px; }
+.nr-eyebrow::before { content: ""; width: 8px; height: 8px; background: var(--nr-red); flex: none; }
+:focus-visible { outline: 2px solid var(--nr-red); outline-offset: 2px; }
+.nr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ── Status: a whole box in its color ── */
+.nr-status { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; min-height: 72px; padding: 12px 16px; border-radius: 18px; }
+.nr-status.ok { background: var(--nr-ok); color: var(--nr-ink-on-ok); }
+.nr-status.warn { background: var(--nr-warn); color: var(--nr-ink-on-warn); }
+.nr-status.err { background: var(--nr-red); color: var(--nr-ink-on-red); }
+.nr-status.off { background: var(--nr-surface-2); color: var(--nr-ink-3); }
+.nr-status.info { background: var(--nr-ink); color: var(--nr-page); }
+/* off, inside a glass panel: a card, not a grey block */
+.nr-panel .nr-status.off { background: var(--nr-glass-card); border: 1px solid var(--nr-glass-edge-card); color: var(--nr-ink-2); }
+.nr-status svg { width: 20px; height: 20px; flex: none; }
+.nr-status .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.nr-status .name { flex: 1; font-family: var(--nr-font-title); font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; min-width: 0; overflow-wrap: anywhere; }
+.nr-status .value { font-family: var(--nr-font-title); font-size: 15px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nr-status .value small { font-family: var(--nr-font-sans); font-size: 11px; font-weight: 700; margin-left: 3px; }
+.nr-word { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+/* a square and a word, inline */
+.nr-state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
+.nr-state i { width: 9px; height: 9px; flex: none; background: currentColor; }
+.nr-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+
+/* ── The bar: glass over the page ── */
+.nr-header { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 16px; padding: 0 20px; height: var(--nr-bar-h);
+  background: var(--nr-bar-glass); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); border-bottom: 1px solid var(--nr-edge); }
+.nr-header .nr-logo { display: grid; flex: none; }
+.nr-header .nr-logo img { grid-area: 1 / 1; height: 26px; width: auto; display: block; }
+:root[data-theme="dark"] .nr-logo .for-light, :root[data-theme="light"] .nr-logo .for-dark { visibility: hidden; }
+:root:not([data-theme]) .nr-logo .for-light { visibility: hidden; }
+.nr-header .nr-divider { width: 1px; height: 26px; background: var(--nr-edge); flex: none; }
+.nr-header .nr-title { font-family: var(--nr-font-title); font-size: 18px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nr-header .nr-title .thin { color: var(--nr-ink-3); }
+.nr-header .nr-spacer { flex: 1; }
+.nr-header .nr-meta { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: none; }
+.nr-live { display: inline-flex; align-items: center; gap: 8px; color: var(--nr-ink-2); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.nr-live i { width: 9px; height: 9px; background: var(--nr-ok); transition: background 600ms ease-out; }
+.nr-live.beat i { background: var(--nr-ink); transition: none; }
+.nr-live.lost i { background: var(--nr-warn); }
+.nr-live.wait i { background: var(--nr-ink-3); }
+/* the theme: two outlined pills, the picked one solid red */
+.nr-seg { display: inline-flex; gap: 6px; flex: none; }
+.nr-seg button { appearance: none; border: 1px solid var(--nr-glass-edge); border-radius: var(--nr-radius-pill); background: transparent; color: var(--nr-ink-2);
+  font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0 14px; min-height: 36px; cursor: pointer; }
+.nr-seg button[aria-pressed="true"] { background: var(--nr-red); border-color: var(--nr-red); color: var(--nr-ink-on-red); }
+@media (pointer: coarse) { .nr-seg button { min-height: var(--nr-hit); } }
+
+/* ── Buttons: outlined pills on the glass; the main one solid red ── */
+.nr-btn { appearance: none; position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: var(--nr-hit); padding: 0 18px; border: 1px solid var(--nr-glass-edge); border-radius: var(--nr-radius-pill); background: transparent; color: var(--nr-ink);
+  font: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; white-space: nowrap;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation; -webkit-touch-callout: none; text-decoration: none;
+  transition: filter 120ms ease, transform 80ms ease; }
+.nr-btn:hover { filter: brightness(1.12); }
+.nr-btn:active { transform: translateY(1px); }
+.nr-btn.primary { background: var(--nr-red); border-color: var(--nr-red); color: var(--nr-ink-on-red); }
+.nr-btn.danger { background: var(--nr-red); border-color: var(--nr-red); color: var(--nr-ink-on-red); }
+.nr-btn.ok { background: var(--nr-ok); border-color: var(--nr-ok); color: var(--nr-ink-on-ok); }
+.nr-btn.quiet { border-color: transparent; color: var(--nr-ink-2); }
+.nr-btn.small { min-height: 32px; padding: 0 12px; font-size: 12px; }
+.nr-btn.big { min-height: 64px; border-radius: 18px; font-size: 20px; letter-spacing: 0.04em; width: 100%; }
+.nr-btn[aria-pressed="true"], .nr-btn.on { background: var(--nr-ink); border-color: var(--nr-ink); color: var(--nr-page); }
+.nr-btn:disabled, .nr-btn:disabled:hover { background: var(--nr-surface-2); border-color: var(--nr-surface-2); color: var(--nr-ink-3); cursor: not-allowed; filter: none; transform: none; }
+.nr-btn svg { display: block; flex: none; width: 18px; height: 18px; }
+.nr-btn .k { font-family: var(--nr-font-mono); font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 6px; background: var(--nr-page); color: var(--nr-ink-2); letter-spacing: 0; text-transform: none; }
+.nr-btn.primary .k, .nr-btn.danger .k { background: var(--nr-red-deep); color: var(--nr-ink-on-red); }
+.nr-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ── Panels and cards: glass (Black 22%, 10 px blur, White 10% edge; frosted white
+   in the light theme), the standard's shadow under text on it; status boxes,
+   the summary and the main buttons stay solid ── */
+.nr-panel { background: var(--nr-glass); border: 1px solid var(--nr-glass-edge); border-radius: var(--nr-radius-panel); padding: 24px 28px 28px; min-width: 0;
+  display: flex; flex-direction: column; gap: 20px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-shadow: var(--nr-on-glass); }
+.nr-card { background: var(--nr-glass-card); border: 1px solid var(--nr-glass-edge-card); border-radius: var(--nr-radius-card); padding: 16px 20px; min-width: 0;
+  display: flex; flex-direction: column; gap: 10px; }
+.nr-status, .nr-summary, .nr-btn.primary, .nr-btn.danger, .nr-btn.ok, .nr-view, .nr-input, .nr-note.caution, .nr-info .tip, .nr-badge { text-shadow: none; }
+.nr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* a panel's title: spaced capitals, the red dash in front */
+.nr-panel-title { font-family: var(--nr-font-title); font-size: 14px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; line-height: 1;
+  display: flex; align-items: center; gap: 12px; }
+.nr-panel-title::before { content: ""; flex: none; width: 22px; height: 3px; background: var(--nr-red); }
+.nr-sub { font-family: var(--nr-font-title); font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--nr-ink-2); }
+.nr-note { font-size: 13px; color: var(--nr-ink-2); }
+.nr-note.caution { background: var(--nr-warn); color: var(--nr-ink-on-warn); font-weight: 600; padding: 10px 14px; border-radius: 14px; }
+/* tags and badges: opaque pills, never a tint */
+.nr-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 5px 11px; border-radius: var(--nr-radius-pill); white-space: nowrap; background: var(--nr-ink); color: var(--nr-page); }
+.nr-badge.ok { background: var(--nr-ok); color: var(--nr-ink-on-ok); }
+.nr-badge.warn { background: var(--nr-warn); color: var(--nr-ink-on-warn); }
+.nr-badge.err { background: var(--nr-red); color: var(--nr-ink-on-red); }
+.nr-badge.off { background: var(--nr-surface-2); color: var(--nr-ink-2); }
+
+/* ── The summary: the page's numbers in its own ink turned over, no status color ── */
+.nr-summary { container-type: inline-size; background: var(--nr-ink); color: var(--nr-page); border-radius: var(--nr-radius-panel); padding: 24px 28px; }
+.nr-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 14px 20px; }
+.nr-stat { container-type: inline-size; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nr-stat b { font-family: var(--nr-font-title); font-weight: 700; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums; font-size: min(34px, calc(100cqi * 1.3 / var(--len, 6))); }
+.nr-stat > span { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nr-stat small { font-family: var(--nr-font-sans); font-size: 0.5em; font-weight: 700; letter-spacing: 0.04em; margin-left: 4px; }
+
+/* ── A gauge: a name, a value as large as the box allows, ten cells for a share ── */
+.nr-gauge { container-type: inline-size; border-radius: var(--nr-radius-panel); padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.nr-gauge .name { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.nr-gauge .value { font-family: var(--nr-font-title); font-weight: 700; line-height: 1; margin-top: auto; white-space: nowrap; font-variant-numeric: tabular-nums;
+  font-size: min(72px, calc(100cqi * 1.3 / var(--len, 6))); }
+.nr-gauge .side { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.nr-cells { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; }
+.nr-cells i { height: 12px; background: var(--nr-surface-2); }
+.nr-status.ok .nr-cells i { background: var(--nr-ok-deep); }
+.nr-status.warn .nr-cells i { background: var(--nr-warn-deep); }
+.nr-status.err .nr-cells i { background: #C70028; }
+.nr-cells i.on { background: currentColor; }
+
+/* ── Fields: a name, its unit, the box ── */
+.nr-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 14px; }
+.nr-field { display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0; }
+.nr-field > .name { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 1px; font-size: 13px; font-weight: 700; }
+.nr-field > .name .unit { font-weight: 500; color: var(--nr-ink-2); font-size: 12px; line-height: 1.3; }
+.nr-field > .name b { font-family: var(--nr-font-title); font-size: 18px; color: var(--nr-ink); margin-left: auto; font-variant-numeric: tabular-nums; }
+.nr-field.wide { grid-column: 1 / -1; }
+.nr-input, input[type="text"].nr-input, input[type="number"].nr-input, select.nr-input { width: 100%; min-width: 0; height: var(--nr-hit); background: var(--nr-well); color: var(--nr-ink);
+  border: 1px solid var(--nr-edge); border-radius: var(--nr-radius-md); font-family: var(--nr-font-mono); font-size: 15px; padding: 0 12px; }
+@media (pointer: coarse) { .nr-input { font-size: 16px; } }
+.nr-input:focus { outline: none; border-color: var(--nr-red); box-shadow: 0 0 0 1px var(--nr-red); }
+.nr-input:disabled { color: var(--nr-ink-3); background: var(--nr-surface-2); }
+input[type="number"].nr-input { -moz-appearance: textfield; appearance: textfield; text-align: center; }
+input[type="number"].nr-input::-webkit-inner-spin-button, input[type="number"].nr-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.nr-stepper { display: grid; grid-template-columns: var(--nr-hit) minmax(0, 1fr) var(--nr-hit); gap: 6px; }
+.nr-stepper button { appearance: none; border: 1px solid var(--nr-edge); background: var(--nr-surface-2); color: var(--nr-ink); border-radius: var(--nr-radius-md);
+  font: inherit; font-size: 20px; font-weight: 700; line-height: 1; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.nr-stepper button:active { background: var(--nr-red); border-color: var(--nr-red); color: var(--nr-ink-on-red); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--nr-red); width: 18px; height: 18px; }
+/* a slider: a red fill to the value (--v), a square thumb big enough for a thumb */
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: var(--nr-hit); background: transparent; --v: 0%; }
+input[type="range"]::-webkit-slider-runnable-track { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--nr-red) var(--v), var(--nr-surface-2) var(--v)); }
+input[type="range"]::-moz-range-track { height: 10px; border-radius: 5px; background: var(--nr-surface-2); }
+input[type="range"]::-moz-range-progress { height: 10px; border-radius: 5px; background: var(--nr-red); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -9px; border-radius: var(--nr-radius-sm); background: var(--nr-red); border: 3px solid var(--nr-surface); }
+input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: var(--nr-radius-sm); background: var(--nr-red); border: 3px solid var(--nr-surface); }
+
+/* ── An info chip: hover or tap shows the tip ── */
+.nr-info { appearance: none; border: 0; padding: 0; position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+  margin-left: 6px; border-radius: 5px; background: var(--nr-surface-2); color: var(--nr-ink-2); font: 700 11px var(--nr-font-sans); cursor: help; flex: none; vertical-align: middle; }
+.nr-info::after { content: ""; position: absolute; inset: -12px; }
+.nr-info:hover, .nr-info.open { background: var(--nr-red); color: var(--nr-ink-on-red); }
+.nr-info .tip { display: none; position: absolute; top: 26px; left: -10px; z-index: 60; width: min(280px, 76vw); padding: 12px 14px; background: var(--nr-ink); color: var(--nr-page);
+  border-radius: 14px; font: 500 13px/1.5 var(--nr-font-sans); letter-spacing: normal; text-transform: none; text-align: left; white-space: normal; }
+.nr-info:hover .tip, .nr-info.open .tip { display: block; }
+
+/* ── A toast: what just happened ── */
+#nr-toast { position: fixed; left: 50%; bottom: 24px; z-index: 90; transform: translate(-50%, 16px); background: var(--nr-ink); color: var(--nr-page); border-radius: var(--nr-radius-pill);
+  padding: 12px 22px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 160ms ease-out, transform 160ms ease-out; white-space: nowrap; }
+#nr-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ── Views (lidar, charts, the camera), legends, tables ── */
+.nr-view { position: relative; background: var(--nr-well); border: 1px solid var(--nr-edge); border-radius: 16px; overflow: hidden; min-height: 0; }
+.nr-view canvas { display: block; width: 100%; height: 100%; }
+.nr-view .cap { position: absolute; left: 12px; bottom: 10px; font-size: 12px; font-weight: 600; color: var(--nr-ink-2); pointer-events: none; }
+.nr-legend { display: flex; gap: 6px 16px; flex-wrap: wrap; white-space: nowrap; font: 600 12px/18px var(--nr-font-sans); color: var(--nr-ink-2); }
+.nr-legend svg { width: 22px; height: 8px; vertical-align: middle; margin-right: 4px; }
+.nr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.nr-table th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--nr-ink-2); padding: 8px 10px; border-bottom: 1px solid var(--nr-edge); white-space: nowrap; }
+.nr-table td { padding: 8px 10px; border-top: 1px solid var(--nr-edge); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nr-scrollx { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ── Time charts from /ui/charts.js ── */
+.nr-chart { position: relative; touch-action: pan-y; }
+.nr-chart svg.plot { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+.nr-chart .tick { fill: var(--nr-ink-2); font: 500 12px var(--nr-font-sans); font-variant-numeric: tabular-nums; }
+.nr-chart .grid { stroke: var(--nr-edge); stroke-width: 1; }
+.nr-chart .mark { stroke: var(--nr-ink-3); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.6; }
+.nr-chart .band { fill: var(--nr-surface-2); }
+.nr-chart .band.on { fill: var(--nr-red); }
+.nr-chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.nr-chart .hair { stroke: var(--nr-ink-3); stroke-width: 1; }
+.nr-chart .tipbox { position: absolute; top: 0; pointer-events: none; padding: 4px 8px; border-radius: var(--nr-radius-sm); background: var(--nr-ink); color: var(--nr-page);
+  font: 600 13px/18px var(--nr-font-sans); white-space: pre; z-index: 5; }
+.nr-chart .empty { position: absolute; inset: 0; display: grid; place-items: center; }
+
+/* ── Code and command output (upstream's rcn-code) ── */
+pre.nr-code, .nr-code { background: var(--nr-well); color: var(--nr-ink-2); font: 400 13px/20px var(--nr-font-mono); border: 1px solid var(--nr-edge); border-radius: var(--nr-radius-md); padding: 12px 16px; white-space: pre-wrap; margin: 0; }
+
+/* ── Icons from /ui/icons.svg: 24 px line drawings, 2 px stroke, round caps ── */
+.nr-icon { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ── Closed-app screen from /ui/lost.js ── */
+#nr-lost { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: var(--nr-page); padding: var(--nr-space-4); }
+#nr-lost .box { max-width: 420px; text-align: center; display: grid; gap: var(--nr-space-3); justify-items: center; }
+#nr-lost .nr-mark { height: 40px; width: auto; }
+
+/* ── Page layout: one 12-column grid on wide windows, one column on phones ── */
+.nr-main { padding: var(--nr-gap) var(--nr-gap) 48px; display: grid; gap: var(--nr-gap); grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.nr-main > * { grid-column: span 12; }
+@media (min-width: 1100px) {
+  .nr-main > .nr-span-3 { grid-column: span 3; }
+  .nr-main > .nr-span-4 { grid-column: span 4; }
+  .nr-main > .nr-span-6 { grid-column: span 6; }
+  .nr-main > .nr-span-8 { grid-column: span 8; }
+}
+@media (min-width: 701px) and (max-width: 1099px) {
+  .nr-main > .nr-span-3, .nr-main > .nr-span-4, .nr-main > .nr-span-6 { grid-column: span 6; }
+}
+
+/* no answer from the car: what is shown is the last update, greyed so it does not pass for now */
+.nr-lost-data .nr-panel, .nr-lost-data .nr-summary, .nr-lost-data .nr-gauge { filter: grayscale(1); }
+
+/* a key's hint means nothing on a screen with no keyboard */
+@media (hover: none) and (pointer: coarse) { .nr-btn .k { display: none; } }
+
+/* a phone: the bar in two rows, flat glass, tighter edges */
+@media (max-width: 700px) {
+  :root { --nr-gap: 12px; }
+  .nr-header { position: relative; flex-wrap: wrap; height: auto; padding: 8px 12px 10px; gap: 8px; }
+  .nr-header .nr-divider, .nr-live span { display: none; }
+  .nr-header .nr-title { order: 5; flex-basis: 100%; font-size: 16px; }
+  .nr-header .nr-meta { gap: 8px; }
+  .nr-seg button { padding: 0 10px; }
+  .nr-panel { padding: 16px; border-radius: 20px; }
+  .nr-summary, .nr-gauge { padding: 16px 18px; border-radius: 20px; }
+  .nr-stats { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  .nr-nodes { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+}
+/* a phone, or a viewer who asked for less transparency: flat glass, nothing blurred */
+@media (max-width: 700px), (prefers-reduced-transparency: reduce) {
+  .nr-panel { background: var(--nr-glass-flat); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nr-live i, .nr-btn, #nr-toast { transition: none; }
+}
+/* Windows High Contrast strips the colors: every status is written there, and
+   the marks drawn as backgrounds take the system's text color */
+@media (forced-colors: active) {
+  .nr-sr { position: static; width: auto; height: auto; clip: auto; overflow: visible; display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+  .nr-state i, .nr-live i, .nr-cells i.on, .nr-eyebrow::before, .nr-panel-title::before { forced-color-adjust: none; background: CanvasText; }
+}
