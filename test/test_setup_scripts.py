@@ -171,6 +171,7 @@ class TestOneShotSetup:
         'package',
         [
             'ros-humble-ros-base',
+            'ros-humble-vision-msgs',
             'ros-humble-robot-state-publisher',
             'ros-humble-xacro',
             'ros-humble-slam-toolbox',
