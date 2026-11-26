@@ -1152,7 +1152,7 @@ Commands:
                                          Flags persist to ~/.config/racecar/networking.env:
                                            --ssid=NAME   --psk=PASS   --channel=N
                                            --ap-addr=CIDR (default 10.42.0.1/24)
-                                           --eth-static=CIDR (default 192.168.1.101/24)
+                                           --eth-static=CIDR (default 192.168.10.100/24)
                                            --lidar-host=CIDR (default 192.168.8.1/24)
                                            --show / --reset
     service <action>    systemd service control. Actions:
