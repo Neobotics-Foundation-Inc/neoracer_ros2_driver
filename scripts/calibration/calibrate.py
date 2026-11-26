@@ -61,7 +61,7 @@ from calibrate_common import (  # noqa: E402, I100
     use_color,
 )
 
-TELEOP_UNIT = 'neoracer-teleop'
+TELEOP_UNIT = 'neoracer-teleop.service'
 RUN_PROMPT = 'Press Enter to run, s to skip, and q to stop: '
 RUN_PROMPT_BACK = 'Press Enter to run, s to skip, b to go back a step, and q to stop: '
 LIDAR_SETUP = (

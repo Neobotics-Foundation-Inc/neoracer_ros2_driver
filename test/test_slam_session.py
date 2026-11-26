@@ -278,8 +278,28 @@ class TestNeoRacer:
         assert capabilities and not set(capabilities) & held
 
     def test_teleop_unit_is_the_neoracer_unit(self, ss):
-        assert ss.TELEOP_UNIT == 'neoracer-teleop'
-        assert (ROOT / 'scripts' / f'{ss.TELEOP_UNIT}.service').is_file()
+        assert ss.TELEOP_UNIT == 'neoracer-teleop.service'
+        assert (ROOT / 'scripts' / ss.TELEOP_UNIT).is_file()
+
+    def test_the_teleop_stop_and_start_need_no_password(self, ss, monkeypatch):
+        # /etc/sudoers.d/neoracer names each unit in full, and sudo -n fails
+        # rather than prompting when no rule matches.
+        sudoers = (ROOT / 'scripts' / 'sudoers.d-neoracer').read_text()
+        for verb in ('start', 'stop'):
+            assert f'/usr/bin/systemctl {verb} {ss.TELEOP_UNIT},' in sudoers
+        ran = []
+
+        def fake_run(cmd, check=False, **_kw):
+            ran.append(cmd)
+            return type('R', (), {'returncode': 0})()
+
+        monkeypatch.setattr(ss.subprocess, 'run', fake_run)
+        monkeypatch.setattr(ss.Session, 'teleop_service_active', staticmethod(lambda: True))
+        assert ss.Session.stop_teleop_service(ss.Session) is True
+        assert ran == [['sudo', '-n', 'systemctl', 'stop', 'neoracer-teleop.service']]
+        text = (ROOT / 'scripts' / 'validation' / 'slam_session.py').read_text()
+        assert "['sudo', '-n', 'systemctl', 'start', TELEOP_UNIT]" in text
+        assert "['sudo', 'systemctl'" not in text
 
     def test_autonomy_arguments_are_declared_by_the_launch(self, ss):
         launch = (ROOT / 'launch' / 'autonomy.launch.py').read_text()

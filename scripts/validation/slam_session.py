@@ -62,7 +62,7 @@ import slam_eval  # noqa: E402
 import sysinfo  # noqa: E402
 
 SESSIONS = slam_eval.EVAL_DIR / 'sessions'
-TELEOP_UNIT = 'neoracer-teleop'
+TELEOP_UNIT = 'neoracer-teleop.service'
 FOXGLOVE_PARAMS = HERE / 'foxglove_validation.yaml'
 FOXGLOVE_PORT = 8765
 BAG_TOPICS = ('/scan', '/tf', '/tf_static', '/odom/integrated', '/pose', '/amcl_pose', '/map')
@@ -474,8 +474,8 @@ class Session:
     def stop_teleop_service(self) -> bool:
         if not self.teleop_service_active():
             return True
-        print('Stopping the teleop service. sudo may ask for your password.')
-        r = subprocess.run(['sudo', 'systemctl', 'stop', TELEOP_UNIT], check=False)
+        print('Stopping the teleop service.')
+        r = subprocess.run(['sudo', '-n', 'systemctl', 'stop', TELEOP_UNIT], check=False)
         return r.returncode == 0
 
     def write_meta(self, **extra: Any) -> None:
@@ -859,7 +859,7 @@ class Session:
             print('Storage is getting full. Clear space before the next session.')
             print_storage_advice()
         if ask('Restart the teleop service now? [y/N] ') == 'y':
-            subprocess.run(['sudo', 'systemctl', 'start', TELEOP_UNIT], check=False)
+            subprocess.run(['sudo', '-n', 'systemctl', 'start', TELEOP_UNIT], check=False)
         return code
 
     def shutdown(self) -> None:
