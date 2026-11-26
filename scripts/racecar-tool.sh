@@ -650,7 +650,7 @@ usage: racecar setup networking [--ssid=NAME] [--psk=PASS]
 Persists any --flag values to ~/.config/racecar/networking.env and then runs
 scripts/setup_networking.sh (Wi-Fi AP + Ethernet dual-IP + Lakibeam subnet).
   --show   print current persisted overrides and exit
-  --reset  delete the persisted file (revert to script defaults)
+  --reset  delete the saved settings and the access point connection
 Persistence runs BEFORE --show or --reset, so
   racecar setup networking --ssid=foo --show
 saves foo, then prints the new file contents.
@@ -665,8 +665,30 @@ __RC_NET_HELP__
                             echo "racecar setup networking: --reset cannot be combined with override flags" >&2
                             return 2
                         fi
+                        # The access point connection keeps this car's SSID
+                        # and stays up until it is deleted. Its name is
+                        # AP_CON_NAME in setup_networking.sh. The settings
+                        # file goes first, because deleting the access point
+                        # can end an SSH session over Wi-Fi.
+                        local ap_con="neoracer-ap" con_names
+                        echo "WARNING: this reconfigures Wi-Fi. If you're SSH'd over Wi-Fi, run from a"
+                        echo "wired session or the console instead."
                         rm -f "$cfg_file"
-                        echo "Cleared $cfg_file; defaults will apply on next run."
+                        if ! con_names="$(nmcli -t -f NAME connection show 2>&1)"; then
+                            echo "$con_names" >&2
+                            echo "racecar setup networking: removed $cfg_file, but nmcli cannot list the connections" >&2
+                            return 1
+                        fi
+                        if grep -qxF "$ap_con" <<<"$con_names"; then
+                            if ! sudo nmcli connection delete "$ap_con"; then
+                                echo "racecar setup networking: removed $cfg_file, but the access point connection $ap_con is still there" >&2
+                                return 1
+                            fi
+                            echo "Removed the saved settings ($cfg_file) and the access point connection $ap_con."
+                        else
+                            echo "Removed the saved settings ($cfg_file). The access point connection $ap_con does not exist."
+                        fi
+                        echo "The next 'racecar setup networking' brings the access point back with the default SSID."
                         return 0
                     fi
 

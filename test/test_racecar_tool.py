@@ -5,8 +5,8 @@ Ported from upstream's test_racecar_tool.py at v0.9.0, without the eth, wifi,
 desktop, disk and RealSense tests: the NeoRacer has none of those commands.
 Tests for the NeoRacer's own commands (update, ws, clear, launch, compile) are
 added. Every test that would reach the car runs against stub sudo, systemctl,
-git, colcon and ros2 commands and a temporary HOME, so a run on a car never
-starts, stops or updates anything.
+git, colcon, ros2 and nmcli commands and a temporary HOME, so a run on a car
+never starts, stops, updates or reconfigures anything.
 """
 
 import os
@@ -88,6 +88,15 @@ case "${rest[0]}" in
 esac
 """
 LOGGER = '#!/bin/bash\necho "{name} $*" >> "$RC_LOG"\n'
+NMCLI = r"""#!/bin/bash
+# Stub: `nmcli -t -f NAME connection show` lists RC_CONNECTIONS, one name per
+# line; every other call is logged.
+if [[ "$*" == '-t -f NAME connection show' ]]; then
+    for name in ${RC_CONNECTIONS:-}; do echo "$name"; done
+    exit 0
+fi
+echo "nmcli $*" >> "$RC_LOG"
+"""
 
 
 class Car:
@@ -107,6 +116,7 @@ class Car:
         self.bin = tmp_path / 'bin'
         self.bin.mkdir()
         (self.bin / 'systemctl').write_text(SYSTEMCTL)
+        (self.bin / 'nmcli').write_text(NMCLI)
         for name in ('sudo', 'git', 'colcon', 'ros2', 'journalctl'):
             (self.bin / name).write_text(LOGGER.format(name=name))
         (self.bin / 'hostname').write_text('#!/bin/bash\necho neoracer\n')
@@ -540,14 +550,40 @@ class TestSetup:
         assert result.returncode == 0
         assert 'No persisted networking config' in result.stdout
 
-    def test_networking_reset_removes_persisted_file(self, car):
+    def test_networking_reset_removes_the_settings_and_the_access_point(self, car):
+        # The access point connection keeps the car's SSID until it is
+        # deleted, so a golden image cloned after a reset ships with neither.
         cfg = car.home / '.config' / 'racecar' / 'networking.env'
         cfg.parent.mkdir(parents=True)
         cfg.write_text('RACECAR_AP_SSID="dummy"\n')
-        result = car.run('setup', 'networking', '--reset')
-        assert result.returncode == 0
+        result = car.run('setup', 'networking', '--reset', RC_CONNECTIONS='neoracer-ap wired-rj45')
+        assert result.returncode == 0, result.stderr
         assert not cfg.exists()
-        assert 'Cleared' in result.stdout
+        assert car.calls() == ['sudo nmcli connection delete neoracer-ap']
+        assert 'WARNING: this reconfigures Wi-Fi' in result.stdout
+        assert 'and the access point connection neoracer-ap' in result.stdout
+        assert 'back with the default SSID' in result.stdout
+
+    def test_networking_reset_warns_before_it_deletes(self, car):
+        result = car.run('setup', 'networking', '--reset', RC_CONNECTIONS='neoracer-ap')
+        assert result.stdout.index('WARNING') < result.stdout.index('Removed')
+
+    def test_a_second_networking_reset_is_not_an_error(self, car):
+        result = car.run('setup', 'networking', '--reset', RC_CONNECTIONS='wired-rj45')
+        assert result.returncode == 0, result.stderr
+        assert car.calls() == []
+        assert 'neoracer-ap does not exist' in result.stdout
+
+    def test_a_failed_access_point_delete_fails_the_reset(self, car):
+        (car.bin / 'sudo').write_text('#!/bin/bash\necho "sudo $*" >> "$RC_LOG"\nexit 1\n')
+        result = car.run('setup', 'networking', '--reset', RC_CONNECTIONS='neoracer-ap')
+        assert result.returncode == 1
+        assert 'neoracer-ap is still there' in result.stderr
+
+    def test_reset_deletes_the_connection_setup_creates(self):
+        setup = (ROOT / 'scripts' / 'setup_networking.sh').read_text()
+        assert 'AP_CON_NAME="neoracer-ap"' in setup
+        assert 'local ap_con="neoracer-ap"' in TEXT
 
     def test_networking_flag_persists_when_combined_with_show(self, car):
         result = car.run('setup', 'networking', '--ssid=test-ssid', '--psk=test-pass', '--show')
