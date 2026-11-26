@@ -266,7 +266,8 @@ class TestRerunOnASetUpCar:
         # start the new unit at boot too, so setup stops the old unit and
         # removes the link, even one whose unit file is gone.
         text = read('setup_services.sh')
-        assert 'link="/etc/systemd/system/multi-user.target.wants/$svc"' in text
+        assert 'SYSTEMD_DIR="${RACECAR_SYSTEMD_DIR:-/etc/systemd/system}"' in text
+        assert 'link="$SYSTEMD_DIR/multi-user.target.wants/$svc"' in text
         assert 'if [[ -L "$link" ]]; then' in text
         remove = text.index('sudo rm -f "$link"')
         assert text.index('sudo systemctl stop "$svc"') < remove
@@ -285,6 +286,102 @@ class TestRerunOnASetUpCar:
         start = text.index('if systemctl is-active --quiet neoracer-teleop.service; then')
         assert 'for svc in "${newly_enabled[@]}"; do' in text[start:]
         assert text.index('newly_enabled+=("$svc")') < start
+
+
+SERVICES_SUDO = r"""#!/bin/bash
+# Stub: an install into RACECAR_SYSTEMD_DIR runs; every other call is logged.
+if [[ "$1" == install && "${!#}" == "$RACECAR_SYSTEMD_DIR"/* ]]; then
+    exec "$@"
+fi
+echo "sudo $*" >> "$RC_LOG"
+"""
+SERVICES_SYSTEMCTL = r"""#!/bin/bash
+# Stub: is-enabled and is-active answer from RC_ENABLED and RC_ACTIVE; every
+# other call is logged.
+args=()
+for a in "$@"; do [[ "$a" == --quiet ]] || args+=("$a"); done
+case "${args[0]}" in
+    is-enabled) [[ " $RC_ENABLED " == *" ${args[1]} "* ]] ;;
+    is-active) [[ " $RC_ACTIVE " == *" ${args[1]} "* ]] ;;
+    list-unit-files) ;;
+    *) echo "systemctl ${args[*]}" >> "$RC_LOG" ;;
+esac
+"""
+
+
+class TestEnableState:
+    """
+    setup_services.sh enables a unit at its first install and never after.
+
+    The script runs against stub sudo and systemctl commands and a temporary
+    unit folder, so a run on a car never installs, enables or starts anything.
+    """
+
+    def run(self, tmp_path, installed=(), enabled=(), active=()):
+        units = tmp_path / 'units'
+        units.mkdir(exist_ok=True)
+        for svc in installed:
+            (units / svc).write_text('an older unit file\n')
+        stubs = tmp_path / 'bin'
+        stubs.mkdir(exist_ok=True)
+        for name, body in (('sudo', SERVICES_SUDO), ('systemctl', SERVICES_SYSTEMCTL)):
+            (stubs / name).write_text(body)
+            (stubs / name).chmod(0o755)
+        log = tmp_path / 'calls.log'
+        log.write_text('')
+        env = {
+            **os.environ,
+            'PATH': f'{stubs}:{os.environ["PATH"]}',
+            'RACECAR_SYSTEMD_DIR': str(units),
+            'RACECAR_DASHBOARDS': '0',
+            'RC_LOG': str(log),
+            'RC_ENABLED': ' '.join(enabled),
+            'RC_ACTIVE': ' '.join(active),
+        }
+        result = subprocess.run(
+            ['bash', str(SCRIPTS / 'setup_services.sh')],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout, log.read_text().splitlines()
+
+    def boot_units(self):
+        return [f'neoracer-{u}.service' for u in BOOT_UNITS]
+
+    def test_a_first_install_enables_every_boot_unit(self, tmp_path):
+        out, calls = self.run(tmp_path)
+        enabled = [c.split()[-1] for c in calls if c.startswith('sudo systemctl enable')]
+        assert enabled == self.boot_units()
+        assert (tmp_path / 'units' / 'neoracer-autonomy.service').is_file()
+        assert not any(c.startswith('sudo systemctl start') for c in calls)
+
+    def test_a_unit_disabled_on_the_car_stays_disabled(self, tmp_path):
+        units = [*self.boot_units(), 'neoracer-autonomy.service']
+        kept_on = [u for u in self.boot_units() if u != 'neoracer-mapview.service']
+        out, calls = self.run(tmp_path, installed=units, enabled=kept_on)
+        assert not any(c.startswith('sudo systemctl enable') for c in calls)
+        assert 'neoracer-mapview.service: installed before; enable state kept' in out
+        assert out.count('already enabled') == len(kept_on)
+
+    def test_an_upgrade_enables_and_starts_only_the_new_unit(self, tmp_path):
+        # A 0.6.x car has no map viewer unit. Its jupyter unit was disabled
+        # by hand, and stays so.
+        old = [u for u in self.boot_units() if u != 'neoracer-mapview.service']
+        on = [u for u in old if u != 'neoracer-jupyter.service']
+        out, calls = self.run(
+            tmp_path, installed=old, enabled=on, active=['neoracer-teleop.service']
+        )
+        changes = [
+            c for c in calls if c.startswith(('sudo systemctl enable', 'sudo systemctl start'))
+        ]
+        assert changes == [
+            'sudo systemctl enable neoracer-mapview.service',
+            'sudo systemctl start neoracer-mapview.service',
+        ]
+        assert 'neoracer-jupyter.service: installed before; enable state kept' in out
 
 
 class TestLaunchWrapper:
