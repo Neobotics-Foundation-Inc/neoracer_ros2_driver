@@ -593,6 +593,32 @@ class TestSetup:
         assert 'RACECAR_AP_PSK="test-pass"' in text
         assert 'Persisted networking config' in result.stdout
 
+    def test_networking_saves_every_flag_setup_reads(self, car):
+        result = car.run(
+            'setup',
+            'networking',
+            '--lidar-host=192.168.9.1/24',
+            '--wifi-iface=wlan0',
+            '--eth-iface=eth1',
+            '--show',
+        )
+        assert result.returncode == 0, result.stderr
+        text = (car.home / '.config' / 'racecar' / 'networking.env').read_text()
+        assert 'RACECAR_LIDAR_HOST="192.168.9.1/24"' in text
+        assert 'RACECAR_WIFI_IFACE="wlan0"' in text
+        assert 'RACECAR_ETH_IFACE="eth1"' in text
+
+    def test_networking_saves_each_key_its_flags_set(self):
+        # setup_networking.sh reads only the saved file, so a key that a flag
+        # sets but the save loop leaves out never reaches it.
+        parser = TEXT.split('local action="apply"')[1].split('__RC_NET_HELP__')[0]
+        flag_keys = set(re.findall(r'vals\[(RACECAR_[A-Z_]+)\]=', parser))
+        loop = re.search(r'for k in ((?:RACECAR_[A-Z_]+[\s\\]*)+); do', TEXT)
+        assert loop and set(loop.group(1).replace('\\', ' ').split()) == flag_keys
+        setup = (ROOT / 'scripts' / 'setup_networking.sh').read_text()
+        for key in flag_keys:
+            assert f'${{{key}:-' in setup, key
+
     def test_networking_reset_with_overrides_errors(self, car):
         result = car.run('setup', 'networking', '--ssid=lab-net', '--reset')
         assert result.returncode == 2

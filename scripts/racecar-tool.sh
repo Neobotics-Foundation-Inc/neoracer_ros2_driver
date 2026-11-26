@@ -697,7 +697,8 @@ __RC_NET_HELP__
                         : > "$cfg_file"
                         chmod 600 "$cfg_file"
                         echo "# racecar networking overrides - managed by 'racecar setup networking'" >> "$cfg_file"
-                        for k in RACECAR_AP_SSID RACECAR_AP_PSK RACECAR_AP_CHANNEL RACECAR_AP_ADDR RACECAR_ETH_STATIC; do
+                        for k in RACECAR_AP_SSID RACECAR_AP_PSK RACECAR_AP_CHANNEL RACECAR_AP_ADDR RACECAR_ETH_STATIC \
+                                 RACECAR_LIDAR_HOST RACECAR_WIFI_IFACE RACECAR_ETH_IFACE; do
                             if [[ -n "${vals[$k]:-}" ]]; then
                                 printf '%s="%s"\n' "$k" "${vals[$k]}" >> "$cfg_file"
                             fi
