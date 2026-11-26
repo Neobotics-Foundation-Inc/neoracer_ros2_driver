@@ -49,7 +49,7 @@ The version jumps from 0.6.1 to 0.9.0. From this release, the version number fol
 - The teleop launch takes the control nodes' config files as arguments. `launch_teleop.sh` points `~/logs/latest` at the new log folder with one rename, so the link never goes missing during a restart.
 
 ### Removed
-- `racecar mapping` and `racecar navigation`, which ran the vendor SLAM and Nav2 packages. `~/osracer_ws` is unchanged. `racecar ws osracer` still switches a shell to it, and maps made with the vendor stack stay there.
+- `racecar mapping` and `racecar navigation`, which ran the vendor SLAM and Nav2 packages. Setup changes `~/osracer_ws` only for the shared lidar, as it did before 0.9.0. `racecar ws osracer` still switches a shell to it, and maps made with the vendor stack stay there.
 - The vendor robot description, the vendor SLAM and Nav2 includes, the vendor EKF, the complementary filter and `twist_bridge_node` from the autonomy launch. Its `slam:=` and `nav:=` arguments give way to upstream's `mode:=`, `map:=`, `pose:=` and `localizer:=`.
 - The seven lab dashboard repositories that setup cloned. Setup copies each old clone's tuning into the car profile, moves its logs under the data root, and then moves the clone to `scripts/dashboards/.migrated/`. It also moves Camera Label's dataset from `~/data/camlabel` to the data root.
 - The node graph and the vendor autonomy rows of the old 8080 page.

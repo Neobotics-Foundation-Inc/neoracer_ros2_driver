@@ -495,9 +495,16 @@ A bare `ros2 topic echo /scan` is not evidence of a dead lidar. `echo` truncates
 
 Factory images ship the Seeed vendor stack preinstalled in `~/osracer_ws`, including its own copy of the `lakibeam1` package that has diverged from the pinned fork. Two copies of one package means the lidar you get depends on overlay order, and colcon may refuse to build ("underlay override").
 
-Setup reconciles this to a single shared lidar: it masks the vendor copy with `COLCON_IGNORE`, symlinks `src/lakibeam1` into `~/osracer_ws/src`, and rebuilds it there. Both workspaces stay usable, one active per shell, and build from one source.
+Setup reconciles this to a single shared lidar. It makes these changes in `~/osracer_ws`:
 
-- Setup never edits existing `.bashrc` lines. It appends one marked block, `# Neoracer - default workspace`, which runs after the factory lines and resets the environment to the neoracer overlay. Nothing under `~/osracer_ws` is modified.
+- It adds `COLCON_IGNORE` to the vendor copy of `lakibeam1`, so colcon skips it.
+- It links the pinned `src/lakibeam1` into `~/osracer_ws/src` and rebuilds that one package there.
+- It changes the lidar address in the vendor's `osracer_bringup/launch/lidar.launch.py` from 192.168.198.2 to 192.168.8.2, the lidar's address over USB-C.
+- It installs four ROS packages that the vendor bringup needs and the factory image leaves out.
+
+Both workspaces stay usable, one active per shell, and build from one source. Running setup again gives the same result.
+
+- Setup never edits existing `.bashrc` lines. It appends one marked block, `# Neoracer - default workspace`, which runs after the factory lines and resets the environment to the neoracer overlay.
 - `racecar ws osracer` switches the current shell to the vendor stack, `racecar ws neoracer` switches back, and a bare `racecar ws` shows which is active. The switch is per shell and leaves disk state alone.
 - Restore the factory default by deleting that block from `~/.bashrc`; every factory line is still there, untouched.
 - If the vendor stack autostarts on your image (`systemctl list-unit-files | grep -i osr`), stop it before running teleop; both stacks contend for the serial ports.
