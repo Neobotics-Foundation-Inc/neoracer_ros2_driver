@@ -464,7 +464,7 @@ Settings live in `config/inference.yaml`:
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `model_path` | `yolo11n.pt` | Absolute path, a filename in `models/`, or a stock Ultralytics name |
+| `model_path` | `yolo26n.engine` | Absolute path, a filename in `models/`, or a stock Ultralytics name |
 | `device` | `"0"` | CUDA index, or `"cpu"` |
 | `imgsz` / `score_threshold` / `iou_threshold` | 640 / 0.5 / 0.45 | Model input size and NMS thresholds |
 | `max_detections` | 10 | Cap per frame |
@@ -475,7 +475,7 @@ Settings live in `config/inference.yaml`:
 
 Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo26n.pt` averages 50.1 ms per frame; the TensorRT engine cuts that to 20.9 ms, which clears the `max_rate_hz` ceiling of 15 Hz with headroom to spare.
 
-Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. The `.pt` weights are committed, so a fresh clone runs inference without a download. Engines are tied to the board and the TensorRT version that built them, so each car builds its own with `racecar compile` and `models/*.engine` stays gitignored.
+Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. The `.pt` weights and a TensorRT engine for this fleet's configuration are committed, so a fresh clone runs inference without a download. A car that cannot load the engine falls back to `yolo26n.pt` and says so in the log. Rebuild the engine there with `racecar compile`.
 
 Health lands on `/diagnostics` (latency, detection counts, frame staleness) and on the dashboard as a **YOLO inference** card.
 
