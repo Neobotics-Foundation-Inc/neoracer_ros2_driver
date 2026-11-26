@@ -380,7 +380,7 @@ racecar library --select <folder>  # choose which library is on the Python path
 racecar library --status           # show the current selection
 ```
 
-Refreshing the labs preserves student files.
+Refreshing the labs keeps files a student added. It replaces each shipped lab file with the new version, so a student saves edits under a new file name to keep them. Every setup run, including `racecar update`, also selects the `neoracer-os` library again.
 
 ## GPU stack
 
