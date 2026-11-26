@@ -123,12 +123,11 @@ With the car powered off, connect the ESP32 base, the LakiBeam1 (USB-C), the web
 sudo reboot
 ```
 
-After reboot, verify and start the stack:
+After reboot, verify the stack. Teleop starts at boot:
 
 ```sh
 racecar status --quick      # host checks only, without the ROS sampling window
-racecar service status      # units enabled by setup, teleop not yet running
-racecar service start       # starts neoracer-teleop (watchdog follows)
+racecar service status      # core units running
 ```
 
 Browse to `http://neoracer.local:8080` for the live dashboard.
