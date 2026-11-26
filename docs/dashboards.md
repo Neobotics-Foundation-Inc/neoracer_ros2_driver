@@ -112,10 +112,12 @@ its folder for `@DIR@`, and installs it to `/etc/systemd/system/`. The
 renderer checks for `@DIR@` and `Environment=HOME=` first and does not
 install a template that has changed shape. A first install is stopped and disabled; an
 installed unit keeps its enable state, and one that is running when its unit
-file changes is restarted on the new file. Upstream's discovery range line
-is not added. `setup_services.sh` runs the script, so `racecar service
-install` and `setup_all.sh` install the dashboards with no network. Set
-`RACECAR_DASHBOARDS=0` to skip them.
+file changes is restarted on the new file. On a car set up before the
+dashboards moved into the driver, setup disables each dashboard whose old
+clone it moves aside, because the old setup enabled it at boot. Upstream's
+discovery range line is not added. `setup_services.sh` runs the script, so
+`racecar service install` and `setup_all.sh` install the dashboards with no
+network. Set `RACECAR_DASHBOARDS=0` to skip them.
 
 ## Cars set up before the move
 

@@ -27,6 +27,10 @@ under the data root while the data root holds no dataset yet. Nothing is
 deleted, and running it again finds nothing left to move.
 
     python3 checkouts.py [DASHBOARDS_DIR]
+    python3 checkouts.py --list [DASHBOARDS_DIR]
+
+--list prints the id of each dashboard that still has an old checkout and
+moves nothing. setup_dashboards.sh uses it to disable those units first.
 """
 
 from __future__ import annotations
@@ -278,6 +282,11 @@ def set_aside(dash_dir: Path, checkout: Path, now: datetime) -> str:
     return f'{checkout.name}: moved to {dest}'
 
 
+def old_checkouts(dash_dir: Path) -> list[str]:
+    """Return the id of each dashboard that still has an old checkout under dash_dir."""
+    return [ident for ident, (repo, _) in DASHBOARDS.items() if (dash_dir / repo).is_dir()]
+
+
 def migrate(
     dash_dir: Path, now: datetime | None = None, home: Path | None = None
 ) -> tuple[list[str], bool]:
@@ -307,6 +316,10 @@ def migrate(
 
 
 def main(argv: list[str]) -> int:
+    if argv[:1] == ['--list']:
+        for ident in old_checkouts(Path(argv[1]) if argv[1:] else HERE):
+            print(ident)
+        return 0
     dash_dir = Path(argv[0]) if argv else HERE
     if os.geteuid() == 0:
         print('  run this as the car user, not root: the profile and data are theirs')
