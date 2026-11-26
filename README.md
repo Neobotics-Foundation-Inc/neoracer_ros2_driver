@@ -195,7 +195,7 @@ racecar calibrate           # guided calibration: lidar, odom, steering (dynamic
 racecar calibrate status    # what is calibrated on this car, when, and the values
 racecar calibrate check     # each calibration against the live sensors
 
-racecar setup all           # the 7-phase orchestrator
+racecar setup all           # the 8-phase orchestrator
 racecar setup networking    # WiFi AP + Ethernet + lidar subnet
 racecar update              # repo to latest main + full setup + service restart
 
