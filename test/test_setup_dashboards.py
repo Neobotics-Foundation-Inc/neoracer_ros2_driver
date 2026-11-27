@@ -12,8 +12,10 @@ from datetime import datetime
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 
 from conftest import load_script
 import pytest
@@ -228,6 +230,35 @@ class TestSetupScript:
         r = run_setup(tmp_path, units, systemctl=str(stub))
         assert r.returncode == 1
         assert 'not every old dashboard is disabled' in r.stdout
+        assert (tree / 'pursuit_dashboard' / 'pursuit.yaml').read_text() == shipped
+        assert not (tree / '.migrated').exists()
+
+    def test_a_failed_checkout_listing_leaves_the_old_checkouts_in_place(self, tmp_path):
+        # With no list of old checkouts, setup disables no unit and moves no
+        # checkout. A stub python3 fails only the `checkouts.py --list` call.
+        units = tmp_path / 'units'
+        units.mkdir()
+        tree = tree_copy(tmp_path)
+        shipped = (tree / 'pursuit' / 'pursuit.yaml').read_text()
+        old_checkout(tree, 'pursuit_dashboard', 'pursuit', shipped)
+        stubs = tmp_path / 'bin'
+        stubs.mkdir()
+        (stubs / 'python3').write_text(
+            '#!/bin/bash\n'
+            '[[ "$2" == --list ]] && { echo "checkouts.py: listing failed" >&2; exit 1; }\n'
+            f'exec {shlex.quote(sys.executable)} "$@"\n'
+        )
+        (stubs / 'python3').chmod(0o755)
+        log = tmp_path / 'systemctl.log'
+        stub = tmp_path / 'systemctl'
+        stub.write_text(f'#!/bin/bash\necho "$*" >> "{log}"\n')
+        stub.chmod(0o755)
+        r = run_setup(tmp_path, units, systemctl=str(stub), PATH=f'{stubs}:{os.environ["PATH"]}')
+        assert r.returncode == 1
+        assert 'checkouts.py: listing failed' in r.stderr
+        assert 'not every old dashboard is disabled' in r.stdout
+        assert 'Incomplete: old checkouts' in r.stdout
+        assert not any(c.startswith('disable') for c in log.read_text().splitlines())
         assert (tree / 'pursuit_dashboard' / 'pursuit.yaml').read_text() == shipped
         assert not (tree / '.migrated').exists()
 

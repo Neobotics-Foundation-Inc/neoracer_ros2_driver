@@ -537,6 +537,13 @@ class TestUpdate:
         assert 'usage: racecar update [--labs]' in result.stderr
         assert car.calls() == []
 
+    def test_help_flag_prints_the_usage_and_runs_no_git(self, tmp_path):
+        car, result = self._update(tmp_path, '--help', RC_ENABLED='neoracer-teleop')
+        assert result.returncode == 2
+        assert 'usage: racecar update [--labs]' in result.stderr
+        assert not any(c.startswith('git') for c in car.calls())
+        assert car.calls() == []
+
     def test_help_documents_the_labs_flag(self, car):
         out = car.run('help').stdout
         assert re.search(r'^    update \[--labs\] ', out, re.M)
@@ -627,6 +634,19 @@ class TestSetup:
         result = car.run('setup', 'networking', '--reset', RC_CONNECTIONS='neoracer-ap')
         assert result.returncode == 1
         assert 'neoracer-ap is still there' in result.stderr
+
+    def test_a_failed_connection_listing_fails_the_reset(self, car):
+        # The settings file goes before the listing, so it is gone already.
+        cfg = self.saved_settings(car, 'RACECAR_AP_SSID="dummy"\n')
+        (car.bin / 'nmcli').write_text(
+            '#!/bin/bash\necho "Error: NetworkManager is not running." >&2\nexit 8\n'
+        )
+        result = car.run('setup', 'networking', '--reset')
+        assert result.returncode == 1
+        assert 'Error: NetworkManager is not running.' in result.stderr
+        assert 'but nmcli cannot list the connections' in result.stderr
+        assert not cfg.exists()
+        assert car.calls() == []
 
     def test_reset_deletes_the_connection_setup_creates(self):
         setup = (ROOT / 'scripts' / 'setup_networking.sh').read_text()
