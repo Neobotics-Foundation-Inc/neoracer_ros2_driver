@@ -12,6 +12,7 @@ a sudoers drop-in where upstream uses polkit rules, which Ubuntu 22.04's polkit
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -422,6 +423,11 @@ case "$repo" in
         echo '# shipped lab' > "$dest/lab_a/lab_a.py" ;;
 esac
 """
+JUPYTER_MKTEMP = """#!/bin/bash
+# Stub: `mktemp -d` makes its folder under TMPDIR, as GNU mktemp does on the
+# car. The Mac's mktemp ignores TMPDIR.
+exec {mktemp} -d "$TMPDIR/tmp.XXXXXXXXXX"
+"""
 LABS_KEPT = "Labs left unchanged. Run 'racecar update --labs' to refresh them."
 
 
@@ -441,12 +447,7 @@ class TestStudentLibraryAndLabs:
         part = text.split('\n# Student library + labs.\n', 1)[1]
         script = tmp_path / 'student_side.sh'
         script.write_text('#!/bin/bash\nset -eo pipefail\nJUPYTER_WS="$HOME/jupyter_ws"\n' + part)
-        stubs = tmp_path / 'bin'
-        if not stubs.exists():
-            stubs.mkdir()
-            (stubs / 'git').write_text(JUPYTER_GIT)
-            (stubs / 'git').chmod(0o755)
-            (stubs / 'python3').symlink_to(sys.executable)
+        stubs = self.stubs(tmp_path)
         (tmp_path / 'tmp').mkdir(exist_ok=True)
         log = tmp_path / 'calls.log'
         log.write_text('')
@@ -466,6 +467,19 @@ class TestStudentLibraryAndLabs:
             ['bash', str(script)], capture_output=True, text=True, timeout=30, env=env
         )
         return result, log.read_text().splitlines()
+
+    def stubs(self, tmp_path):
+        stubs = tmp_path / 'bin'
+        if not stubs.exists():
+            stubs.mkdir()
+            (stubs / 'git').write_text(JUPYTER_GIT)
+            (stubs / 'mktemp').write_text(
+                JUPYTER_MKTEMP.format(mktemp=shlex.quote(shutil.which('mktemp')))
+            )
+            for name in ('git', 'mktemp'):
+                (stubs / name).chmod(0o755)
+            (stubs / 'python3').symlink_to(sys.executable)
+        return stubs
 
     def home(self, tmp_path):
         home = tmp_path / 'home'
@@ -595,6 +609,22 @@ class TestStudentLibraryAndLabs:
         assert (old / 'racecar_core.py').read_text() == '# old library\n'
         assert pth.read_text() == f'{old}\n'
         assert not self.backups(tmp_path)
+        assert not list((tmp_path / 'tmp').iterdir())
+
+    def test_a_failed_backup_leaves_no_temp_folder(self, tmp_path):
+        # A stub date gives the backup the name of a folder already there,
+        # as two refreshes in one second would, so its mkdir fails.
+        lab = self.edited_labs(tmp_path)
+        date = self.stubs(tmp_path) / 'date'
+        date.write_text('#!/bin/bash\necho 20260101-000000\n')
+        date.chmod(0o755)
+        taken = self.neo(tmp_path) / 'labs-backup-20260101-000000'
+        taken.mkdir()
+        result, _ = self.run(tmp_path, RACECAR_LABS_REFRESH='1')
+        assert result.returncode == 1
+        assert lab.read_text() == '# student edit\n'
+        assert not list(taken.iterdir())
+        assert not (self.neo(tmp_path) / 'library').exists()
         assert not list((tmp_path / 'tmp').iterdir())
 
 

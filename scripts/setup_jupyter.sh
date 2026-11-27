@@ -156,6 +156,9 @@ fi
 
 echo "Fetching student library ($LIB_PIN)..."
 TMP="$(mktemp -d)"
+# An EXIT trap removes the temp folder on any exit, so a failed backup or
+# copy leaves none behind.
+trap 'rm -rf "$TMP"' EXIT
 if ! git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"; then
     rm -rf "$TMP"
     echo "Could not fetch the student library at $LIB_PIN from $LIB_REPO." >&2
