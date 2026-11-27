@@ -385,6 +385,203 @@ class TestEnableState:
         assert 'neoracer-jupyter.service: installed before; enable state kept' in out
 
 
+JUPYTER_GIT = r"""#!/bin/bash
+# Stub: `git clone` makes a one-file library or labs tree at its last
+# argument, and every call is logged. A clone of a repository named in
+# RC_CLONE_FAILS fails.
+echo "git $*" >> "$RC_LOG"
+[[ "$1" == clone ]] || exit 0
+repo="${@: -2:1}"
+dest="${!#}"
+for name in ${RC_CLONE_FAILS:-}; do
+    if [[ "$repo" == */"$name" ]]; then exit 128; fi
+done
+mkdir -p "$dest/.git"
+case "$repo" in
+    */racecar-neo-library)
+        mkdir -p "$dest/library"
+        echo '# library from the pin' > "$dest/library/racecar_core.py" ;;
+    */neoracer-labs)
+        mkdir -p "$dest/lab_a"
+        echo '# shipped lab' > "$dest/lab_a/lab_a.py" ;;
+esac
+"""
+LABS_KEPT = "Labs left unchanged. Run 'racecar update --labs' to refresh them."
+
+
+class TestStudentLibraryAndLabs:
+    """
+    setup_jupyter.sh replaces the library on every run and copies the labs only when asked.
+
+    The part of the script from its "Student library + labs." banner to the
+    end runs on its own, against a stub git, a temporary HOME and a temporary
+    TMPDIR. A run on a car never fetches anything, installs a pip package, or
+    touches the car's own labs, library or data root.
+    """
+
+    def run(self, tmp_path, **env_extra):
+        text = read('setup_jupyter.sh')
+        assert 'JUPYTER_WS="$USER_HOME/jupyter_ws"' in text
+        part = text.split('\n# Student library + labs.\n', 1)[1]
+        script = tmp_path / 'student_side.sh'
+        script.write_text('#!/bin/bash\nset -eo pipefail\nJUPYTER_WS="$HOME/jupyter_ws"\n' + part)
+        stubs = tmp_path / 'bin'
+        if not stubs.exists():
+            stubs.mkdir()
+            (stubs / 'git').write_text(JUPYTER_GIT)
+            (stubs / 'git').chmod(0o755)
+            (stubs / 'python3').symlink_to(sys.executable)
+        (tmp_path / 'tmp').mkdir(exist_ok=True)
+        log = tmp_path / 'calls.log'
+        log.write_text('')
+        skip = ('RACECAR_LABS_REFRESH', 'LIB_REPO', 'LIB_PIN')
+        env = {k: v for k, v in os.environ.items() if k not in skip}
+        env.update(
+            {
+                'HOME': str(self.home(tmp_path)),
+                'PATH': f'{stubs}:{os.environ["PATH"]}',
+                'PYTHONUSERBASE': str(self.home(tmp_path) / '.local'),
+                'RC_LOG': str(log),
+                'TMPDIR': str(tmp_path / 'tmp'),
+                **env_extra,
+            }
+        )
+        result = subprocess.run(
+            ['bash', str(script)], capture_output=True, text=True, timeout=30, env=env
+        )
+        return result, log.read_text().splitlines()
+
+    def home(self, tmp_path):
+        home = tmp_path / 'home'
+        home.mkdir(exist_ok=True)
+        return home
+
+    def neo(self, tmp_path):
+        return self.home(tmp_path) / 'jupyter_ws' / 'neoracer-os'
+
+    def pth(self, tmp_path):
+        out = subprocess.run(
+            [sys.executable, '-c', 'import site; print(site.getusersitepackages())'],
+            capture_output=True,
+            text=True,
+            env=dict(
+                os.environ,
+                HOME=str(self.home(tmp_path)),
+                PYTHONUSERBASE=str(self.home(tmp_path) / '.local'),
+            ),
+        ).stdout.strip()
+        return Path(out) / 'racecar_student.pth'
+
+    def select(self, tmp_path, library):
+        pth = self.pth(tmp_path)
+        pth.parent.mkdir(parents=True, exist_ok=True)
+        pth.write_text(f'{library}\n')
+        return pth
+
+    def edited_labs(self, tmp_path):
+        """Make the labs folder of a car set up before, with one shipped lab edited."""
+        lab = self.neo(tmp_path) / 'labs' / 'lab_a' / 'lab_a.py'
+        lab.parent.mkdir(parents=True)
+        lab.write_text('# student edit\n')
+        return lab
+
+    def fetched_labs(self, calls):
+        return any('neoracer-labs' in c for c in calls)
+
+    def backups(self, tmp_path):
+        return sorted(self.neo(tmp_path).glob('labs-backup-*'))
+
+    def test_a_first_install_copies_the_labs(self, tmp_path):
+        result, calls = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        labs = self.neo(tmp_path) / 'labs'
+        assert (labs / 'lab_a' / 'lab_a.py').read_text() == '# shipped lab\n'
+        assert not (labs / '.git').exists()
+        assert self.fetched_labs(calls)
+        assert not self.backups(tmp_path)
+        assert self.pth(tmp_path).read_text() == f'{self.neo(tmp_path) / "library"}\n'
+        assert not list((tmp_path / 'tmp').iterdir())
+
+    @pytest.mark.parametrize('refresh', [None, '0'])
+    def test_a_rerun_leaves_the_labs_alone_and_does_not_fetch_them(self, tmp_path, refresh):
+        lab = self.edited_labs(tmp_path)
+        env = {} if refresh is None else {'RACECAR_LABS_REFRESH': refresh}
+        result, calls = self.run(tmp_path, **env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert lab.read_text() == '# student edit\n'
+        assert not self.fetched_labs(calls)
+        assert LABS_KEPT in result.stdout.splitlines()
+        assert not self.backups(tmp_path)
+
+    def test_a_refresh_backs_up_the_labs_then_replaces_the_shipped_files(self, tmp_path):
+        lab = self.edited_labs(tmp_path)
+        own = self.neo(tmp_path) / 'labs' / 'my_lab.py'
+        own.write_text('# student file\n')
+        result, calls = self.run(tmp_path, RACECAR_LABS_REFRESH='1')
+        assert result.returncode == 0, result.stdout + result.stderr
+        backups = self.backups(tmp_path)
+        assert len(backups) == 1
+        assert re.fullmatch(r'labs-backup-\d{8}-\d{6}', backups[0].name)
+        assert (backups[0] / 'lab_a' / 'lab_a.py').read_text() == '# student edit\n'
+        assert (backups[0] / 'my_lab.py').read_text() == '# student file\n'
+        assert f'Labs backed up to {backups[0]}' in result.stdout
+        assert lab.read_text() == '# shipped lab\n'
+        assert own.read_text() == '# student file\n'
+        assert LABS_KEPT not in result.stdout
+
+    def test_every_run_replaces_the_library(self, tmp_path):
+        self.edited_labs(tmp_path)
+        old = self.neo(tmp_path) / 'library'
+        old.mkdir()
+        (old / 'racecar_core.py').write_text('# old library\n')
+        (old / 'stale.py').write_text('')
+        result, _ = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (old / 'racecar_core.py').read_text() == '# library from the pin\n'
+        assert not (old / 'stale.py').exists()
+
+    def test_another_selected_library_is_kept(self, tmp_path):
+        self.edited_labs(tmp_path)
+        mine = self.home(tmp_path) / 'jupyter_ws' / 'my-library' / 'library'
+        mine.mkdir(parents=True)
+        (mine / 'racecar_core.py').write_text('')
+        pth = self.select(tmp_path, mine)
+        result, _ = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pth.read_text() == f'{mine}\n'
+        assert f'Library selection kept: {mine}' in result.stdout.splitlines()
+
+    @pytest.mark.parametrize('folder', ['missing', 'without racecar_core.py'])
+    def test_a_selection_whose_library_is_gone_is_reset(self, tmp_path, folder):
+        # racecar library --select and --list count a folder as a library only
+        # when it holds racecar_core.py.
+        self.edited_labs(tmp_path)
+        gone = self.home(tmp_path) / 'jupyter_ws' / 'old-library' / 'library'
+        if folder != 'missing':
+            gone.mkdir(parents=True)
+        pth = self.select(tmp_path, gone)
+        result, _ = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pth.read_text() == f'{self.neo(tmp_path) / "library"}\n'
+        assert 'Library selection kept' not in result.stdout
+
+    @pytest.mark.parametrize('repo', ['racecar-neo-library', 'neoracer-labs'])
+    def test_a_failed_fetch_changes_nothing(self, tmp_path, repo):
+        lab = self.edited_labs(tmp_path)
+        old = self.neo(tmp_path) / 'library'
+        old.mkdir()
+        (old / 'racecar_core.py').write_text('# old library\n')
+        pth = self.select(tmp_path, old)
+        result, _ = self.run(tmp_path, RACECAR_LABS_REFRESH='1', RC_CLONE_FAILS=repo)
+        assert result.returncode == 1
+        assert 'the labs on the car' in result.stderr
+        assert lab.read_text() == '# student edit\n'
+        assert (old / 'racecar_core.py').read_text() == '# old library\n'
+        assert pth.read_text() == f'{old}\n'
+        assert not self.backups(tmp_path)
+        assert not list((tmp_path / 'tmp').iterdir())
+
+
 class TestLaunchWrapper:
     """launch_teleop.sh is what neoracer-teleop.service and `racecar teleop` run."""
 

@@ -476,14 +476,17 @@ class TestService:
 
 
 class TestUpdate:
-    """`racecar update`: reset to origin/main, run setup, restart what was enabled."""
+    """`racecar update [--labs]`: reset to origin/main, run setup, restart what was enabled."""
 
-    def _update(self, tmp_path, **env):
+    def _update(self, tmp_path, *args, **env):
+        # The stub setup logs the RACECAR_LABS_REFRESH value it received.
         package = tmp_path / 'package'
         (package / 'scripts').mkdir(parents=True)
-        (package / 'scripts' / 'setup_all.sh').write_text('echo "setup_all.sh" >> "$RC_LOG"\n')
+        (package / 'scripts' / 'setup_all.sh').write_text(
+            'echo "setup_all.sh labs=${RACECAR_LABS_REFRESH-unset}" >> "$RC_LOG"\n'
+        )
         car = Car(tmp_path, package=package)
-        return car, car.run('update', **env)
+        return car, car.run('update', *args, **env)
 
     def test_resets_before_setup_then_restarts_enabled_units(self, tmp_path):
         car, result = self._update(tmp_path, RC_ENABLED='neoracer-teleop neoracer-mapview')
@@ -491,10 +494,37 @@ class TestUpdate:
         assert car.calls() == [
             'git fetch origin',
             'git reset --hard origin/main',
-            'setup_all.sh',
+            'setup_all.sh labs=0',
             'sudo systemctl restart neoracer-teleop.service',
             'sudo systemctl restart neoracer-mapview.service',
         ]
+
+    def test_labs_flag_asks_setup_to_refresh_the_labs(self, tmp_path):
+        car, result = self._update(tmp_path, '--labs', RC_ENABLED='neoracer-teleop')
+        assert result.returncode == 0, result.stderr
+        assert car.calls()[:3] == [
+            'git fetch origin',
+            'git reset --hard origin/main',
+            'setup_all.sh labs=1',
+        ]
+
+    def test_a_refresh_value_in_the_shell_does_not_refresh_the_labs(self, tmp_path):
+        car, result = self._update(tmp_path, RACECAR_LABS_REFRESH='1')
+        assert result.returncode == 0, result.stderr
+        assert 'setup_all.sh labs=0' in car.calls()
+
+    @pytest.mark.parametrize('args', [['--bogus'], ['labs'], ['--labs', '--force']])
+    def test_an_unknown_option_stops_before_the_reset(self, tmp_path, args):
+        car, result = self._update(tmp_path, *args, RC_ENABLED='neoracer-teleop')
+        assert result.returncode == 2
+        assert 'usage: racecar update [--labs]' in result.stderr
+        assert car.calls() == []
+
+    def test_help_documents_the_labs_flag(self, car):
+        out = car.run('help').stdout
+        assert re.search(r'^    update \[--labs\] ', out, re.M)
+        assert re.search(r'^ +--labs +refresh the labs too', out, re.M)
+        assert 'labs-backup-<date>-<time>' in out
 
     def test_restarts_at_most_one_drive_dashboard(self, tmp_path):
         car, result = self._update(
@@ -874,6 +904,9 @@ class TestCompletion:
 
     def test_service_actions_drop_update(self):
         assert 'update' not in self._complete('racecar', 'service', '')
+
+    def test_update_offers_the_labs_flag(self):
+        assert self._complete('racecar', 'update', '') == ['--labs']
 
     def test_setup_offers_every_phase(self):
         words = set(self._complete('racecar', 'setup', ''))

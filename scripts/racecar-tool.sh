@@ -263,9 +263,23 @@ racecar() {
             # script never rewrites itself mid-run; this function is already
             # loaded in shell memory, so replacing the file under it is safe.
             # reset --hard discards local edits in the driver repo.
+            # setup_jupyter.sh leaves the labs as they are unless --labs is
+            # given. RACECAR_LABS_REFRESH carries the choice through
+            # setup_all.sh. It is set on every update, so a value exported in
+            # the shell never refreshes the labs without --labs.
+            local labs=0 arg
+            for arg in "$@"; do
+                case "$arg" in
+                    --labs) labs=1 ;;
+                    *)
+                        echo "usage: racecar update [--labs]" >&2
+                        return 2
+                        ;;
+                esac
+            done
             echo "Updating $pkg_dir to latest origin/main..."
             ( cd "$pkg_dir" && git fetch origin && git reset --hard origin/main ) || return 1
-            bash "$pkg_dir/scripts/setup_all.sh" || return 1
+            RACECAR_LABS_REFRESH="$labs" bash "$pkg_dir/scripts/setup_all.sh" || return 1
             # Restart only what was already enabled, so a field update brings
             # back the services this car runs without starting a lab dashboard
             # nobody asked for.
@@ -1119,9 +1133,13 @@ Commands:
                           foxglove on|off     foxglove_bridge (port 8765) at the
                                               next start or load
                         Poses are in the map frame: meters, meters, radians.
-    update              Field update in one command: repo to latest origin/main
+    update [--labs]     Field update in one command: repo to latest origin/main
                         (discards local repo edits), full `setup all`, restart
-                        all services. Needs internet.
+                        the enabled services. Needs internet. The labs in
+                        ~/jupyter_ws/neoracer-os/labs stay as they are.
+                          --labs   refresh the labs too; setup first copies
+                                   the labs folder to labs-backup-<date>-<time>
+                                   beside it
     launch <name>       Shortcut for `ros2 launch neoracer_ros2_driver <name>.launch.py`.
                         Examples: racecar launch lidar
                                   racecar launch camera
@@ -1262,6 +1280,9 @@ _racecar_complete() {
             ;;
         cleanup)
             COMPREPLY=( $(compgen -W "--dry-run --force --help" -- "$cur") )
+            ;;
+        update)
+            COMPREPLY=( $(compgen -W "--labs" -- "$cur") )
             ;;
         library)
             if [[ "$cur" == --select=* || "$prev" == "--select" ]]; then
