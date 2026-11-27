@@ -159,7 +159,7 @@ Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-
 
 The lidar driver (package `lakibeam1`) is third-party and is not vendored in this repo. Phase 5 clones it from the [Neobotics fork](https://github.com/Neobotics-Foundation-Inc/Lakibeam_ROS2_Driver) at tag `v1.0-neobotics`, which carries the scan-health fixes described in [docs/lidar_scan_health.md](docs/lidar_scan_health.md). Override with `LAKI_REPO=` / `LAKI_PIN=` to test an unreleased revision.
 
-Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. If the clone fails, setup stops at phase 7 and leaves the car's library as it was.
+Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. Phase 7 clones the labs only on a car that has none yet or for a labs refresh. If a clone fails, setup stops at phase 7 and leaves the car's library and labs as they were.
 
 ## The `racecar` shell tool
 
@@ -198,6 +198,7 @@ racecar calibrate check     # each calibration against the live sensors
 racecar setup all           # the 8-phase orchestrator
 racecar setup networking    # WiFi AP + Ethernet + lidar subnet
 racecar update              # repo to latest main + full setup + service restart
+racecar update --labs       # ...and refresh the labs after a backup copy
 
 racecar ws [neoracer|osracer]   # switch this shell between workspaces
 racecar library --list          # student library folders in ~/jupyter_ws
@@ -210,7 +211,7 @@ racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
 
-`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
+`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet. It leaves the labs as they are. `racecar update --labs` also refreshes them, as [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library) describes.
 
 `racecar test` leaves out the on-car hardware tests in `test/test_hardware.py`. Run them on the car with teleop running and the handset on: `racecar cd`, then `python3 -m pytest -m hardware test/test_hardware.py -v`. Each failure names the device and gives a fix.
 
@@ -379,7 +380,9 @@ racecar library --select <folder>  # choose which library is on the Python path
 racecar library --status           # show the current selection
 ```
 
-Refreshing the labs keeps files a student added. It replaces each shipped lab file with the new version, so a student saves edits under a new file name to keep them. Every setup run, including `racecar update`, also selects the `neoracer-os` library again.
+Every setup run, `racecar update` included, replaces the library in `~/jupyter_ws/neoracer-os/library`, so it matches the driver. The first setup copies the labs into `~/jupyter_ws/neoracer-os/labs`. After that, setup and `racecar update` leave the labs as they are. `racecar update --labs` refreshes them. It first copies the labs folder to `~/jupyter_ws/neoracer-os/labs-backup-<date>-<time>`, for example `labs-backup-20261127-141500`. It then replaces each shipped lab file with the new version. Files a student added stay in place. `RACECAR_LABS_REFRESH=1 racecar setup all` refreshes the labs the same way with no git reset.
+
+Setup selects the `neoracer-os` library on every run, unless a student selected another library with `racecar library --select` and that folder still holds `racecar_core.py`.
 
 ## GPU stack
 
