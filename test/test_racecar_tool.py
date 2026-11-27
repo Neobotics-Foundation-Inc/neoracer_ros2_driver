@@ -128,8 +128,12 @@ class Car:
         self.log = tmp_path / 'calls.log'
         self.log.write_text('')
 
-    def run(self, *args, **env_extra):
+    def run(self, *args, stdin=None, **env_extra):
+        # The networking reset asks a question over SSH through the access
+        # point, so a run inherits no SSH session and reads stdin only from
+        # the text it is given.
         env = dict(os.environ)
+        env.pop('SSH_CONNECTION', None)
         env.update(
             {
                 'HOME': str(self.home),
@@ -145,7 +149,13 @@ class Car:
         env.update(env_extra)
         script = f'set +u; source "{TOOL}"; racecar {shlex.join(args)}'
         return subprocess.run(
-            ['bash', '-c', script], capture_output=True, text=True, timeout=30, env=env
+            ['bash', '-c', script],
+            input=stdin,
+            stdin=subprocess.DEVNULL if stdin is None else None,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
         )
 
     def calls(self):
@@ -576,6 +586,7 @@ class TestSetup:
             assert flag in result.stdout
         for flag in ('--wifi-iface', '--eth-iface', '--show', '--reset'):
             assert flag in result.stdout
+        assert '(asks first over SSH through the access point)' in result.stdout
 
     def test_networking_unknown_flag_errors(self, car):
         result = car.run('setup', 'networking', '--bogus')
@@ -621,6 +632,75 @@ class TestSetup:
         setup = (ROOT / 'scripts' / 'setup_networking.sh').read_text()
         assert 'AP_CON_NAME="neoracer-ap"' in setup
         assert 'local ap_con="neoracer-ap"' in TEXT
+
+    def saved_settings(self, car, text):
+        cfg = car.home / '.config' / 'racecar' / 'networking.env'
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(text)
+        return cfg
+
+    @pytest.mark.parametrize('answer', ['n\n', '\n', '', 'yes\n'])
+    def test_a_reset_over_the_access_point_asks_and_a_no_changes_nothing(self, car, answer):
+        # An empty answer is a bare Enter, and no text at all is a closed stdin.
+        cfg = self.saved_settings(car, 'RACECAR_AP_SSID="dummy"\n')
+        result = car.run(
+            'setup',
+            'networking',
+            '--reset',
+            stdin=answer,
+            SSH_CONNECTION='10.42.0.23 50122 10.42.0.1 22',
+            RC_CONNECTIONS='neoracer-ap',
+        )
+        assert result.returncode == 1
+        assert 'Delete the access point now? [y/N]' in result.stdout
+        assert 'Reset cancelled. Nothing changed.' in result.stdout
+        assert cfg.read_text() == 'RACECAR_AP_SSID="dummy"\n'
+        assert car.calls() == []
+
+    @pytest.mark.parametrize('answer', ['y\n', 'Y\n'])
+    def test_a_reset_over_the_access_point_runs_after_a_yes(self, car, answer):
+        # The saved access point address counts, without its prefix length.
+        cfg = self.saved_settings(car, 'RACECAR_AP_ADDR="10.42.5.1/24"\n')
+        result = car.run(
+            'setup',
+            'networking',
+            '--reset',
+            stdin=answer,
+            SSH_CONNECTION='10.42.5.23 50122 10.42.5.1 22',
+            RC_CONNECTIONS='neoracer-ap',
+        )
+        assert result.returncode == 0, result.stderr
+        assert 'Delete the access point now? [y/N]' in result.stdout
+        assert not cfg.exists()
+        assert car.calls() == ['sudo nmcli connection delete neoracer-ap']
+
+    def test_a_reset_over_another_address_does_not_ask(self, car):
+        # A session through the Ethernet address outlives the access point.
+        cfg = self.saved_settings(car, 'RACECAR_AP_SSID="dummy"\n')
+        result = car.run(
+            'setup',
+            'networking',
+            '--reset',
+            SSH_CONNECTION='192.168.10.20 50122 192.168.10.100 22',
+            RC_CONNECTIONS='neoracer-ap',
+        )
+        assert result.returncode == 0, result.stderr
+        assert 'Delete the access point now?' not in result.stdout
+        assert not cfg.exists()
+        assert car.calls() == ['sudo nmcli connection delete neoracer-ap']
+
+    def test_a_reset_with_no_ssh_session_does_not_ask(self, car):
+        cfg = self.saved_settings(car, 'RACECAR_AP_SSID="dummy"\n')
+        result = car.run('setup', 'networking', '--reset', RC_CONNECTIONS='neoracer-ap')
+        assert result.returncode == 0, result.stderr
+        assert 'Delete the access point now?' not in result.stdout
+        assert not cfg.exists()
+        assert car.calls() == ['sudo nmcli connection delete neoracer-ap']
+
+    def test_the_reset_question_uses_the_access_point_address_setup_uses(self):
+        setup = (ROOT / 'scripts' / 'setup_networking.sh').read_text()
+        assert 'AP_ADDR="${RACECAR_AP_ADDR:-10.42.0.1/24}"' in setup
+        assert 'local ap_addr="${vals[RACECAR_AP_ADDR]:-10.42.0.1/24}"' in TEXT
 
     def test_networking_flag_persists_when_combined_with_show(self, car):
         result = car.run('setup', 'networking', '--ssid=test-ssid', '--psk=test-pass', '--show')

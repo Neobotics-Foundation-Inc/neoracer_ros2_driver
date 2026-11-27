@@ -665,6 +665,7 @@ Persists any --flag values to ~/.config/racecar/networking.env and then runs
 scripts/setup_networking.sh (Wi-Fi AP + Ethernet dual-IP + Lakibeam subnet).
   --show   print current persisted overrides and exit
   --reset  delete the saved settings and the access point connection
+           (asks first over SSH through the access point)
 Persistence runs BEFORE --show or --reset, so
   racecar setup networking --ssid=foo --show
 saves foo, then prints the new file contents.
@@ -687,6 +688,23 @@ __RC_NET_HELP__
                         local ap_con="neoracer-ap" con_names
                         echo "WARNING: this reconfigures Wi-Fi. If you're SSH'd over Wi-Fi, run from a"
                         echo "wired session or the console instead."
+                        # Deleting the access point ends an SSH session that
+                        # runs over it, so the reset asks first. Only y or Y
+                        # goes on. The third field of SSH_CONNECTION is the
+                        # car's address for the session. The access point
+                        # address is the saved RACECAR_AP_ADDR, or the
+                        # AP_ADDR default in setup_networking.sh.
+                        local ap_addr="${vals[RACECAR_AP_ADDR]:-10.42.0.1/24}" answer=""
+                        local -a ssh_fields=()
+                        read -r -a ssh_fields <<<"${SSH_CONNECTION:-}"
+                        if [[ -n "${ssh_fields[2]:-}" && "${ssh_fields[2]}" == "${ap_addr%%/*}" ]]; then
+                            printf 'Delete the access point now? [y/N] '
+                            read -r answer || answer=""
+                            if [[ "$answer" != [yY] ]]; then
+                                echo "Reset cancelled. Nothing changed."
+                                return 1
+                            fi
+                        fi
                         rm -f "$cfg_file"
                         if ! con_names="$(nmcli -t -f NAME connection show 2>&1)"; then
                             echo "$con_names" >&2
