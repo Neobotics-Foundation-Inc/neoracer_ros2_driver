@@ -153,7 +153,7 @@ Eight phases, all under `scripts/`:
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
 6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
 7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library at a pinned tag + labs
-8. **`setup_services.sh`**: installs the systemd units and `/etc/sudoers.d/neoracer`; core stack and map viewer enabled, `neoracer-autonomy` installed but not enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
+8. **`setup_services.sh`**: installs the systemd units and `/etc/sudoers.d/neoracer`; core stack and map viewer enabled at first install, `neoracer-autonomy` installed but not enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
