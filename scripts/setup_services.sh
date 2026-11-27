@@ -200,8 +200,9 @@ else
 fi
 
 echo
-echo "Core services installed and enabled. neoracer-autonomy is installed and"
-echo "starts on demand: racecar map start NAME, or the map viewer on port 8088."
+echo "Core services installed. Each one is enabled at its first install and keeps"
+echo "its enable state after that. neoracer-autonomy is installed and starts on"
+echo "demand: racecar map start NAME, or the map viewer on port 8088."
 echo "To start the core services now:"
 echo "  sudo systemctl start neoracer-teleop.service"
 echo "Or reboot to bring everything up automatically."

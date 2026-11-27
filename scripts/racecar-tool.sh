@@ -544,8 +544,8 @@ __RC_COMPILE__
                     cat <<'__RC_SVC_HELP__'
 usage: racecar service <action> [unit]
 actions:
-  install        Install units: core stack enabled, autonomy on demand,
-                 lab dashboards disabled
+  install        Install units: core stack enabled at first install,
+                 autonomy on demand, lab dashboards disabled
   start [name]   Start neoracer-<name>; no name = the core stack.
                  Starting or restarting a lab dashboard that drives the car
                  stops the others that do first.

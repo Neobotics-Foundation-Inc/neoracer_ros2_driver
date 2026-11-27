@@ -348,6 +348,13 @@ class TestService:
         assert 'only one of them runs at a time' in out
         assert 'racecar map' in out
 
+    def test_both_help_texts_enable_the_core_stack_at_first_install_only(self, car):
+        # setup_services.sh enables a core unit only when its unit file is new.
+        service_help = ' '.join(car.run('service', 'help').stdout.split())
+        top_help = ' '.join(car.run('help').stdout.split())
+        assert 'core stack enabled at first install' in service_help
+        assert 'core enabled at first install' in top_help
+
     def test_starting_a_drive_dashboard_stops_the_others(self, car):
         result = car.run(
             'service', 'start', 'linefollow', RC_ACTIVE='neoracer-wallfollow neoracer-camlabel'
