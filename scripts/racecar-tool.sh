@@ -263,9 +263,23 @@ racecar() {
             # script never rewrites itself mid-run; this function is already
             # loaded in shell memory, so replacing the file under it is safe.
             # reset --hard discards local edits in the driver repo.
+            # setup_jupyter.sh leaves the labs as they are unless --labs is
+            # given. RACECAR_LABS_REFRESH carries the choice through
+            # setup_all.sh. It is set on every update, so a value exported in
+            # the shell never refreshes the labs without --labs.
+            local labs=0 arg
+            for arg in "$@"; do
+                case "$arg" in
+                    --labs) labs=1 ;;
+                    *)
+                        echo "usage: racecar update [--labs]" >&2
+                        return 2
+                        ;;
+                esac
+            done
             echo "Updating $pkg_dir to latest origin/main..."
             ( cd "$pkg_dir" && git fetch origin && git reset --hard origin/main ) || return 1
-            bash "$pkg_dir/scripts/setup_all.sh" || return 1
+            RACECAR_LABS_REFRESH="$labs" bash "$pkg_dir/scripts/setup_all.sh" || return 1
             # Restart only what was already enabled, so a field update brings
             # back the services this car runs without starting a lab dashboard
             # nobody asked for.
@@ -530,8 +544,8 @@ __RC_COMPILE__
                     cat <<'__RC_SVC_HELP__'
 usage: racecar service <action> [unit]
 actions:
-  install        Install units: core stack enabled, autonomy on demand,
-                 lab dashboards disabled
+  install        Install units: core stack enabled at first install,
+                 autonomy on demand, lab dashboards disabled
   start [name]   Start neoracer-<name>; no name = the core stack.
                  Starting or restarting a lab dashboard that drives the car
                  stops the others that do first.
@@ -650,7 +664,8 @@ usage: racecar setup networking [--ssid=NAME] [--psk=PASS]
 Persists any --flag values to ~/.config/racecar/networking.env and then runs
 scripts/setup_networking.sh (Wi-Fi AP + Ethernet dual-IP + Lakibeam subnet).
   --show   print current persisted overrides and exit
-  --reset  delete the persisted file (revert to script defaults)
+  --reset  delete the saved settings and the access point connection
+           (asks first over SSH through the access point)
 Persistence runs BEFORE --show or --reset, so
   racecar setup networking --ssid=foo --show
 saves foo, then prints the new file contents.
@@ -665,8 +680,56 @@ __RC_NET_HELP__
                             echo "racecar setup networking: --reset cannot be combined with override flags" >&2
                             return 2
                         fi
+                        # The access point connection keeps this car's SSID
+                        # and stays up until it is deleted. Its name is
+                        # AP_CON_NAME in setup_networking.sh. The settings
+                        # file goes first, because deleting the access point
+                        # can end an SSH session over Wi-Fi.
+                        local ap_con="neoracer-ap" con_names
+                        echo "WARNING: this reconfigures Wi-Fi. If you're SSH'd over Wi-Fi, run from a"
+                        echo "wired session or the console instead."
+                        # Deleting the access point ends an SSH session that
+                        # runs over it, so the reset asks first. Only y or Y
+                        # goes on. The third field of SSH_CONNECTION is the
+                        # car's address for the session. The access point
+                        # address is the saved RACECAR_AP_ADDR, or the
+                        # AP_ADDR default in setup_networking.sh. A session
+                        # to neoracer.local can also arrive on the Wi-Fi
+                        # interface's IPv6 link-local address, which can end
+                        # in %<interface>, so every address of that interface
+                        # counts too.
+                        local ap_addr="${vals[RACECAR_AP_ADDR]:-10.42.0.1/24}" answer="" here=""
+                        local wifi_iface="${vals[RACECAR_WIFI_IFACE]:-wlP1p1s0}"
+                        local -a ssh_fields=()
+                        read -r -a ssh_fields <<<"${SSH_CONNECTION:-}"
+                        here="${ssh_fields[2]:-}"
+                        here="${here%%\%*}"
+                        if [[ -n "$here" ]] && { [[ "$here" == "${ap_addr%%/*}" ]] \
+                            || ip -o addr show dev "$wifi_iface" 2>/dev/null \
+                                | awk -v a="$here" '{ split($4, p, "/"); if (p[1] == a) f = 1 } END { exit !f }'; }; then
+                            printf 'Delete the access point now? [y/N] '
+                            read -r answer || answer=""
+                            if [[ "$answer" != [yY] ]]; then
+                                echo "Reset cancelled. Nothing changed."
+                                return 1
+                            fi
+                        fi
                         rm -f "$cfg_file"
-                        echo "Cleared $cfg_file; defaults will apply on next run."
+                        if ! con_names="$(nmcli -t -f NAME connection show 2>&1)"; then
+                            echo "$con_names" >&2
+                            echo "racecar setup networking: removed $cfg_file, but nmcli cannot list the connections" >&2
+                            return 1
+                        fi
+                        if grep -qxF "$ap_con" <<<"$con_names"; then
+                            if ! sudo nmcli connection delete "$ap_con"; then
+                                echo "racecar setup networking: removed $cfg_file, but the access point connection $ap_con is still there" >&2
+                                return 1
+                            fi
+                            echo "Removed the saved settings ($cfg_file) and the access point connection $ap_con."
+                        else
+                            echo "Removed the saved settings ($cfg_file). The access point connection $ap_con does not exist."
+                        fi
+                        echo "The next 'racecar setup networking' brings the access point back with the default SSID."
                         return 0
                     fi
 
@@ -675,7 +738,8 @@ __RC_NET_HELP__
                         : > "$cfg_file"
                         chmod 600 "$cfg_file"
                         echo "# racecar networking overrides - managed by 'racecar setup networking'" >> "$cfg_file"
-                        for k in RACECAR_AP_SSID RACECAR_AP_PSK RACECAR_AP_CHANNEL RACECAR_AP_ADDR RACECAR_ETH_STATIC; do
+                        for k in RACECAR_AP_SSID RACECAR_AP_PSK RACECAR_AP_CHANNEL RACECAR_AP_ADDR RACECAR_ETH_STATIC \
+                                 RACECAR_LIDAR_HOST RACECAR_WIFI_IFACE RACECAR_ETH_IFACE; do
                             if [[ -n "${vals[$k]:-}" ]]; then
                                 printf '%s="%s"\n' "$k" "${vals[$k]}" >> "$cfg_file"
                             fi
@@ -1096,9 +1160,13 @@ Commands:
                           foxglove on|off     foxglove_bridge (port 8765) at the
                                               next start or load
                         Poses are in the map frame: meters, meters, radians.
-    update              Field update in one command: repo to latest origin/main
+    update [--labs]     Field update in one command: repo to latest origin/main
                         (discards local repo edits), full `setup all`, restart
-                        all services. Needs internet.
+                        the enabled services. Needs internet. The labs in
+                        ~/jupyter_ws/neoracer-os/labs stay as they are.
+                          --labs   refresh the labs too; setup first copies
+                                   the labs folder to labs-backup-<date>-<time>
+                                   beside it
     launch <name>       Shortcut for `ros2 launch neoracer_ros2_driver <name>.launch.py`.
                         Examples: racecar launch lidar
                                   racecar launch camera
@@ -1129,12 +1197,13 @@ Commands:
                                          Flags persist to ~/.config/racecar/networking.env:
                                            --ssid=NAME   --psk=PASS   --channel=N
                                            --ap-addr=CIDR (default 10.42.0.1/24)
-                                           --eth-static=CIDR (default 192.168.1.101/24)
+                                           --eth-static=CIDR (default 192.168.10.100/24)
                                            --lidar-host=CIDR (default 192.168.8.1/24)
                                            --show / --reset
     service <action>    systemd service control. Actions:
-                          install              setup_services.sh (core enabled,
-                                               dashboards installed disabled)
+                          install              setup_services.sh (core enabled
+                                               at first install, dashboards
+                                               installed disabled)
                           start [name]         no name: the core stack
                           stop [name]          no name: the core stack
                           restart [name]       no name: every enabled unit;
@@ -1239,6 +1308,9 @@ _racecar_complete() {
             ;;
         cleanup)
             COMPREPLY=( $(compgen -W "--dry-run --force --help" -- "$cur") )
+            ;;
+        update)
+            COMPREPLY=( $(compgen -W "--labs" -- "$cur") )
             ;;
         library)
             if [[ "$cur" == --select=* || "$prev" == "--select" ]]; then

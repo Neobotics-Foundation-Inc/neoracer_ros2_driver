@@ -12,8 +12,10 @@ from datetime import datetime
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 
 from conftest import load_script
 import pytest
@@ -180,6 +182,85 @@ class TestSetupScript:
         log.unlink()
         run_setup(tmp_path, units, systemctl=str(stub))
         assert not log.exists()  # nothing changed, so nothing was called
+
+    def test_an_old_dashboard_is_disabled_before_its_checkout_moves(self, tmp_path):
+        # The old setup enabled each dashboard at boot, and the new unit keeps
+        # that enable state, so setup disables it once, while its old
+        # checkout still names it. The stub notes whether the checkout is
+        # still there at each call.
+        units = tmp_path / 'units'
+        units.mkdir()
+        tree = tree_copy(tmp_path)
+        old = {'wallfollow': 'wallfollow_dashboard', 'webteleop': 'teleop_dashboard'}
+        for name, repo in old.items():
+            stem = STEMS[name]
+            old_checkout(tree, repo, stem, (tree / name / f'{stem}.yaml').read_text())
+        log = tmp_path / 'systemctl.log'
+        stub = tmp_path / 'systemctl'
+        stub.write_text(
+            '#!/bin/bash\n'
+            f'[[ -d "{tree}/wallfollow_dashboard" ]] && here=present || here=moved\n'
+            f'echo "$* $here" >> "{log}"\n'
+        )
+        stub.chmod(0o755)
+        r = run_setup(tmp_path, units, systemctl=str(stub))
+        assert r.returncode == 0, r.stdout + r.stderr
+        calls = log.read_text().splitlines()
+        assert [c for c in calls if c.startswith('disable')] == [
+            'disable neoracer-wallfollow.service present',
+            'disable neoracer-webteleop.service present',
+        ]
+        assert not any(c.startswith('stop') for c in calls)
+        assert r.stdout.count('disabled at boot (the old setup enabled it)') == 2
+        assert (tree / '.migrated' / 'teleop_dashboard').is_dir()
+        log.unlink()
+        again = run_setup(tmp_path, units, systemctl=str(stub))
+        assert again.returncode == 0 and not log.exists()
+
+    def test_a_failed_disable_leaves_the_old_checkouts_in_place(self, tmp_path):
+        # The next run finds the checkout and disables the unit again.
+        units = tmp_path / 'units'
+        units.mkdir()
+        tree = tree_copy(tmp_path)
+        shipped = (tree / 'pursuit' / 'pursuit.yaml').read_text()
+        old_checkout(tree, 'pursuit_dashboard', 'pursuit', shipped)
+        stub = tmp_path / 'systemctl'
+        stub.write_text('#!/bin/bash\n[[ "$1" == disable ]] && exit 1\nexit 0\n')
+        stub.chmod(0o755)
+        r = run_setup(tmp_path, units, systemctl=str(stub))
+        assert r.returncode == 1
+        assert 'not every old dashboard is disabled' in r.stdout
+        assert (tree / 'pursuit_dashboard' / 'pursuit.yaml').read_text() == shipped
+        assert not (tree / '.migrated').exists()
+
+    def test_a_failed_checkout_listing_leaves_the_old_checkouts_in_place(self, tmp_path):
+        # With no list of old checkouts, setup disables no unit and moves no
+        # checkout. A stub python3 fails only the `checkouts.py --list` call.
+        units = tmp_path / 'units'
+        units.mkdir()
+        tree = tree_copy(tmp_path)
+        shipped = (tree / 'pursuit' / 'pursuit.yaml').read_text()
+        old_checkout(tree, 'pursuit_dashboard', 'pursuit', shipped)
+        stubs = tmp_path / 'bin'
+        stubs.mkdir()
+        (stubs / 'python3').write_text(
+            '#!/bin/bash\n'
+            '[[ "$2" == --list ]] && { echo "checkouts.py: listing failed" >&2; exit 1; }\n'
+            f'exec {shlex.quote(sys.executable)} "$@"\n'
+        )
+        (stubs / 'python3').chmod(0o755)
+        log = tmp_path / 'systemctl.log'
+        stub = tmp_path / 'systemctl'
+        stub.write_text(f'#!/bin/bash\necho "$*" >> "{log}"\n')
+        stub.chmod(0o755)
+        r = run_setup(tmp_path, units, systemctl=str(stub), PATH=f'{stubs}:{os.environ["PATH"]}')
+        assert r.returncode == 1
+        assert 'checkouts.py: listing failed' in r.stderr
+        assert 'not every old dashboard is disabled' in r.stdout
+        assert 'Incomplete: old checkouts' in r.stdout
+        assert not any(c.startswith('disable') for c in log.read_text().splitlines())
+        assert (tree / 'pursuit_dashboard' / 'pursuit.yaml').read_text() == shipped
+        assert not (tree / '.migrated').exists()
 
     def test_a_failed_install_is_not_reported_as_success(self, text):
         # install_unit runs under `|| true`, which suppresses errexit for its
@@ -485,6 +566,12 @@ class TestMigrate:
         assert not (data / 'dashboards' / 'eps' / 'ledger.jsonl').exists()
         assert (dash / '.migrated' / 'eps_dashboard' / 'ledger.jsonl').is_file()
         assert any('stays with the old checkout' in ln for ln in lines)
+
+    def test_old_checkouts_lists_each_dashboard_with_one(self, co, dash):
+        assert co.old_checkouts(dash) == []
+        (dash / 'teleop_dashboard').mkdir()
+        (dash / 'camlabel_dashboard').mkdir()
+        assert co.old_checkouts(dash) == ['camlabel', 'webteleop']
 
     def test_a_second_set_aside_does_not_overwrite_the_first(self, co, dash, data):
         (dash / '.migrated' / 'eps_dashboard').mkdir(parents=True)

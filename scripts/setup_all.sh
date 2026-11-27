@@ -78,7 +78,7 @@ echo "==> [7/8] JupyterLab + workspace"
 bash "$SCRIPT_DIR/setup_jupyter.sh"
 
 echo
-echo "==> [8/8] systemd services (core stack and map viewer enabled, autonomy on demand, lab dashboards off)"
+echo "==> [8/8] systemd services (core stack and map viewer enabled at first install, autonomy on demand, lab dashboards off)"
 bash "$SCRIPT_DIR/setup_services.sh"
 
 echo

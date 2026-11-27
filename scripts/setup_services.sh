@@ -38,9 +38,12 @@
 #
 # Idempotent: re-runs update only what changed and never change a service's
 # enable state after the first install.
+#
+# Test hook: RACECAR_SYSTEMD_DIR, a folder in place of /etc/systemd/system.
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYSTEMD_DIR="${RACECAR_SYSTEMD_DIR:-/etc/systemd/system}"
 
 SERVICES=(
     neoracer-data.service
@@ -64,7 +67,7 @@ changed=0
 # stops the old unit and removes the link. `-L` also finds a link whose unit
 # file is gone.
 for svc in "${INSTALL_ONLY[@]}"; do
-    link="/etc/systemd/system/multi-user.target.wants/$svc"
+    link="$SYSTEMD_DIR/multi-user.target.wants/$svc"
     if [[ -L "$link" ]]; then
         sudo systemctl stop "$svc" 2>/dev/null || true
         sudo rm -f "$link"
@@ -73,12 +76,28 @@ for svc in "${INSTALL_ONLY[@]}"; do
     fi
 done
 
+# A unit whose file is not on the car yet is a first install. When a run stops
+# before such a core unit is enabled, its new file is removed again, so the
+# next run still counts it as a first install and enables it.
+declare -A first_install=()
+remove_new_units() {
+    local svc
+    for svc in "${SERVICES[@]}"; do
+        if [[ -n "${first_install[$svc]:-}" ]]; then
+            sudo rm -f "${SYSTEMD_DIR}/${svc}"
+        fi
+    done
+}
+trap remove_new_units EXIT
 for svc in "${SERVICES[@]}" "${INSTALL_ONLY[@]}"; do
     src="${SCRIPT_DIR}/${svc}"
-    dst="/etc/systemd/system/${svc}"
+    dst="${SYSTEMD_DIR}/${svc}"
     if [[ ! -f "$src" ]]; then
         echo "Missing $src - skipping" >&2
         continue
+    fi
+    if [[ ! -e "$dst" ]]; then
+        first_install[$svc]=1
     fi
     if cmp -s "$src" "$dst" 2>/dev/null; then
         echo "  $svc: already up to date"
@@ -105,20 +124,25 @@ if [[ -n "$(systemctl list-unit-files 'jupyterlab.service' --no-legend 2>/dev/nu
     sudo systemctl disable --now jupyterlab.service 2>/dev/null || true
 fi
 
-# Enable so they auto-start on boot. `enable` is idempotent - no-op if
-# already enabled. We deliberately don't `start` here; the user controls
-# when the stack first comes up (avoids surprise launch during install). The
-# one exception follows the loop.
+# Enable a unit at its first install, so it starts on boot. A unit already
+# on the car keeps its enable state, so `racecar service disable mapview`
+# keeps the map viewer off across setup runs. We deliberately don't `start`
+# here; the user controls when the stack first comes up (avoids surprise
+# launch during install). The one exception follows the loop.
 newly_enabled=()
 for svc in "${SERVICES[@]}"; do
     if systemctl is-enabled --quiet "$svc"; then
         echo "  $svc: already enabled"
+    elif [[ -z "${first_install[$svc]:-}" ]]; then
+        echo "  $svc: installed before; enable state kept"
     else
         sudo systemctl enable "$svc"
         echo "  $svc: enabled"
         newly_enabled+=("$svc")
     fi
+    unset 'first_install[$svc]'
 done
+trap - EXIT
 
 # A unit enabled for the first time normally comes up at the next boot. On a
 # car whose stack already runs, setup starts it now. `racecar update` from
@@ -176,8 +200,9 @@ else
 fi
 
 echo
-echo "Core services installed and enabled. neoracer-autonomy is installed and"
-echo "starts on demand: racecar map start NAME, or the map viewer on port 8088."
+echo "Core services installed. Each one is enabled at its first install and keeps"
+echo "its enable state after that. neoracer-autonomy is installed and starts on"
+echo "demand: racecar map start NAME, or the map viewer on port 8088."
 echo "To start the core services now:"
 echo "  sudo systemctl start neoracer-teleop.service"
 echo "Or reboot to bring everything up automatically."

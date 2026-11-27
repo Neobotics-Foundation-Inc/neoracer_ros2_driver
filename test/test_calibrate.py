@@ -190,7 +190,7 @@ class TestRun:
         assert cal.run_steps(lidar) == 0
         out = capsys.readouterr().out
         assert 'laser_yaw_deg: default -> 179.5' in out
-        assert 'Apply later: systemctl restart neoracer-teleop' in out
+        assert 'Apply later: systemctl restart neoracer-teleop.service' in out
         assert len(ran) == 1
 
     def test_skip_and_quit(self, cal, harness):
@@ -205,7 +205,7 @@ class TestRun:
         answers += ['', 'y']
         lidar = [s for s in cal.STEPS if s.key == 'lidar']
         cal.run_steps(lidar)
-        assert ran[-1] == ['systemctl', 'restart', 'neoracer-teleop']
+        assert ran[-1] == ['systemctl', 'restart', 'neoracer-teleop.service']
 
     def test_tools_run_in_session_mode(self, cal, tools, monkeypatch):
         envs = []
@@ -680,7 +680,13 @@ class TestNeoRacer:
         assert 'turn_gain' not in out
 
     def test_teleop_is_the_neoracer_unit(self, cal):
-        assert cal.TELEOP_UNIT == 'neoracer-teleop'
+        assert cal.TELEOP_UNIT == 'neoracer-teleop.service'
+
+    def test_the_teleop_restart_needs_no_password(self, cal):
+        # /etc/sudoers.d/neoracer names each unit in full; a name without
+        # .service matches no rule, and sudo asks for the password.
+        sudoers = (Path(cal.__file__).parents[1] / 'sudoers.d-neoracer').read_text()
+        assert f'/usr/bin/systemctl restart {cal.TELEOP_UNIT},' in sudoers
 
     def test_a_missing_tool_is_reported_not_failed(self, cal, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(cal, 'HERE', tmp_path)  # no tools here

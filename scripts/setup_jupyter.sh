@@ -133,37 +133,92 @@ done
 # --branch` does not take a commit hash. LIB_REPO can be a local clone.
 # The labs come from neoracer-labs. Assemble both into
 # ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
-# library so notebooks can `import racecar_core`. Re-running refreshes both; a
-# fetch failure aborts setup rather than leaving a half-installed library.
+# library so notebooks can `import racecar_core`.
+# Every run replaces the library, so it matches this driver. The labs folder
+# is the student's workspace. The first run copies the labs in. A later run
+# leaves the labs as they are and does not fetch them, unless
+# RACECAR_LABS_REFRESH is 1. `racecar update --labs` sets it to 1, and
+# `racecar update` sets it to 0. With it at 1, the run copies the labs folder
+# to labs-backup-YYYYMMDD-HHMMSS beside it, then overlays the shipped files.
+# Files a student added stay in place. To refresh the labs with no git reset,
+# run `RACECAR_LABS_REFRESH=1 racecar setup all`. A fetch failure stops setup
+# and leaves the library and the labs as they were.
 LIB_REPO="${LIB_REPO:-https://github.com/Neobotics-Foundation-Inc/racecar-neo-library}"
 LIB_PIN="${LIB_PIN:-v0.9.0-neobotics}"
 LABS_REPO="https://github.com/Neobotics-Foundation-Inc/neoracer-labs"
 NEO_OS="$JUPYTER_WS/neoracer-os"
+LABS="$NEO_OS/labs"
 
-echo "Fetching student library ($LIB_PIN) + labs..."
+FETCH_LABS=1
+if [ -d "$LABS" ] && [ "${RACECAR_LABS_REFRESH:-0}" != 1 ]; then
+    FETCH_LABS=0
+fi
+
+echo "Fetching student library ($LIB_PIN)..."
 TMP="$(mktemp -d)"
+# An EXIT trap removes the temp folder on any exit, so a failed backup or
+# copy leaves none behind.
+trap 'rm -rf "$TMP"' EXIT
 if ! git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"; then
     rm -rf "$TMP"
     echo "Could not fetch the student library at $LIB_PIN from $LIB_REPO." >&2
     echo "Check the network. If that tag or branch does not exist, set LIB_PIN" >&2
-    echo "(and LIB_REPO) to one that does. The library on the car is unchanged." >&2
+    echo "(and LIB_REPO) to one that does." >&2
+    echo "The library and the labs on the car are unchanged." >&2
     exit 1
 fi
-git clone --depth 1 "$LABS_REPO" "$TMP/labs"
+if [ "$FETCH_LABS" = 1 ]; then
+    echo "Fetching labs..."
+    if ! git clone --depth 1 "$LABS_REPO" "$TMP/labs"; then
+        rm -rf "$TMP"
+        echo "Could not fetch the labs from $LABS_REPO. Check the network." >&2
+        echo "The library and the labs on the car are unchanged." >&2
+        exit 1
+    fi
+fi
 mkdir -p "$NEO_OS"
-# The library is ours to replace wholesale. The labs folder is the student's
-# workspace: overlay the shipped files but never delete what they saved there.
+# A refresh copies the labs folder before anything changes. mkdir fails on a
+# folder that exists, so a backup never lands inside an older one.
+if [ "$FETCH_LABS" = 1 ] && [ -d "$LABS" ]; then
+    BACKUP="$NEO_OS/labs-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir "$BACKUP"
+    cp -a "$LABS/." "$BACKUP/"
+    echo "Labs backed up to $BACKUP"
+fi
+# The library is replaced wholesale. The labs are copied only on a first
+# install or a refresh. The copy overlays the shipped files and deletes
+# nothing a student saved.
 rm -rf "$NEO_OS/library"
 cp -r "$TMP/lib/library" "$NEO_OS/library"
-rm -rf "$TMP/labs/.git"
-mkdir -p "$NEO_OS/labs"
-cp -r "$TMP/labs/." "$NEO_OS/labs/"
+if [ "$FETCH_LABS" = 1 ]; then
+    rm -rf "$TMP/labs/.git"
+    mkdir -p "$LABS"
+    cp -r "$TMP/labs/." "$LABS/"
+    echo "Labs ready: $LABS"
+else
+    echo "Labs left unchanged. Run 'racecar update --labs' to refresh them."
+fi
 rm -rf "$TMP"
 
 # Select this library by writing the same racecar_student.pth that
 # `racecar library --select neoracer-os` manages, so a fresh shell can
-# `import racecar_core` with no extra step.
+# `import racecar_core` with no extra step. A student who selected another
+# library keeps that choice. The .pth is kept when its first line names a
+# folder other than this library and that folder holds racecar_core.py.
+# `racecar library --select` and `--list` apply the same test to a folder.
 SITE="$(python3 -c 'import site; print(site.getusersitepackages())')"
-mkdir -p "$SITE"
-echo "$NEO_OS/library" > "$SITE/racecar_student.pth"
-echo "Student library ready: $NEO_OS/library (selected via $SITE/racecar_student.pth)"
+PTH="$SITE/racecar_student.pth"
+SELECTED=""
+if [ -f "$PTH" ]; then
+    SELECTED="$(head -n 1 "$PTH")"
+fi
+if [ -n "$SELECTED" ] && [ "$SELECTED" != "$NEO_OS/library" ] \
+    && [ -f "$SELECTED/racecar_core.py" ]; then
+    echo "Library selection kept: $SELECTED"
+    echo "Student library ready: $NEO_OS/library"
+    echo "Run 'racecar library --select neoracer-os' to use it."
+else
+    mkdir -p "$SITE"
+    echo "$NEO_OS/library" > "$PTH"
+    echo "Student library ready: $NEO_OS/library (selected via $PTH)"
+fi

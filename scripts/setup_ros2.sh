@@ -34,6 +34,7 @@ sudo apt-get update
 sudo apt-get install -y \
     ros-humble-ros-base \
     ros-humble-ackermann-msgs \
+    ros-humble-vision-msgs \
     ros-humble-cv-bridge \
     ros-humble-image-transport \
     ros-humble-image-transport-plugins \

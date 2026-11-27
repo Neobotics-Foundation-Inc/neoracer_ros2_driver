@@ -12,6 +12,7 @@ a sudoers drop-in where upstream uses polkit rules, which Ubuntu 22.04's polkit
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -171,6 +172,7 @@ class TestOneShotSetup:
         'package',
         [
             'ros-humble-ros-base',
+            'ros-humble-vision-msgs',
             'ros-humble-robot-state-publisher',
             'ros-humble-xacro',
             'ros-humble-slam-toolbox',
@@ -266,7 +268,8 @@ class TestRerunOnASetUpCar:
         # start the new unit at boot too, so setup stops the old unit and
         # removes the link, even one whose unit file is gone.
         text = read('setup_services.sh')
-        assert 'link="/etc/systemd/system/multi-user.target.wants/$svc"' in text
+        assert 'SYSTEMD_DIR="${RACECAR_SYSTEMD_DIR:-/etc/systemd/system}"' in text
+        assert 'link="$SYSTEMD_DIR/multi-user.target.wants/$svc"' in text
         assert 'if [[ -L "$link" ]]; then' in text
         remove = text.index('sudo rm -f "$link"')
         assert text.index('sudo systemctl stop "$svc"') < remove
@@ -285,6 +288,344 @@ class TestRerunOnASetUpCar:
         start = text.index('if systemctl is-active --quiet neoracer-teleop.service; then')
         assert 'for svc in "${newly_enabled[@]}"; do' in text[start:]
         assert text.index('newly_enabled+=("$svc")') < start
+
+
+SERVICES_SUDO = r"""#!/bin/bash
+# Stub: an install or a removal in RACECAR_SYSTEMD_DIR runs; every other call
+# is logged. Enabling the unit named in RC_ENABLE_FAILS fails.
+if [[ ("$1" == install || "$1" == rm) && "${!#}" == "$RACECAR_SYSTEMD_DIR"/* ]]; then
+    exec "$@"
+fi
+echo "sudo $*" >> "$RC_LOG"
+[[ "$*" != "systemctl enable ${RC_ENABLE_FAILS:-}" ]]
+"""
+SERVICES_SYSTEMCTL = r"""#!/bin/bash
+# Stub: is-enabled and is-active answer from RC_ENABLED and RC_ACTIVE; every
+# other call is logged.
+args=()
+for a in "$@"; do [[ "$a" == --quiet ]] || args+=("$a"); done
+case "${args[0]}" in
+    is-enabled) [[ " $RC_ENABLED " == *" ${args[1]} "* ]] ;;
+    is-active) [[ " $RC_ACTIVE " == *" ${args[1]} "* ]] ;;
+    list-unit-files) ;;
+    *) echo "systemctl ${args[*]}" >> "$RC_LOG" ;;
+esac
+"""
+
+
+class TestEnableState:
+    """
+    setup_services.sh enables a unit at its first install and never after.
+
+    The script runs against stub sudo and systemctl commands and a temporary
+    unit folder, so a run on a car never installs, enables or starts anything.
+    """
+
+    def run(self, tmp_path, installed=(), enabled=(), active=(), code=0, **env_extra):
+        units = tmp_path / 'units'
+        units.mkdir(exist_ok=True)
+        for svc in installed:
+            (units / svc).write_text('an older unit file\n')
+        stubs = tmp_path / 'bin'
+        stubs.mkdir(exist_ok=True)
+        for name, body in (('sudo', SERVICES_SUDO), ('systemctl', SERVICES_SYSTEMCTL)):
+            (stubs / name).write_text(body)
+            (stubs / name).chmod(0o755)
+        log = tmp_path / 'calls.log'
+        log.write_text('')
+        env = {
+            **os.environ,
+            'PATH': f'{stubs}:{os.environ["PATH"]}',
+            'RACECAR_SYSTEMD_DIR': str(units),
+            'RACECAR_DASHBOARDS': '0',
+            'RC_LOG': str(log),
+            'RC_ENABLED': ' '.join(enabled),
+            'RC_ACTIVE': ' '.join(active),
+            **env_extra,
+        }
+        result = subprocess.run(
+            ['bash', str(SCRIPTS / 'setup_services.sh')],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        assert result.returncode == code, result.stdout + result.stderr
+        return result.stdout, log.read_text().splitlines()
+
+    def boot_units(self):
+        return [f'neoracer-{u}.service' for u in BOOT_UNITS]
+
+    def test_a_first_install_enables_every_boot_unit(self, tmp_path):
+        out, calls = self.run(tmp_path)
+        enabled = [c.split()[-1] for c in calls if c.startswith('sudo systemctl enable')]
+        assert enabled == self.boot_units()
+        assert (tmp_path / 'units' / 'neoracer-autonomy.service').is_file()
+        assert not any(c.startswith('sudo systemctl start') for c in calls)
+
+    def test_a_unit_disabled_on_the_car_stays_disabled(self, tmp_path):
+        units = [*self.boot_units(), 'neoracer-autonomy.service']
+        kept_on = [u for u in self.boot_units() if u != 'neoracer-mapview.service']
+        out, calls = self.run(tmp_path, installed=units, enabled=kept_on)
+        assert not any(c.startswith('sudo systemctl enable') for c in calls)
+        assert 'neoracer-mapview.service: installed before; enable state kept' in out
+        assert out.count('already enabled') == len(kept_on)
+
+    def test_an_upgrade_enables_and_starts_only_the_new_unit(self, tmp_path):
+        # A 0.6.x car has no map viewer unit. Its jupyter unit was disabled
+        # by hand, and stays so.
+        old = [u for u in self.boot_units() if u != 'neoracer-mapview.service']
+        on = [u for u in old if u != 'neoracer-jupyter.service']
+        out, calls = self.run(
+            tmp_path, installed=old, enabled=on, active=['neoracer-teleop.service']
+        )
+        changes = [
+            c for c in calls if c.startswith(('sudo systemctl enable', 'sudo systemctl start'))
+        ]
+        assert changes == [
+            'sudo systemctl enable neoracer-mapview.service',
+            'sudo systemctl start neoracer-mapview.service',
+        ]
+        assert 'neoracer-jupyter.service: installed before; enable state kept' in out
+
+    def test_a_failed_first_enable_is_retried_on_the_next_run(self, tmp_path):
+        # The first run stops at the map viewer's enable. Its new file is
+        # removed again, so the next run counts it as a first install. The
+        # units enabled before the failure keep their files.
+        units = tmp_path / 'units'
+        self.run(tmp_path, code=1, RC_ENABLE_FAILS='neoracer-mapview.service')
+        assert not (units / 'neoracer-mapview.service').exists()
+        before = [u for u in self.boot_units() if u != 'neoracer-mapview.service']
+        assert all((units / u).is_file() for u in before)
+        out, calls = self.run(tmp_path, enabled=before)
+        enabled = [c.split()[-1] for c in calls if c.startswith('sudo systemctl enable')]
+        assert enabled == ['neoracer-mapview.service']
+
+
+JUPYTER_GIT = r"""#!/bin/bash
+# Stub: `git clone` makes a one-file library or labs tree at its last
+# argument, and every call is logged. A clone of a repository named in
+# RC_CLONE_FAILS fails.
+echo "git $*" >> "$RC_LOG"
+[[ "$1" == clone ]] || exit 0
+repo="${@: -2:1}"
+dest="${!#}"
+for name in ${RC_CLONE_FAILS:-}; do
+    if [[ "$repo" == */"$name" ]]; then exit 128; fi
+done
+mkdir -p "$dest/.git"
+case "$repo" in
+    */racecar-neo-library)
+        mkdir -p "$dest/library"
+        echo '# library from the pin' > "$dest/library/racecar_core.py" ;;
+    */neoracer-labs)
+        mkdir -p "$dest/lab_a"
+        echo '# shipped lab' > "$dest/lab_a/lab_a.py" ;;
+esac
+"""
+JUPYTER_MKTEMP = """#!/bin/bash
+# Stub: `mktemp -d` makes its folder under TMPDIR, as GNU mktemp does on the
+# car. The Mac's mktemp ignores TMPDIR.
+exec {mktemp} -d "$TMPDIR/tmp.XXXXXXXXXX"
+"""
+LABS_KEPT = "Labs left unchanged. Run 'racecar update --labs' to refresh them."
+
+
+class TestStudentLibraryAndLabs:
+    """
+    setup_jupyter.sh replaces the library on every run and copies the labs only when asked.
+
+    The part of the script from its "Student library + labs." banner to the
+    end runs on its own, against a stub git, a temporary HOME and a temporary
+    TMPDIR. A run on a car never fetches anything, installs a pip package, or
+    touches the car's own labs, library or data root.
+    """
+
+    def run(self, tmp_path, **env_extra):
+        text = read('setup_jupyter.sh')
+        assert 'JUPYTER_WS="$USER_HOME/jupyter_ws"' in text
+        part = text.split('\n# Student library + labs.\n', 1)[1]
+        script = tmp_path / 'student_side.sh'
+        script.write_text('#!/bin/bash\nset -eo pipefail\nJUPYTER_WS="$HOME/jupyter_ws"\n' + part)
+        stubs = self.stubs(tmp_path)
+        (tmp_path / 'tmp').mkdir(exist_ok=True)
+        log = tmp_path / 'calls.log'
+        log.write_text('')
+        skip = ('RACECAR_LABS_REFRESH', 'LIB_REPO', 'LIB_PIN')
+        env = {k: v for k, v in os.environ.items() if k not in skip}
+        env.update(
+            {
+                'HOME': str(self.home(tmp_path)),
+                'PATH': f'{stubs}:{os.environ["PATH"]}',
+                'PYTHONUSERBASE': str(self.home(tmp_path) / '.local'),
+                'RC_LOG': str(log),
+                'TMPDIR': str(tmp_path / 'tmp'),
+                **env_extra,
+            }
+        )
+        result = subprocess.run(
+            ['bash', str(script)], capture_output=True, text=True, timeout=30, env=env
+        )
+        return result, log.read_text().splitlines()
+
+    def stubs(self, tmp_path):
+        stubs = tmp_path / 'bin'
+        if not stubs.exists():
+            stubs.mkdir()
+            (stubs / 'git').write_text(JUPYTER_GIT)
+            (stubs / 'mktemp').write_text(
+                JUPYTER_MKTEMP.format(mktemp=shlex.quote(shutil.which('mktemp')))
+            )
+            for name in ('git', 'mktemp'):
+                (stubs / name).chmod(0o755)
+            (stubs / 'python3').symlink_to(sys.executable)
+        return stubs
+
+    def home(self, tmp_path):
+        home = tmp_path / 'home'
+        home.mkdir(exist_ok=True)
+        return home
+
+    def neo(self, tmp_path):
+        return self.home(tmp_path) / 'jupyter_ws' / 'neoracer-os'
+
+    def pth(self, tmp_path):
+        out = subprocess.run(
+            [sys.executable, '-c', 'import site; print(site.getusersitepackages())'],
+            capture_output=True,
+            text=True,
+            env=dict(
+                os.environ,
+                HOME=str(self.home(tmp_path)),
+                PYTHONUSERBASE=str(self.home(tmp_path) / '.local'),
+            ),
+        ).stdout.strip()
+        return Path(out) / 'racecar_student.pth'
+
+    def select(self, tmp_path, library):
+        pth = self.pth(tmp_path)
+        pth.parent.mkdir(parents=True, exist_ok=True)
+        pth.write_text(f'{library}\n')
+        return pth
+
+    def edited_labs(self, tmp_path):
+        """Make the labs folder of a car set up before, with one shipped lab edited."""
+        lab = self.neo(tmp_path) / 'labs' / 'lab_a' / 'lab_a.py'
+        lab.parent.mkdir(parents=True)
+        lab.write_text('# student edit\n')
+        return lab
+
+    def fetched_labs(self, calls):
+        return any('neoracer-labs' in c for c in calls)
+
+    def backups(self, tmp_path):
+        return sorted(self.neo(tmp_path).glob('labs-backup-*'))
+
+    def test_a_first_install_copies_the_labs(self, tmp_path):
+        result, calls = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        labs = self.neo(tmp_path) / 'labs'
+        assert (labs / 'lab_a' / 'lab_a.py').read_text() == '# shipped lab\n'
+        assert not (labs / '.git').exists()
+        assert self.fetched_labs(calls)
+        assert not self.backups(tmp_path)
+        assert self.pth(tmp_path).read_text() == f'{self.neo(tmp_path) / "library"}\n'
+        assert not list((tmp_path / 'tmp').iterdir())
+
+    @pytest.mark.parametrize('refresh', [None, '0'])
+    def test_a_rerun_leaves_the_labs_alone_and_does_not_fetch_them(self, tmp_path, refresh):
+        lab = self.edited_labs(tmp_path)
+        env = {} if refresh is None else {'RACECAR_LABS_REFRESH': refresh}
+        result, calls = self.run(tmp_path, **env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert lab.read_text() == '# student edit\n'
+        assert not self.fetched_labs(calls)
+        assert LABS_KEPT in result.stdout.splitlines()
+        assert not self.backups(tmp_path)
+
+    def test_a_refresh_backs_up_the_labs_then_replaces_the_shipped_files(self, tmp_path):
+        lab = self.edited_labs(tmp_path)
+        own = self.neo(tmp_path) / 'labs' / 'my_lab.py'
+        own.write_text('# student file\n')
+        result, calls = self.run(tmp_path, RACECAR_LABS_REFRESH='1')
+        assert result.returncode == 0, result.stdout + result.stderr
+        backups = self.backups(tmp_path)
+        assert len(backups) == 1
+        assert re.fullmatch(r'labs-backup-\d{8}-\d{6}', backups[0].name)
+        assert (backups[0] / 'lab_a' / 'lab_a.py').read_text() == '# student edit\n'
+        assert (backups[0] / 'my_lab.py').read_text() == '# student file\n'
+        assert f'Labs backed up to {backups[0]}' in result.stdout
+        assert lab.read_text() == '# shipped lab\n'
+        assert own.read_text() == '# student file\n'
+        assert LABS_KEPT not in result.stdout
+
+    def test_every_run_replaces_the_library(self, tmp_path):
+        self.edited_labs(tmp_path)
+        old = self.neo(tmp_path) / 'library'
+        old.mkdir()
+        (old / 'racecar_core.py').write_text('# old library\n')
+        (old / 'stale.py').write_text('')
+        result, _ = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (old / 'racecar_core.py').read_text() == '# library from the pin\n'
+        assert not (old / 'stale.py').exists()
+
+    def test_another_selected_library_is_kept(self, tmp_path):
+        self.edited_labs(tmp_path)
+        mine = self.home(tmp_path) / 'jupyter_ws' / 'my-library' / 'library'
+        mine.mkdir(parents=True)
+        (mine / 'racecar_core.py').write_text('')
+        pth = self.select(tmp_path, mine)
+        result, _ = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pth.read_text() == f'{mine}\n'
+        assert f'Library selection kept: {mine}' in result.stdout.splitlines()
+
+    @pytest.mark.parametrize('folder', ['missing', 'without racecar_core.py'])
+    def test_a_selection_whose_library_is_gone_is_reset(self, tmp_path, folder):
+        # racecar library --select and --list count a folder as a library only
+        # when it holds racecar_core.py.
+        self.edited_labs(tmp_path)
+        gone = self.home(tmp_path) / 'jupyter_ws' / 'old-library' / 'library'
+        if folder != 'missing':
+            gone.mkdir(parents=True)
+        pth = self.select(tmp_path, gone)
+        result, _ = self.run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pth.read_text() == f'{self.neo(tmp_path) / "library"}\n'
+        assert 'Library selection kept' not in result.stdout
+
+    @pytest.mark.parametrize('repo', ['racecar-neo-library', 'neoracer-labs'])
+    def test_a_failed_fetch_changes_nothing(self, tmp_path, repo):
+        lab = self.edited_labs(tmp_path)
+        old = self.neo(tmp_path) / 'library'
+        old.mkdir()
+        (old / 'racecar_core.py').write_text('# old library\n')
+        pth = self.select(tmp_path, old)
+        result, _ = self.run(tmp_path, RACECAR_LABS_REFRESH='1', RC_CLONE_FAILS=repo)
+        assert result.returncode == 1
+        assert 'the labs on the car' in result.stderr
+        assert lab.read_text() == '# student edit\n'
+        assert (old / 'racecar_core.py').read_text() == '# old library\n'
+        assert pth.read_text() == f'{old}\n'
+        assert not self.backups(tmp_path)
+        assert not list((tmp_path / 'tmp').iterdir())
+
+    def test_a_failed_backup_leaves_no_temp_folder(self, tmp_path):
+        # A stub date gives the backup the name of a folder already there,
+        # as two refreshes in one second would, so its mkdir fails.
+        lab = self.edited_labs(tmp_path)
+        date = self.stubs(tmp_path) / 'date'
+        date.write_text('#!/bin/bash\necho 20260101-000000\n')
+        date.chmod(0o755)
+        taken = self.neo(tmp_path) / 'labs-backup-20260101-000000'
+        taken.mkdir()
+        result, _ = self.run(tmp_path, RACECAR_LABS_REFRESH='1')
+        assert result.returncode == 1
+        assert lab.read_text() == '# student edit\n'
+        assert not list(taken.iterdir())
+        assert not (self.neo(tmp_path) / 'library').exists()
+        assert not list((tmp_path / 'tmp').iterdir())
 
 
 class TestLaunchWrapper:

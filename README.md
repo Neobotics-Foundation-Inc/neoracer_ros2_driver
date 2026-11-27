@@ -123,12 +123,11 @@ With the car powered off, connect the ESP32 base, the LakiBeam1 (USB-C), the web
 sudo reboot
 ```
 
-After reboot, verify and start the stack:
+After reboot, verify the stack. Teleop starts at boot:
 
 ```sh
 racecar status --quick      # host checks only, without the ROS sampling window
-racecar service status      # units enabled by setup, teleop not yet running
-racecar service start       # starts neoracer-teleop (watchdog follows)
+racecar service status      # core units running
 ```
 
 Browse to `http://neoracer.local:8080` for the live dashboard.
@@ -154,13 +153,13 @@ Eight phases, all under `scripts/`:
 5. **`setup_workspace.sh`**: clones the LakiBeam1 driver into `src/lakibeam1` at a pinned tag, then `colcon build --symlink-install`
 6. **`setup_ml.sh`**: PyTorch/torchvision for Tegra, Ultralytics, ONNX export tooling; verifies the JetPack TensorRT bindings
 7. **`setup_jupyter.sh`**: JupyterLab, `~/jupyter_ws/`, and the student library at a pinned tag + labs
-8. **`setup_services.sh`**: installs the systemd units and `/etc/sudoers.d/neoracer`; core stack and map viewer enabled, `neoracer-autonomy` installed but not enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
+8. **`setup_services.sh`**: installs the systemd units and `/etc/sudoers.d/neoracer`; core stack and map viewer enabled at first install, `neoracer-autonomy` installed but not enabled, lab dashboards installed from `scripts/dashboards/` by `setup_dashboards.sh` and left disabled
 
 Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-over-WiFi install. Any phase script runs on its own to redo a step, e.g. `bash scripts/setup_udev.sh` after a hardware swap.
 
 The lidar driver (package `lakibeam1`) is third-party and is not vendored in this repo. Phase 5 clones it from the [Neobotics fork](https://github.com/Neobotics-Foundation-Inc/Lakibeam_ROS2_Driver) at tag `v1.0-neobotics`, which carries the scan-health fixes described in [docs/lidar_scan_health.md](docs/lidar_scan_health.md). Override with `LAKI_REPO=` / `LAKI_PIN=` to test an unreleased revision.
 
-Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. If the clone fails, setup stops at phase 7 and leaves the car's library as it was.
+Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. Phase 7 clones the labs only on a car that has none yet or for a labs refresh. If a clone fails, setup stops at phase 7 and leaves the car's library and labs as they were.
 
 ## The `racecar` shell tool
 
@@ -178,7 +177,7 @@ racecar compile custom.pt   # ...or a specific .pt, resolved in models/
 racecar watchdog            # run the supervisor in the foreground
 
 racecar service status      # active/enabled snapshot for every unit
-racecar service install     # install units: core enabled, dashboards disabled
+racecar service install     # install units: core enabled at first install, dashboards disabled
 racecar service start       # no name: the core stack
 racecar service stop        # no name: the core stack
 racecar service restart     # every enabled unit; never starts a disabled one
@@ -196,9 +195,10 @@ racecar calibrate           # guided calibration: lidar, odom, steering (dynamic
 racecar calibrate status    # what is calibrated on this car, when, and the values
 racecar calibrate check     # each calibration against the live sensors
 
-racecar setup all           # the 7-phase orchestrator
+racecar setup all           # the 8-phase orchestrator
 racecar setup networking    # WiFi AP + Ethernet + lidar subnet
 racecar update              # repo to latest main + full setup + service restart
+racecar update --labs       # ...and refresh the labs after a backup copy
 
 racecar ws [neoracer|osracer]   # switch this shell between workspaces
 racecar library --list          # student library folders in ~/jupyter_ws
@@ -211,7 +211,7 @@ racecar cleanup [--force]       # list / kill stale processes + SHM orphans
 racecar help                    # full usage
 ```
 
-`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet.
+`racecar update` resets the repo to `origin/main` (discarding local edits), runs the full setup, and restarts every enabled service. A disabled lab dashboard stays down across an update. Requires internet. It leaves the labs as they are. `racecar update --labs` also refreshes them, as [Jupyter notebooks and the student library](#jupyter-notebooks-and-the-student-library) describes.
 
 `racecar test` leaves out the on-car hardware tests in `test/test_hardware.py`. Run them on the car with teleop running and the handset on: `racecar cd`, then `python3 -m pytest -m hardware test/test_hardware.py -v`. Each failure names the device and gives a fix.
 
@@ -380,7 +380,9 @@ racecar library --select <folder>  # choose which library is on the Python path
 racecar library --status           # show the current selection
 ```
 
-Refreshing the labs preserves student files.
+Every setup run, `racecar update` included, replaces the library in `~/jupyter_ws/neoracer-os/library`, so it matches the driver. The first setup copies the labs into `~/jupyter_ws/neoracer-os/labs`. After that, setup and `racecar update` leave the labs as they are. `racecar update --labs` refreshes them. It first copies the labs folder to `~/jupyter_ws/neoracer-os/labs-backup-<date>-<time>`, for example `labs-backup-20261127-141500`. It then replaces each shipped lab file with the new version. Files a student added stay in place. Setup does not delete old backup folders. Delete one when it is no longer needed. `RACECAR_LABS_REFRESH=1 racecar setup all` refreshes the labs the same way with no git reset.
+
+Setup selects the `neoracer-os` library on every run, unless a student selected another library with `racecar library --select` and that folder still holds `racecar_core.py`.
 
 ## GPU stack
 
@@ -464,7 +466,7 @@ Settings live in `config/inference.yaml`:
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `model_path` | `yolo11n.pt` | Absolute path, a filename in `models/`, or a stock Ultralytics name |
+| `model_path` | `yolo26n.engine` | Absolute path, a filename in `models/`, or a stock Ultralytics name |
 | `device` | `"0"` | CUDA index, or `"cpu"` |
 | `imgsz` / `score_threshold` / `iou_threshold` | 640 / 0.5 / 0.45 | Model input size and NMS thresholds |
 | `max_detections` | 10 | Cap per frame |
@@ -475,7 +477,7 @@ Settings live in `config/inference.yaml`:
 
 Inference is slower than the 60 fps camera, so the subscription holds a single best-effort frame: a frame arriving while the model is busy replaces the one waiting behind it rather than queueing. Detections stay on the present instead of falling behind a backlog, at the cost of frames the model never sees. Measured on a 25 W Orin Nano with the teleop stack running, `yolo26n.pt` averages 50.1 ms per frame; the TensorRT engine cuts that to 20.9 ms, which clears the `max_rate_hz` ceiling of 15 Hz with headroom to spare.
 
-Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. The `.pt` weights are committed, so a fresh clone runs inference without a download. Engines are tied to the board and the TensorRT version that built them, so each car builds its own with `racecar compile` and `models/*.engine` stays gitignored.
+Point `model_path` at an `.engine` to use it; both formats load through the same call. Building one is the export step in [GPU stack](#gpu-stack), and `models/README.md` has the recipe. The `.pt` weights and a TensorRT engine for this fleet's configuration are committed, so a fresh clone runs inference without a download. A car that cannot load the engine falls back to `yolo26n.pt` and says so in the log. Rebuild the engine there with `racecar compile`.
 
 Health lands on `/diagnostics` (latency, detection counts, frame staleness) and on the dashboard as a **YOLO inference** card.
 
@@ -495,9 +497,15 @@ A bare `ros2 topic echo /scan` is not evidence of a dead lidar. `echo` truncates
 
 Factory images ship the Seeed vendor stack preinstalled in `~/osracer_ws`, including its own copy of the `lakibeam1` package that has diverged from the pinned fork. Two copies of one package means the lidar you get depends on overlay order, and colcon may refuse to build ("underlay override").
 
-Setup reconciles this to a single shared lidar: it masks the vendor copy with `COLCON_IGNORE`, symlinks `src/lakibeam1` into `~/osracer_ws/src`, and rebuilds it there. Both workspaces stay usable, one active per shell, and build from one source.
+Setup reconciles this to a single shared lidar. It makes these changes in `~/osracer_ws`:
 
-- Setup never edits existing `.bashrc` lines. It appends one marked block, `# Neoracer - default workspace`, which runs after the factory lines and resets the environment to the neoracer overlay. Nothing under `~/osracer_ws` is modified.
+- It adds `COLCON_IGNORE` to the vendor copy of `lakibeam1`, so colcon skips it.
+- It links the pinned `src/lakibeam1` into `~/osracer_ws/src` and rebuilds that one package there.
+- It changes the lidar address in the vendor's `osracer_bringup/launch/lidar.launch.py` from 192.168.198.2 to 192.168.8.2, the lidar's address over USB-C.
+
+Setup also installs four apt packages that the vendor bringup needs and the factory image leaves out: `ros-humble-tf-transformations`, `python3-transforms3d`, `ros-humble-robot-localization` and `ros-humble-imu-complementary-filter`. Both workspaces stay usable, one active per shell, and build from one source. Running setup again gives the same result.
+
+- Setup never edits existing `.bashrc` lines. It appends one marked block, `# Neoracer - default workspace`, which runs after the factory lines and resets the environment to the neoracer overlay.
 - `racecar ws osracer` switches the current shell to the vendor stack, `racecar ws neoracer` switches back, and a bare `racecar ws` shows which is active. The switch is per shell and leaves disk state alone.
 - Restore the factory default by deleting that block from `~/.bashrc`; every factory line is still there, untouched.
 - If the vendor stack autostarts on your image (`systemctl list-unit-files | grep -i osr`), stop it before running teleop; both stacks contend for the serial ports.
