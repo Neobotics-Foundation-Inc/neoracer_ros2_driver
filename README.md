@@ -502,9 +502,8 @@ Setup reconciles this to a single shared lidar. It makes these changes in `~/osr
 - It adds `COLCON_IGNORE` to the vendor copy of `lakibeam1`, so colcon skips it.
 - It links the pinned `src/lakibeam1` into `~/osracer_ws/src` and rebuilds that one package there.
 - It changes the lidar address in the vendor's `osracer_bringup/launch/lidar.launch.py` from 192.168.198.2 to 192.168.8.2, the lidar's address over USB-C.
-- It installs four ROS packages that the vendor bringup needs and the factory image leaves out.
 
-Both workspaces stay usable, one active per shell, and build from one source. Running setup again gives the same result.
+Setup also installs four apt packages that the vendor bringup needs and the factory image leaves out: `ros-humble-tf-transformations`, `python3-transforms3d`, `ros-humble-robot-localization` and `ros-humble-imu-complementary-filter`. Both workspaces stay usable, one active per shell, and build from one source. Running setup again gives the same result.
 
 - Setup never edits existing `.bashrc` lines. It appends one marked block, `# Neoracer - default workspace`, which runs after the factory lines and resets the environment to the neoracer overlay.
 - `racecar ws osracer` switches the current shell to the vendor stack, `racecar ws neoracer` switches back, and a bare `racecar ws` shows which is active. The switch is per shell and leaves disk state alone.
