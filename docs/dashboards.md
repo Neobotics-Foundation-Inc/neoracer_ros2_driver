@@ -159,8 +159,8 @@ camlabel kept it and where the installer's erase list reaches, to
 no dataset: two datasets are never merged, because their image numbers would
 collide. Nothing is deleted, a checkout that cannot be moved is left in place
 and reported, and a second run finds nothing to move. The old units have the
-same `neoracer-<id>` names, so the new units replace them and keep their
-enable state.
+same `neoracer-<id>` names, so the new units replace them. Setup disables
+each one before its checkout moves, because the old setup enabled it at boot.
 
 The driver does not use `scripts/dashboards/.migrated/` after the move. The
 folder is kept because an old checkout can hold something the steps above do

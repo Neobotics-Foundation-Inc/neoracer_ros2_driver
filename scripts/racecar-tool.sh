@@ -1174,8 +1174,9 @@ Commands:
                                            --lidar-host=CIDR (default 192.168.8.1/24)
                                            --show / --reset
     service <action>    systemd service control. Actions:
-                          install              setup_services.sh (core enabled,
-                                               dashboards installed disabled)
+                          install              setup_services.sh (core enabled
+                                               at first install, dashboards
+                                               installed disabled)
                           start [name]         no name: the core stack
                           stop [name]          no name: the core stack
                           restart [name]       no name: every enabled unit;

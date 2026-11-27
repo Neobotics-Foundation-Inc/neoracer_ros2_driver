@@ -177,7 +177,7 @@ racecar compile custom.pt   # ...or a specific .pt, resolved in models/
 racecar watchdog            # run the supervisor in the foreground
 
 racecar service status      # active/enabled snapshot for every unit
-racecar service install     # install units: core enabled, dashboards disabled
+racecar service install     # install units: core enabled at first install, dashboards disabled
 racecar service start       # no name: the core stack
 racecar service stop        # no name: the core stack
 racecar service restart     # every enabled unit; never starts a disabled one
@@ -380,7 +380,7 @@ racecar library --select <folder>  # choose which library is on the Python path
 racecar library --status           # show the current selection
 ```
 
-Every setup run, `racecar update` included, replaces the library in `~/jupyter_ws/neoracer-os/library`, so it matches the driver. The first setup copies the labs into `~/jupyter_ws/neoracer-os/labs`. After that, setup and `racecar update` leave the labs as they are. `racecar update --labs` refreshes them. It first copies the labs folder to `~/jupyter_ws/neoracer-os/labs-backup-<date>-<time>`, for example `labs-backup-20261127-141500`. It then replaces each shipped lab file with the new version. Files a student added stay in place. `RACECAR_LABS_REFRESH=1 racecar setup all` refreshes the labs the same way with no git reset.
+Every setup run, `racecar update` included, replaces the library in `~/jupyter_ws/neoracer-os/library`, so it matches the driver. The first setup copies the labs into `~/jupyter_ws/neoracer-os/labs`. After that, setup and `racecar update` leave the labs as they are. `racecar update --labs` refreshes them. It first copies the labs folder to `~/jupyter_ws/neoracer-os/labs-backup-<date>-<time>`, for example `labs-backup-20261127-141500`. It then replaces each shipped lab file with the new version. Files a student added stay in place. Setup does not delete old backup folders. Delete one when it is no longer needed. `RACECAR_LABS_REFRESH=1 racecar setup all` refreshes the labs the same way with no git reset.
 
 Setup selects the `neoracer-os` library on every run, unless a student selected another library with `racecar library --select` and that folder still holds `racecar_core.py`.
 
