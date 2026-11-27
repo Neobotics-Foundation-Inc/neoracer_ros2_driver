@@ -76,8 +76,19 @@ for svc in "${INSTALL_ONLY[@]}"; do
     fi
 done
 
-# A unit whose file is not on the car yet is a first install.
+# A unit whose file is not on the car yet is a first install. When a run stops
+# before such a core unit is enabled, its new file is removed again, so the
+# next run still counts it as a first install and enables it.
 declare -A first_install=()
+remove_new_units() {
+    local svc
+    for svc in "${SERVICES[@]}"; do
+        if [[ -n "${first_install[$svc]:-}" ]]; then
+            sudo rm -f "${SYSTEMD_DIR}/${svc}"
+        fi
+    done
+}
+trap remove_new_units EXIT
 for svc in "${SERVICES[@]}" "${INSTALL_ONLY[@]}"; do
     src="${SCRIPT_DIR}/${svc}"
     dst="${SYSTEMD_DIR}/${svc}"
@@ -129,7 +140,9 @@ for svc in "${SERVICES[@]}"; do
         echo "  $svc: enabled"
         newly_enabled+=("$svc")
     fi
+    unset 'first_install[$svc]'
 done
+trap - EXIT
 
 # A unit enabled for the first time normally comes up at the next boot. On a
 # car whose stack already runs, setup starts it now. `racecar update` from

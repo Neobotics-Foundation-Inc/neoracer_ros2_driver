@@ -290,11 +290,13 @@ class TestRerunOnASetUpCar:
 
 
 SERVICES_SUDO = r"""#!/bin/bash
-# Stub: an install into RACECAR_SYSTEMD_DIR runs; every other call is logged.
-if [[ "$1" == install && "${!#}" == "$RACECAR_SYSTEMD_DIR"/* ]]; then
+# Stub: an install or a removal in RACECAR_SYSTEMD_DIR runs; every other call
+# is logged. Enabling the unit named in RC_ENABLE_FAILS fails.
+if [[ ("$1" == install || "$1" == rm) && "${!#}" == "$RACECAR_SYSTEMD_DIR"/* ]]; then
     exec "$@"
 fi
 echo "sudo $*" >> "$RC_LOG"
+[[ "$*" != "systemctl enable ${RC_ENABLE_FAILS:-}" ]]
 """
 SERVICES_SYSTEMCTL = r"""#!/bin/bash
 # Stub: is-enabled and is-active answer from RC_ENABLED and RC_ACTIVE; every
@@ -318,7 +320,7 @@ class TestEnableState:
     unit folder, so a run on a car never installs, enables or starts anything.
     """
 
-    def run(self, tmp_path, installed=(), enabled=(), active=()):
+    def run(self, tmp_path, installed=(), enabled=(), active=(), code=0, **env_extra):
         units = tmp_path / 'units'
         units.mkdir(exist_ok=True)
         for svc in installed:
@@ -338,6 +340,7 @@ class TestEnableState:
             'RC_LOG': str(log),
             'RC_ENABLED': ' '.join(enabled),
             'RC_ACTIVE': ' '.join(active),
+            **env_extra,
         }
         result = subprocess.run(
             ['bash', str(SCRIPTS / 'setup_services.sh')],
@@ -346,7 +349,7 @@ class TestEnableState:
             timeout=30,
             env=env,
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == code, result.stdout + result.stderr
         return result.stdout, log.read_text().splitlines()
 
     def boot_units(self):
@@ -383,6 +386,19 @@ class TestEnableState:
             'sudo systemctl start neoracer-mapview.service',
         ]
         assert 'neoracer-jupyter.service: installed before; enable state kept' in out
+
+    def test_a_failed_first_enable_is_retried_on_the_next_run(self, tmp_path):
+        # The first run stops at the map viewer's enable. Its new file is
+        # removed again, so the next run counts it as a first install. The
+        # units enabled before the failure keep their files.
+        units = tmp_path / 'units'
+        self.run(tmp_path, code=1, RC_ENABLE_FAILS='neoracer-mapview.service')
+        assert not (units / 'neoracer-mapview.service').exists()
+        before = [u for u in self.boot_units() if u != 'neoracer-mapview.service']
+        assert all((units / u).is_file() for u in before)
+        out, calls = self.run(tmp_path, enabled=before)
+        enabled = [c.split()[-1] for c in calls if c.startswith('sudo systemctl enable')]
+        assert enabled == ['neoracer-mapview.service']
 
 
 JUPYTER_GIT = r"""#!/bin/bash
