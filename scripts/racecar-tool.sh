@@ -693,11 +693,20 @@ __RC_NET_HELP__
                         # goes on. The third field of SSH_CONNECTION is the
                         # car's address for the session. The access point
                         # address is the saved RACECAR_AP_ADDR, or the
-                        # AP_ADDR default in setup_networking.sh.
-                        local ap_addr="${vals[RACECAR_AP_ADDR]:-10.42.0.1/24}" answer=""
+                        # AP_ADDR default in setup_networking.sh. A session
+                        # to neoracer.local can also arrive on the Wi-Fi
+                        # interface's IPv6 link-local address, which can end
+                        # in %<interface>, so every address of that interface
+                        # counts too.
+                        local ap_addr="${vals[RACECAR_AP_ADDR]:-10.42.0.1/24}" answer="" here=""
+                        local wifi_iface="${vals[RACECAR_WIFI_IFACE]:-wlP1p1s0}"
                         local -a ssh_fields=()
                         read -r -a ssh_fields <<<"${SSH_CONNECTION:-}"
-                        if [[ -n "${ssh_fields[2]:-}" && "${ssh_fields[2]}" == "${ap_addr%%/*}" ]]; then
+                        here="${ssh_fields[2]:-}"
+                        here="${here%%\%*}"
+                        if [[ -n "$here" ]] && { [[ "$here" == "${ap_addr%%/*}" ]] \
+                            || ip -o addr show dev "$wifi_iface" 2>/dev/null \
+                                | awk -v a="$here" '{ split($4, p, "/"); if (p[1] == a) f = 1 } END { exit !f }'; }; then
                             printf 'Delete the access point now? [y/N] '
                             read -r answer || answer=""
                             if [[ "$answer" != [yY] ]]; then

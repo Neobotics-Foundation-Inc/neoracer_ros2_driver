@@ -97,6 +97,16 @@ if [[ "$*" == '-t -f NAME connection show' ]]; then
 fi
 echo "nmcli $*" >> "$RC_LOG"
 """
+IP = r"""#!/bin/bash
+# Stub: `ip -o addr show dev IFACE` prints one line per address in
+# RC_IFACE_ADDRS when IFACE is RC_IFACE (wlP1p1s0 by default). Any other call
+# fails, as on a machine with no ip command.
+if [[ "$1 $2 $3 $4" == '-o addr show dev' && "$5" == "${RC_IFACE:-wlP1p1s0}" ]]; then
+    for a in ${RC_IFACE_ADDRS:-}; do echo "3: $5    inet6 $a scope link"; done
+    exit 0
+fi
+exit 127
+"""
 
 
 class Car:
@@ -117,6 +127,7 @@ class Car:
         self.bin.mkdir()
         (self.bin / 'systemctl').write_text(SYSTEMCTL)
         (self.bin / 'nmcli').write_text(NMCLI)
+        (self.bin / 'ip').write_text(IP)
         for name in ('sudo', 'git', 'colcon', 'ros2', 'journalctl'):
             (self.bin / name).write_text(LOGGER.format(name=name))
         (self.bin / 'hostname').write_text('#!/bin/bash\necho neoracer\n')
@@ -703,11 +714,50 @@ class TestSetup:
             '--reset',
             SSH_CONNECTION='192.168.10.20 50122 192.168.10.100 22',
             RC_CONNECTIONS='neoracer-ap',
+            RC_IFACE_ADDRS='10.42.0.1/24 fe80::1/64',
         )
         assert result.returncode == 0, result.stderr
         assert 'Delete the access point now?' not in result.stdout
         assert not cfg.exists()
         assert car.calls() == ['sudo nmcli connection delete neoracer-ap']
+
+    @pytest.mark.parametrize(
+        'connection',
+        ['fe80::aa 50122 fe80::1%wlP1p1s0 22', 'fe80::aa 50122 fe80::1 22'],
+    )
+    def test_a_reset_over_the_wifi_link_local_address_asks(self, car, connection):
+        # neoracer.local can resolve to the Wi-Fi interface's IPv6 link-local
+        # address, so an SSH session over the access point need not use its
+        # IPv4 address.
+        cfg = self.saved_settings(car, 'RACECAR_AP_SSID="dummy"\n')
+        result = car.run(
+            'setup',
+            'networking',
+            '--reset',
+            stdin='n\n',
+            SSH_CONNECTION=connection,
+            RC_CONNECTIONS='neoracer-ap',
+            RC_IFACE_ADDRS='10.42.0.1/24 fe80::1/64',
+        )
+        assert result.returncode == 1
+        assert 'Delete the access point now? [y/N]' in result.stdout
+        assert cfg.exists()
+        assert car.calls() == []
+
+    def test_a_reset_reads_the_saved_wifi_interface(self, car):
+        self.saved_settings(car, 'RACECAR_WIFI_IFACE="wlan0"\n')
+        result = car.run(
+            'setup',
+            'networking',
+            '--reset',
+            stdin='n\n',
+            SSH_CONNECTION='fe80::aa 50122 fe80::1 22',
+            RC_CONNECTIONS='neoracer-ap',
+            RC_IFACE='wlan0',
+            RC_IFACE_ADDRS='fe80::1/64',
+        )
+        assert result.returncode == 1
+        assert 'Reset cancelled. Nothing changed.' in result.stdout
 
     def test_a_reset_with_no_ssh_session_does_not_ask(self, car):
         cfg = self.saved_settings(car, 'RACECAR_AP_SSID="dummy"\n')
@@ -721,6 +771,8 @@ class TestSetup:
         setup = (ROOT / 'scripts' / 'setup_networking.sh').read_text()
         assert 'AP_ADDR="${RACECAR_AP_ADDR:-10.42.0.1/24}"' in setup
         assert 'local ap_addr="${vals[RACECAR_AP_ADDR]:-10.42.0.1/24}"' in TEXT
+        assert 'WIFI_IFACE="${RACECAR_WIFI_IFACE:-wlP1p1s0}"' in setup
+        assert 'local wifi_iface="${vals[RACECAR_WIFI_IFACE]:-wlP1p1s0}"' in TEXT
 
     def test_networking_flag_persists_when_combined_with_show(self, car):
         result = car.run('setup', 'networking', '--ssid=test-ssid', '--psk=test-pass', '--show')
