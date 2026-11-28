@@ -451,7 +451,7 @@ class TestStudentLibraryAndLabs:
         (tmp_path / 'tmp').mkdir(exist_ok=True)
         log = tmp_path / 'calls.log'
         log.write_text('')
-        skip = ('RACECAR_LABS_REFRESH', 'LIB_REPO', 'LIB_PIN')
+        skip = ('RACECAR_LABS_REFRESH', 'LIB_REPO', 'LIB_PIN', 'LABS_REPO', 'LABS_PIN')
         env = {k: v for k, v in os.environ.items() if k not in skip}
         env.update(
             {
@@ -531,6 +531,18 @@ class TestStudentLibraryAndLabs:
         assert not self.backups(tmp_path)
         assert self.pth(tmp_path).read_text() == f'{self.neo(tmp_path) / "library"}\n'
         assert not list((tmp_path / 'tmp').iterdir())
+
+    @pytest.mark.parametrize('pin', [None, 'labs-test-branch'])
+    def test_the_labs_are_cloned_at_their_pin(self, tmp_path, pin):
+        # The labs are pinned like the library: the tag made for this driver
+        # release by default, or the LABS_PIN a test car sets.
+        env = {} if pin is None else {'LABS_PIN': pin}
+        result, calls = self.run(tmp_path, **env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        clones = [c for c in calls if c.startswith('git clone') and 'neoracer-labs' in c]
+        assert len(clones) == 1
+        assert f'--branch {pin or "v0.9.0-neobotics"} ' in clones[0]
+        assert f'Fetching labs ({pin or "v0.9.0-neobotics"})...' in result.stdout
 
     @pytest.mark.parametrize('refresh', [None, '0'])
     def test_a_rerun_leaves_the_labs_alone_and_does_not_fetch_them(self, tmp_path, refresh):

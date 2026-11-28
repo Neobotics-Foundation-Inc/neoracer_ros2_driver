@@ -131,7 +131,11 @@ done
 # and the 1,440-point lidar. Override LIB_REPO/LIB_PIN to test an unreleased
 # library revision on a car. LIB_PIN names a tag or a branch; `git clone
 # --branch` does not take a commit hash. LIB_REPO can be a local clone.
-# The labs come from neoracer-labs. Assemble both into
+# The labs come from neoracer-labs, pinned the same way to the tag made for
+# this driver release, so `racecar update --labs` gets the labs written for
+# this library. Override LABS_REPO/LABS_PIN to test unreleased labs on a car.
+# A labs change that cars should get takes a new labs tag and a new LABS_PIN
+# here, as a library change does. Assemble both into
 # ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
 # library so notebooks can `import racecar_core`.
 # Every run replaces the library, so it matches this driver. The labs folder
@@ -145,7 +149,8 @@ done
 # and leaves the library and the labs as they were.
 LIB_REPO="${LIB_REPO:-https://github.com/Neobotics-Foundation-Inc/racecar-neo-library}"
 LIB_PIN="${LIB_PIN:-v0.9.0-neobotics}"
-LABS_REPO="https://github.com/Neobotics-Foundation-Inc/neoracer-labs"
+LABS_REPO="${LABS_REPO:-https://github.com/Neobotics-Foundation-Inc/neoracer-labs}"
+LABS_PIN="${LABS_PIN:-v0.9.0-neobotics}"
 NEO_OS="$JUPYTER_WS/neoracer-os"
 LABS="$NEO_OS/labs"
 
@@ -168,10 +173,12 @@ if ! git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"; then
     exit 1
 fi
 if [ "$FETCH_LABS" = 1 ]; then
-    echo "Fetching labs..."
-    if ! git clone --depth 1 "$LABS_REPO" "$TMP/labs"; then
+    echo "Fetching labs ($LABS_PIN)..."
+    if ! git clone --depth 1 --branch "$LABS_PIN" "$LABS_REPO" "$TMP/labs"; then
         rm -rf "$TMP"
-        echo "Could not fetch the labs from $LABS_REPO. Check the network." >&2
+        echo "Could not fetch the labs at $LABS_PIN from $LABS_REPO." >&2
+        echo "Check the network. If that tag or branch does not exist, set LABS_PIN" >&2
+        echo "(and LABS_REPO) to one that does." >&2
         echo "The library and the labs on the car are unchanged." >&2
         exit 1
     fi
