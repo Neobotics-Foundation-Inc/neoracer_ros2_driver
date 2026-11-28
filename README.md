@@ -159,7 +159,7 @@ Networking is not one of the phases: it reconfigures WiFi and would drop an SSH-
 
 The lidar driver (package `lakibeam1`) is third-party and is not vendored in this repo. Phase 5 clones it from the [Neobotics fork](https://github.com/Neobotics-Foundation-Inc/Lakibeam_ROS2_Driver) at tag `v1.0-neobotics`, which carries the scan-health fixes described in [docs/lidar_scan_health.md](docs/lidar_scan_health.md). Override with `LAKI_REPO=` / `LAKI_PIN=` to test an unreleased revision.
 
-Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. Phase 7 clones the labs only on a car that has none yet or for a labs refresh. If a clone fails, setup stops at phase 7 and leaves the car's library and labs as they were.
+Phase 7 clones the [student library fork](https://github.com/Neobotics-Foundation-Inc/racecar-neo-library) at tag `v0.9.0-neobotics`, the library this driver release was tested with. Override with `LIB_REPO=` / `LIB_PIN=` to test an unreleased revision, for example `LIB_PIN=<branch> bash scripts/setup_all.sh`. `LIB_PIN` names a tag or a branch, not a commit. Phase 7 clones the [labs](https://github.com/Neobotics-Foundation-Inc/neoracer-labs) at tag `v0.9.0-neobotics` too, and `LABS_REPO=` / `LABS_PIN=` override them the same way. Phase 7 clones the labs only on a car that has none yet or for a labs refresh. If a clone fails, setup stops at phase 7 and leaves the car's library and labs as they were.
 
 ## The `racecar` shell tool
 
