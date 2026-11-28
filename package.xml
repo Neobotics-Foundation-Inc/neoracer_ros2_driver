@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>neoracer_ros2_driver</name>
-  <version>0.6.1</version>
+  <version>0.9.0</version>
   <description>Backend ROS2 driver for neoracer v1 with support for OSRbot software stack in collaboration with Seeed Studio</description>
   <maintainer email="chrisclai02@gmail.com">chrisclai</maintainer>
   <license>GPL-3.0-only</license>
@@ -21,12 +21,33 @@
   <depend>std_msgs</depend>
   <depend>vision_msgs</depend>
   <depend>diagnostic_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_ros</depend>
 
   <!-- ESP32 + LED-matrix serial bridge -->
   <exec_depend>python3-serial</exec_depend>
   <!-- camera node (OpenCV JPEG encode into sensor_msgs/Image) -->
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <!-- the map viewer and scripts/validation read and draw saved maps (PGM and PNG) -->
+  <exec_depend>python3-pil</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <!-- autonomy_node: slam_toolbox for mapping; nav2 AMCL, map_server and
+       lifecycle_manager for localization on a saved map -->
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- tf2_ros above is the C++ package; on Humble the Python module that
+       autonomy_node and the controller import comes from tf2_ros_py -->
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <!-- the autonomy launch starts foxglove_bridge with foxglove:=true -->
+  <exec_depend>foxglove_bridge</exec_depend>
   <!-- inference node also needs ultralytics and a Tegra torch build; both come
        from scripts/setup_ml.sh, which has no rosdep key on this platform -->
 

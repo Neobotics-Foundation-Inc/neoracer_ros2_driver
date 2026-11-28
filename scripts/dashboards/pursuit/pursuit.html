@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-app="Pure pursuit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pure Pursuit · NeoRacer</title>
+<link rel="icon" href="/ui/brand/n-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/neoracer.css?v=2">
+<script src="/ui/theme.js?v=2"></script>
+<script src="/ui/lost.js?v=2" defer></script>
+<style>
+  /* This page only. The shared pieces are in /ui/neoracer.css. */
+  #cam { width: 100%; height: auto; display: block; aspect-ratio: 4 / 3; }
+  #form { display: grid; gap: 12px; }
+  #form label { display: grid; gap: 6px; font-weight: 700; font-size: 13px; }
+  #form label .unit { font-weight: 500; color: var(--nr-ink-2); }
+  #form label b { font-variant-numeric: tabular-nums; }
+  .readout { font: 400 13px/20px var(--nr-font-mono); color: var(--nr-ink-2); }
+</style>
+</head>
+<body>
+<header class="nr-header">
+  <a class="nr-logo" id="home" href="/" aria-label="NeoRacer, back to the apps page">
+    <img class="for-dark" src="/ui/brand/neoracer-logo-reversed.svg" alt="">
+    <img class="for-light" src="/ui/brand/neoracer-logo.svg" alt="">
+  </a>
+  <span class="nr-divider"></span>
+  <h1 class="nr-title">Pure Pursuit</h1>
+  <div class="nr-meta">
+    <span class="nr-live wait" id="live"><i></i><span>Waiting</span></span>
+    <button type="button" class="nr-btn danger small" onclick="reset()" title="Re-read the saved settings">Reset</button>
+    <div class="nr-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="dark">Dark</button>
+      <button type="button" data-theme-pick="light">Light</button>
+    </div>
+  </div>
+</header>
+
+<main class="nr-main" id="main">
+  <section class="nr-summary" aria-label="Summary">
+    <div class="nr-stats">
+      <div class="nr-stat" style="--len:10"><b id="model">?</b><span>Model</span></div>
+      <div class="nr-stat" style="--len:4"><b id="fps">?</b><span>Camera fps</span></div>
+      <div class="nr-stat" style="--len:12"><b id="tgt">none</b><span>Target</span></div>
+      <div class="nr-stat" style="--len:6"><b id="err">?</b><span>Error</span></div>
+      <div class="nr-stat" style="--len:6"><b id="steer">?</b><span>Steer</span></div>
+      <div class="nr-stat" style="--len:6"><b id="thr">?</b><span>Throttle</span></div>
+    </div>
+  </section>
+
+  <section class="nr-panel nr-span-8" aria-labelledby="t-camera">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-camera">Camera</h2></div>
+    <div class="nr-view"><canvas id="cam" width="640" height="480"></canvas></div>
+    <div class="readout" id="detail"></div>
+  </section>
+
+  <section class="nr-panel nr-span-4" aria-labelledby="t-tune">
+    <div class="nr-head"><h2 class="nr-panel-title" id="t-tune">Tune</h2></div>
+    <div id="form"></div>
+    <div class="nr-actions">
+      <button type="button" class="nr-btn primary small" onclick="apply()">Apply</button>
+      <button type="button" class="nr-btn small" onclick="saveTune()">Save</button>
+      <button type="button" class="nr-btn small" onclick="reset()">Load</button>
+    </div>
+    <p class="nr-note">Press Apply before Save. Save writes the values the car is
+    running now, so anything typed but not applied will not be saved.</p>
+  </section>
+</main>
+<div id="nr-toast" role="status"></div>
+
+<script>
+document.getElementById('home').href = `${location.protocol}//${location.hostname}:8080/`;
+const FIELDS = ['speed', 'speed_kp', 'safety_area', 'angle_kp', 'angle_kd',
+                'score_threshold', 'max_detections'];
+const UNITS = {
+  speed: '0 to 1 throttle cap', speed_kp: 'stopping gain',
+  safety_area: 'stop at this bbox area, 0..1 of image',
+  angle_kp: 'steer per unit offset', angle_kd: 'steering damper',
+  score_threshold: 'ignore detections below, 0..1',
+  max_detections: 'keep this many best scores',
+};
+const STEPS = { speed_kp: '0.01', angle_kp: '0.01', angle_kd: '0.01',
+                safety_area: '0.01', score_threshold: '0.05', max_detections: '1' };
+
+const c = document.getElementById('cam'), ctx = c.getContext('2d');
+const img = new Image();
+let last = null;
+img.onload = draw;
+
+// Pull frames one at a time so a congested link drops frame rate instead
+// of building a lag queue. Pauses when the tab is hidden.
+(function liveLoop() {
+  if (document.hidden) { setTimeout(liveLoop, 250); return; }
+  const t = Date.now();
+  const done = () => {
+    img.removeEventListener('load', done); img.removeEventListener('error', done);
+    setTimeout(liveLoop, Math.max(20, 160 - (Date.now() - t)));
+  };
+  img.addEventListener('load', done); img.addEventListener('error', done);
+  img.src = '/frame?' + t;
+})();
+
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null });
+}
+
+// Confirms Save and Load, so an unsaved tune is never a guess.
+function toast(msg) {
+  const t = document.getElementById('nr-toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function saveTune() {
+  post('/save').then(() => toast('Saved to the car profile'));
+}
+
+function reset() {
+  post('/load').then(() => {
+    document.getElementById('form').dataset.built = '';
+    toast('Loaded');
+  });
+}
+
+function apply() {
+  const out = {};
+  for (const f of FIELDS) out[f] = parseFloat(document.getElementById('in_' + f).value);
+  post('/params', out).then(() => toast('Applied'));
+}
+
+// The slider's red fill follows its value.
+function fill(el) { el.style.setProperty('--v', `${(el.value - el.min) / (el.max - el.min) * 100}%`); }
+
+function buildForm(params) {
+  const form = document.getElementById('form');
+  if (form.dataset.built) return;  // rebuild only on Reset/Load so typing survives
+  form.dataset.built = '1';
+  form.innerHTML = FIELDS.map(f => f === 'speed'
+    ? `<label>speed <span class="unit">${UNITS.speed}</span> <b id="speedval">${params.speed}</b>
+       <input id="in_speed" type="range" min="0" max="1" step="0.01" value="${params.speed}"></label>`
+    : `<label>${f} <span class="unit">${UNITS[f]}</span>
+       <input id="in_${f}" class="nr-input" type="number" step="${STEPS[f] || 'any'}" value="${params[f]}"></label>`
+  ).join('');
+  const speed = document.getElementById('in_speed');
+  fill(speed);
+  speed.oninput = () => {
+    fill(speed);
+    document.getElementById('speedval').textContent = speed.value;
+    post('/params', { speed: parseFloat(speed.value) });
+  };
+}
+
+function draw() {
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  if (!last) return;
+  const [W, H] = last.res[0] ? last.res : [c.width, c.height];
+  const sx = c.width / W, sy = c.height / H;
+  ctx.font = '600 13px "Space Grotesk", Arial, sans-serif'; ctx.lineWidth = 2;
+  for (const d of last.detections) {
+    const isTgt = last.target && d.cx === last.target.cx && d.cy === last.target.cy;
+    ctx.strokeStyle = isTgt ? '#FF0033' : 'rgba(245, 245, 247, 0.6)';
+    ctx.strokeRect((d.cx - d.w / 2) * sx, (d.cy - d.h / 2) * sy, d.w * sx, d.h * sy);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillText(`${d.label} ${d.score < 1 ? d.score : ''}`,
+                 (d.cx - d.w / 2) * sx + 3, (d.cy - d.h / 2) * sy - 4);
+  }
+  // Safety area reference: a centered box of the stop size. When the red
+  // target box grows past this outline, the car is fully stopped.
+  const p = last.params;
+  const aw = Math.sqrt(p.safety_area * 4 / 3) * c.width * 0.866;
+  const ah = aw * 0.75;
+  ctx.strokeStyle = '#FFC847'; ctx.setLineDash([6, 4]);
+  ctx.strokeRect((c.width - aw) / 2, (c.height - ah) / 2, aw, ah);
+  ctx.setLineDash([]);
+  // Center line the steering chases
+  ctx.strokeStyle = 'rgba(245, 245, 247, 0.35)';
+  ctx.beginPath(); ctx.moveTo(c.width / 2, 0); ctx.lineTo(c.width / 2, c.height); ctx.stroke();
+}
+
+// Live while the car answers; No answer after a second of missed polls.
+let misses = 0, lastBeat = 0;
+function beat(ok) {
+  const el = document.getElementById('live'), word = el.querySelector('span');
+  if (ok) {
+    misses = 0;
+    document.getElementById('main').classList.remove('nr-lost-data');
+    if (Date.now() - lastBeat < 1000) return;
+    lastBeat = Date.now();
+    el.className = 'nr-live beat'; word.textContent = 'Live';
+    setTimeout(() => { el.className = 'nr-live'; }, 120);
+  } else if (++misses >= 5) {
+    el.className = 'nr-live lost'; word.textContent = 'No answer';
+    document.getElementById('main').classList.add('nr-lost-data');
+  }
+}
+
+function update() {
+  fetch('/state').then(r => r.json()).then(d => {
+    beat(true);
+    last = d;
+    document.getElementById('model').textContent = d.model;
+    document.getElementById('fps').textContent = d.cam_fps;
+    document.getElementById('tgt').textContent = d.target
+      ? `${d.target.label} (area ${(d.area * 100).toFixed(1)}%)` : 'none';
+    document.getElementById('err').textContent = d.error ?? '?';
+    document.getElementById('steer').textContent = d.steer;
+    document.getElementById('thr').textContent = d.speed_cmd;
+    buildForm(d.params);
+    document.getElementById('detail').textContent =
+      `${d.detections.length} detection(s). Yellow dashes: stop size (safety_area). ` +
+      `Red box: the target being chased. No target: the last command keeps driving.`;
+  }).catch(() => beat(false));
+}
+
+update();
+setInterval(update, 200);
+</script>
+</body>
+</html>

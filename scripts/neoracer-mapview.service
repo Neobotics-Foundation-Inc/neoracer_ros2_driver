@@ -1,0 +1,30 @@
+[Unit]
+Description=Neoracer Web Map Viewer (port 8088)
+# The data root first, as for every neoracer unit: the map list reads it.
+Wants=neoracer-data.service
+After=neoracer-data.service
+After=network.target
+
+[Service]
+Type=exec
+User=racecar
+Group=racecar
+# Independent of teleop: the page offers "Start mapping" while autonomy is stopped.
+# RACECAR_DATA_DIR, from neoracer-data.service, so maps are read from
+# ~/neoracer_data/maps.
+EnvironmentFile=-/run/racecar/environment
+# The buttons run `racecar map`, which starts and stops neoracer-autonomy.service
+# through `sudo -n` (/etc/sudoers.d/neoracer). NoNewPrivileges=yes would stop
+# sudo, so this unit leaves it unset.
+ExecStart=/bin/bash -c '\
+    source /opt/ros/humble/setup.bash && \
+    source /home/racecar/ros2_ws/install/setup.bash && \
+    exec python3 /home/racecar/ros2_ws/src/neoracer_ros2_driver/scripts/mapview.py'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+Environment=HOME=/home/racecar
+WorkingDirectory=/home/racecar/ros2_ws
+
+[Install]
+WantedBy=multi-user.target

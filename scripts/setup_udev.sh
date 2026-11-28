@@ -15,7 +15,12 @@ fi
 
 sudo install -m 0644 "${RULES_SRC}" "${RULES_DST}"
 sudo udevadm control --reload-rules
-sudo udevadm trigger
+# Only the subsystems the racecar rules match, as upstream does. A bare trigger
+# replays every device on a running car, the network included, which can drop
+# the SSH session that runs `racecar update`.
+for subsystem in tty video4linux; do
+    sudo udevadm trigger --subsystem-match="$subsystem"
+done
 
 echo "Installed ${RULES_DST}."
 echo "Symlinks /dev/osrbot_base, /dev/osrbot_led_matrix, /dev/osrbot_usb_cam"

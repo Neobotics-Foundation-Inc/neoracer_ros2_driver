@@ -1,0 +1,46 @@
+# NeoRacer line-follow parameters: an HSV color threshold, a crop area
+# across the floor, and the PD steering and proportional throttle that keep
+# the largest patch of that color under the car's nose.
+#
+# The four blocks are the four trackbar groups on the dashboard, in order.
+# These are the shipped defaults. Save on the dashboard writes this car's
+# values to the car profile, in ~/.config/racecar/dashboards/linefollow.yaml,
+# which loads on top of this file; a driver update leaves that file alone.
+# Reset or Load re-reads both.
+
+# --- 1. HSV threshold. OpenCV ranges: hue 0..179, saturation and value 0..255.
+#        A hue low above its high wraps through 0, which is how red is picked.
+h_low: 0
+h_high: 179
+s_low: 0
+s_high: 255
+v_low: 0
+v_high: 255
+
+# --- 2. speed and angle ---
+speed: 0.0          # 0..1 throttle. Ships at 0.0: the NeoRacer mux has no ROS
+                    # deadman (the handset's mode switch is the gate), so
+                    # nothing drives until you raise it.
+angle_kp: 1.0       # steer per unit of line offset. The offset runs -1 (line
+                    # at the left edge) to +1 (right edge), so 1.0 reaches full
+                    # lock at the edge and 2.0 at half way.
+
+# --- 3. crop area, as fractions of the image height measured from the top ---
+crop_top: 0.6       # move both edges together to look nearer or farther;
+crop_bottom: 1.0    # spread them apart to see more of the floor at once
+
+# --- 4. proportional speed and derivative steering ---
+speed_kp: 0.0       # throttle drop per unit of |offset|: the car slows as the
+                    # line moves off center. 0 = constant speed.
+angle_kd: 0.0       # steering damper on the change in offset between frames.
+                    # Raise this if the car weaves.
+
+min_area: 30        # smallest contour, in pixels at process_width, that counts
+                    # as the line. Raise it to ignore specks.
+process_width: 320  # frames are shrunk to this width before thresholding
+
+# Which camera topic to read. Latest driver: /camera/color. Older cars: /camera.
+camera_topic: /camera/color
+
+preview_width: 320    # live view width sent to the browser, pixels
+preview_quality: 45   # live view jpeg quality 1..100

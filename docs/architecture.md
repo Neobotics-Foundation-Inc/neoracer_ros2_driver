@@ -13,23 +13,30 @@ one student library serves both cars; see [Topic contract](#topic-contract).
 
 | Module (path) | Responsibility | Depends on |
 | --- | --- | --- |
-| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/joy`, `/mag`, `/battery`, and the scalar `rc.physics` topics | controller_lib, pyserial |
+| `controller` (neoracer_ros2_driver/controller.py) | ESP32 serial bridge; maps `/motor` to the `v` command, publishes `/imu/fused`, `/odom`, `/odom/integrated` and its TF `odom -> base_link`, `/joy`, `/mag`, `/battery/state` (and `/battery` for one more release), and the scalar `rc.physics` topics | controller_lib, odometry, pyserial |
 | `controller_lib` (neoracer_ros2_driver/controller_lib.py) | pure parsing + FlySky-to-Joy mapping (unit-tested) | - |
 | `gamepad_node` (neoracer_ros2_driver/gamepad_node.py) | `/joy` to `/gamepad_drive` | ackermann_msgs |
-| `mux_node` (neoracer_ros2_driver/mux_node.py) | gate `/gamepad_drive` (manual) or `/drive` (autonomy) to `/mux_out` | - |
-| `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps; `/mux_out` to `/motor` | - |
+| `mux_node` (neoracer_ros2_driver/mux_node.py) | forward fresh `/drive` to `/mux_out`, zero once stale (`autonomy_passthrough`, the default); with it off, gate `/gamepad_drive` (LB) or `/drive` (RB) | - |
+| `throttle_node` (neoracer_ros2_driver/throttle_node.py) | speed/steer caps, and the mapping caps while `/autonomy/status` reports mapping; `/mux_out` to `/motor` | - |
+| `autonomy_node` (neoracer_ros2_driver/autonomy_node.py) | the one SLAM interface. It reads `/scan`, the localizer's pose (`/pose` from slam_toolbox, `/amcl_pose` from AMCL) and, in localization, `/map`. It publishes `/autonomy/status` (latched, carries the mode the throttle and inference nodes read), `/autonomy/pose` and, for AMCL, `/initialpose`, and serves `/autonomy/save_map`, `/autonomy/autosave` and `/autonomy/global_localization`. Maps go under the data root's `maps/` folder (`~/neoracer_data/maps`; `RACECAR_MAP_ROOT` overrides it). It reads TF and publishes none. The autonomy launch starts it | autonomy, maps, slam_toolbox, nav2_map_server |
+| `autonomy` (neoracer_ros2_driver/autonomy.py) | pure localized test, scan fit and map files (unit-tested) | numpy, scipy |
+| autonomy launch (launch/autonomy.launch.py) | SLAM on top of teleop: slam_toolbox while mapping; map_server and AMCL under the Nav2 lifecycle manager, or the slam_toolbox localizer, in localization; `autonomy_node` in every mode. Configs `slam_mapping.yaml`, `slam_localization.yaml`, `amcl.yaml` and `autonomy.yaml`, each followed by its car profile override. With `foxglove:=true` it also starts `foxglove_bridge` with `foxglove.yaml` (port 8765, view only); `foxglove_layout.json` is a Lichtblick layout, imported by hand. Run by `racecar launch autonomy` or `neoracer-autonomy.service` (scripts/launch_autonomy.sh, autonomy_args.py, autonomy_stop.py) | slam_toolbox, nav2_amcl, nav2_map_server, nav2_lifecycle_manager, foxglove_bridge |
+| validation (scripts/validation/) | test tools on top of the autonomy launch, run from the source tree: `slam_session.py` runs a mapping or localization session (teleop, the launch, foxglove_bridge, an MCAP bag, a load record of the Jetson) and replays its bag through slam_toolbox or AMCL offline; `slam_eval.py`, `scan_fit.py`, `live_fit.py` and `compare_maps.py` measure loads, poses, scan fits and maps. Records go under the data root's `slam_eval/` | the autonomy launch, sysinfo, numpy, SciPy, Pillow |
+| `racecar map` (scripts/neoracer_map.py, scripts/map_control.py) | the operator front end for mapping and localization: checks the request, writes the mode file `~/.config/racecar/autonomy.conf`, stops and starts `neoracer-autonomy.service` through `sudo -n systemctl`, and waits for `/autonomy/status`. A mapping start reads the speed switch on `/rc/channels` and goes ahead only with it UP. A start or load stops the lab apps that publish `/drive` | autonomy, maps, rclpy |
+| map viewer (scripts/mapview.py, scripts/mapview.html, neoracer-mapview.service) | the web front end of `racecar map` on port 8088: the live map, the car's pose and trail, the scan, and the autonomy status. Its buttons run `racecar map` as a child process, one at a time. Set pose publishes `/initialpose` and Find me calls `/autonomy/global_localization`; it publishes no `/drive`. It subscribes to `/autonomy/status`, `/autonomy/pose`, `/map` and `/scan` only while a browser polls, and reads the map list and thumbnails from the map folder. Its warnings use the Jetson readers in scripts/sysinfo.py. Setup installs the unit and enables it at boot | map_control, autonomy, maps, sysinfo, webui, rclpy, Pillow |
 | `camera` (neoracer_ros2_driver/camera.py) | USB webcam to `/camera/color` (JPEG-in-Image) | opencv, numpy |
-| `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray) | inference_lib, ultralytics, torch, vision_msgs |
+| `inference_node` (neoracer_ros2_driver/inference_node.py) | YOLO on `/camera/color` frames to `/edgetpu/inference` (Detection2DArray), paused while `/autonomy/status` reports mapping | inference_lib, ultralytics, torch, vision_msgs |
 | `inference_lib` (neoracer_ros2_driver/inference_lib.py) | pure frame decode + box geometry (unit-tested) | opencv, numpy |
 | `led_matrix` (neoracer_ros2_driver/led_matrix_node.py) | `/dotmatrix/text` to USB-UART 8x8; writes `idle_text` on startup and shutdown | pyserial |
 | `lakibeam1` (pinned fork, cloned to `src/`) | Lakibeam lidar to `/scan` | rclcpp, libcurl |
+| `frames` (launch/frames.launch.py, neoracer_ros2_driver/frames.py) | `robot_state_publisher` on urdf/neoracer.urdf.xacro: the static TF tree `base_link` -> `laser`, `imu_link`, `camera_link`, `base_footprint`, offsets from config/frames.yaml and the car profile | robot_state_publisher, xacro |
 
 ## Data pipeline
 
 ```
 FlySky RC -> controller -> /joy -> gamepad_node -> /gamepad_drive ->
    mux_node -> /mux_out -> throttle_node -> /motor -> controller -> ESP32 ESC
-student lib -> /drive ------------------------^  (autonomy; gated by FlySky switch)
+student lib -> /drive ------------------------^  (autonomy; the ESP32 takes it with the mode switch down)
 ESP32 -> /imu/fused, /odom   Lakibeam -> /scan   USB cam -> /camera/color
 student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
 
@@ -45,9 +52,11 @@ student lib -> /dotmatrix/text -> led_matrix -> 8x8 display
   `docs/esp32_protocol.md`.
 - Network: Lakibeam lidar over UDP at `192.168.8.2` (launch/lidar.launch.py).
 - USB video: camera at `/dev/osrbot_usb_cam` (camera.py).
-- Topics: `/motor`, `/imu/fused`, `/odom`, `/joy`, `/mag`, `/battery`, `/scan`,
+- Topics: `/motor`, `/imu/fused`, `/odom`, `/odom/integrated`, `/joy`, `/mag`, `/battery/state`, `/scan`,
   `/camera/color`, `/edgetpu/inference`, `/dotmatrix/text`, `/drive`, and the
   scalar `/encoder/speed`, `/battery/voltage`, `/rc/channels`.
+- TF: the static tree from `base_link` (frames), `odom -> base_link` from the
+  controller, and `map -> odom` from slam_toolbox or AMCL in the autonomy launch.
 - Weights: `share/neoracer_ros2_driver/models/`, searched before the working
   directory and before Ultralytics' own cache (inference_lib.resolve_model_path).
 
@@ -62,7 +71,7 @@ run different hardware behind identical names:
 | --- | --- | --- |
 | `/camera/color` | RealSense D435i color, remapped | USB webcam, JPEG-in-Image |
 | `/imu/fused` | `imu_fusion_node` blending D435i and LSM9DS1 | ESP32 IMU, single source |
-| `/mag`, `/encoder/speed`, `/battery/voltage`, `/rc/channels` | `pit_node` from the Teensy | `controller` from the ESP32 |
+| `/mag`, `/encoder/speed`, `/battery/voltage`, `/rc/channels`, `/rc/link` | `pit_node` from the Teensy | `controller` from the ESP32 |
 | `/edgetpu/inference` | Coral EdgeTPU, tflite | Orin iGPU, YOLO through TensorRT |
 | `/dotmatrix/text` | MAX7219 chain, 24x8 | USB-UART 8x8 panel |
 | `/scan`, `/joy`, `/drive`, `/motor`, `/mux_out`, `/gamepad_drive` | same | same |
@@ -73,15 +82,16 @@ naming the missing part: `/camera/depth` (no depth camera), `/battery/current`
 (no current shunt), `/led/pixels` (no addressable strip), and
 `/dotmatrix/pixels` (the panel firmware takes text only).
 
-`/odom`, `/odometry/filtered`, `/map`, `/plan`, and `/cmd_vel` are NeoRacer
-additions with no reference counterpart. They serve the SLAM and Nav2 layer
-(`rc.slam`, `rc.nav`) that the reference platform does not carry.
+`/map` comes from slam_toolbox or map_server in the autonomy launch, as on the
+reference platform. The driver no longer starts the vendor EKF or Nav2, so
+`/odometry/filtered`, `/plan` and `/cmd_vel` are gone; navigation comes with a
+later upstream release.
 
 ## GPU stack
 
-`inference_node` is the one driver node that uses the GPU. It is part of the
-default teleop stack, so the GPU is held for the life of that stack; disable it
-with `inference_enable:=false` to get the memory back. The stack is
+`inference_node` is the one driver node that uses the GPU. It is off at boot
+(`scripts/features.py`). Once it is turned on, the GPU is held for the life of
+the teleop stack; launch teleop without it to get the memory back. The stack is
 installed by `scripts/setup_ml.sh` into the user site so the systemd units (which
 run as the same user) can import it.
 
@@ -101,38 +111,50 @@ rather than failing, and logs that it did.
 
 ## Lab dashboards
 
-Seven lab tools live in repositories of their own and are cloned into
-`scripts/dashboards/` by `scripts/setup_services.sh`, each tracking its default
-branch. The driver ships the wiring, not the code: the checkouts are gitignored,
-so a car's tuned dashboard yaml survives an update and a lab can be revised
-without a driver release.
+Seven lab tools ship in the driver, one folder each in `scripts/dashboards/`,
+and `scripts/setup_dashboards.sh` installs their units. `setup_services.sh` runs
+it, so `racecar service install` and `setup_all.sh` both install them, with no
+network.
 
 ```
 setup_services.sh
     |
     |-- core units -> /etc/systemd/system/ -> enabled at boot
+    |-- neoracer-autonomy.service -> /etc/systemd/system/ -> not enabled
+    |-- sudoers.d-neoracer -> visudo -c -> /etc/sudoers.d/neoracer (root, 0440)
     |
-    `-- scripts/dashboards/<name>_dashboard/   (git clone, default branch)
+    `-- setup_dashboards.sh
               |
-              `-- setup.sh -> renders neoracer-<name>.service.in with its own
-                              path -> /etc/systemd/system/ -> installed disabled
+              |-- dashboards/checkouts.py: old checkouts' tuning -> car profile,
+              |                            the checkouts -> dashboards/.migrated/
+              |
+              `-- scripts/dashboards/<id>/neoracer-<id>.service.in
+                      -> rendered with its folder -> /etc/systemd/system/
+                      -> installed disabled
 ```
 
 Each dashboard is a single process that subscribes to driver topics and serves
-its own web UI: camlabel (8082) on `/camera/color`, wallfollow (8081) on
-`/scan`, pursuit (8083) on `/edgetpu/inference`, eps (8084) on `/scan` and
-`/odom`, smartfollow (8085) on all four of those topics at once, linefollow
+its own web UI: wallfollow (8081) on `/scan`, camlabel (8082) on
+`/camera/color`, pursuit (8083) on `/edgetpu/inference`, eps (8084) on `/scan`
+and `/odom`, smartfollow (8085) on all four of those topics at once, linefollow
 (8086) on `/camera/color` and `/odom`, webteleop (8087) on `/camera/color`,
-`/scan`, and `/odom`. They stay off by default because each holds the camera
+`/scan`, `/odom`, `/imu/fused`, `/mag`, `/battery/state` and
+`/edgetpu/inference`. They stay off by default because each holds the camera
 or the GPU for its whole run, and wallfollow, pursuit, eps, smartfollow,
 linefollow, and webteleop all publish `/drive`, where a second publisher
 fights the mux. One at a time, started per session through
-`racecar service start <name>`.
+`racecar service start <name>`. Autonomy and those six also run one at a
+time, because a driving app beside the localizer or slam_toolbox leaves too
+little CPU. A `racecar map` start, load or resume stops them first
+(`DRIVING_APPS` in `scripts/map_control.py`).
 
-The unit is a template rather than a fixed file so the service follows the
-checkout; that is what lets the driver own the install path without vendoring
-the dashboards. `racecar service restart` acts only on enabled units, so a
-field update never brings a dashboard up on its own.
+A dashboard's tuning lives in the car profile and its logs under the data
+root, never in the tree, so a driver update keeps both. Before the dashboards
+moved in-tree, setup cloned each one's repository to
+`scripts/dashboards/<repo>_dashboard/` and the tuning lived in the checkout;
+`checkouts.py` carries a car across, as [docs/dashboards.md](dashboards.md)
+describes. `racecar service restart` acts only on enabled units, so a field
+update never brings a dashboard up on its own.
 
 ## Constraints
 

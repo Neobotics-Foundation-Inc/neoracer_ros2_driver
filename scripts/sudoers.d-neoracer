@@ -1,0 +1,55 @@
+# NeoRacer: start, stop and restart the driver's own services with no password.
+# `racecar service`, `racecar map`, the 8080 apps page (scripts/dashboard.py)
+# and the map viewer (scripts/mapview.py) use it.
+# scripts/setup_services.sh checks this file with `visudo -cf` and installs it
+# as /etc/sudoers.d/neoracer, owned by root, mode 0440.
+#
+# Each unit is named in full. A wildcard such as neoracer-* is not used,
+# because in sudoers * also matches spaces, so it would allow other units and
+# options. Every other systemctl command (enable, disable, mask, edit) and
+# every other unit still asks for the password.
+
+Cmnd_Alias NEORACER_CORE = \
+    /usr/bin/systemctl start neoracer-teleop.service, \
+    /usr/bin/systemctl stop neoracer-teleop.service, \
+    /usr/bin/systemctl restart neoracer-teleop.service, \
+    /usr/bin/systemctl start neoracer-watchdog.service, \
+    /usr/bin/systemctl stop neoracer-watchdog.service, \
+    /usr/bin/systemctl restart neoracer-watchdog.service, \
+    /usr/bin/systemctl start neoracer-dashboard.service, \
+    /usr/bin/systemctl stop neoracer-dashboard.service, \
+    /usr/bin/systemctl restart neoracer-dashboard.service, \
+    /usr/bin/systemctl start neoracer-jupyter.service, \
+    /usr/bin/systemctl stop neoracer-jupyter.service, \
+    /usr/bin/systemctl restart neoracer-jupyter.service, \
+    /usr/bin/systemctl start neoracer-autonomy.service, \
+    /usr/bin/systemctl stop neoracer-autonomy.service, \
+    /usr/bin/systemctl restart neoracer-autonomy.service, \
+    /usr/bin/systemctl start neoracer-mapview.service, \
+    /usr/bin/systemctl stop neoracer-mapview.service, \
+    /usr/bin/systemctl restart neoracer-mapview.service
+
+Cmnd_Alias NEORACER_LABS = \
+    /usr/bin/systemctl start neoracer-camlabel.service, \
+    /usr/bin/systemctl stop neoracer-camlabel.service, \
+    /usr/bin/systemctl restart neoracer-camlabel.service, \
+    /usr/bin/systemctl start neoracer-wallfollow.service, \
+    /usr/bin/systemctl stop neoracer-wallfollow.service, \
+    /usr/bin/systemctl restart neoracer-wallfollow.service, \
+    /usr/bin/systemctl start neoracer-pursuit.service, \
+    /usr/bin/systemctl stop neoracer-pursuit.service, \
+    /usr/bin/systemctl restart neoracer-pursuit.service, \
+    /usr/bin/systemctl start neoracer-eps.service, \
+    /usr/bin/systemctl stop neoracer-eps.service, \
+    /usr/bin/systemctl restart neoracer-eps.service, \
+    /usr/bin/systemctl start neoracer-smartfollow.service, \
+    /usr/bin/systemctl stop neoracer-smartfollow.service, \
+    /usr/bin/systemctl restart neoracer-smartfollow.service, \
+    /usr/bin/systemctl start neoracer-linefollow.service, \
+    /usr/bin/systemctl stop neoracer-linefollow.service, \
+    /usr/bin/systemctl restart neoracer-linefollow.service, \
+    /usr/bin/systemctl start neoracer-webteleop.service, \
+    /usr/bin/systemctl stop neoracer-webteleop.service, \
+    /usr/bin/systemctl restart neoracer-webteleop.service
+
+racecar ALL=(root) NOPASSWD: NEORACER_CORE, NEORACER_LABS

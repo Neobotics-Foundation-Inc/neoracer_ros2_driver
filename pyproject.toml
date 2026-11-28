@@ -1,0 +1,46 @@
+# Lint and format configuration only; the package builds through setup.py
+# (ament_python). Tool versions are pinned in scripts/setup_dev_tools.sh.
+# Settings track ament_flake8: 99 columns, single quotes.
+#
+# The lab dashboards in scripts/dashboards/<id>/ are linted with the rest. A car
+# set up before they moved in-tree may still hold the old checkouts there
+# (<repo>_dashboard/, or .migrated/ once setup_dashboards.sh has moved them);
+# those are other repositories' code and are excluded.
+
+# Python 3.10 is the car's Python: Ubuntu 22.04 on the Jetson, ROS 2 Humble.
+[tool.black]
+line-length = 99
+skip-string-normalization = true
+target-version = ['py310']
+extend-exclude = '^/(scripts/dashboards/([^/]+_dashboard|\.migrated)|build|install|log)/'
+
+[tool.ruff]
+line-length = 99
+target-version = 'py310'
+extend-exclude = [
+    'scripts/dashboards/*_dashboard',
+    'scripts/dashboards/.migrated',
+    'build',
+    'install',
+    'log',
+]
+
+[tool.ruff.lint]
+# Import order is left to ament_flake8 (google style).
+select = ['E', 'F', 'W', 'B', 'C4', 'Q', 'UP']
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = 'single'
+
+[tool.mypy]
+python_version = '3.10'
+files = ['neoracer_ros2_driver', 'launch', 'scripts']
+exclude = ['^scripts/dashboards/([^/]+_dashboard|\.migrated)/']
+# rclpy, message packages and the GPU stack ship no type stubs.
+ignore_missing_imports = true
+# launch/ has no __init__.py; as a namespace package it would shadow ROS launch.
+namespace_packages = false
+# The tree is mostly untyped today. Ported MIT modules are typed; this goes to
+# true once the remaining NeoRacer modules are annotated.
+disallow_untyped_defs = false
+warn_unused_ignores = true

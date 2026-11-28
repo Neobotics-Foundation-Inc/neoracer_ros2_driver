@@ -1,0 +1,57 @@
+# NeoRacer smart-follow parameters: the dynamic wall follower and the
+# pure pursuit car follower in one service. The car chases a detected car
+# when one is in view and falls back to wall following when none is.
+#
+# The two blocks below are the wallfollow (mode 1) and pursuit parameter
+# sets, key for key. Copy the values tuned on those dashboards straight in.
+# These are the shipped defaults. Save on the dashboard writes this car's
+# values to the car profile, in ~/.config/racecar/dashboards/smartfollow.yaml,
+# which loads on top of this file; a driver update leaves that file alone.
+# Reset or Load re-reads both.
+
+target_hold: 0.7      # seconds a target stays valid after its last detection.
+                      # Bridges dropped detection frames so the state does not
+                      # flicker. After this long with nothing detected the
+                      # wall follower takes the car back.
+
+# --- wall following: dynamic gap follower on /scan (wallfollow.yaml) ---
+wall:
+  speed: 0.0          # 0..1 command like the racecar library; 1 = top
+                      # speed (max_mps). Ships at 0.0: the NeoRacer mux has no
+                      # ROS deadman (the handset's mode switch is the gate),
+                      # so nothing drives until you raise it.
+  kp: 0.5             # steering strength
+  speed_kp: 0.0       # 0 = constant speed (slider only). Raise to enable correction.
+  speed_kd: 0.0       # damper for the correction; only used when speed_kp > 0
+  kd: 4.0             # damper. Raise this if the car wobbles.
+  window: 10.0        # averaging window per ray, in degrees. Smooths noise.
+  max_mps: 4.0        # m/s the speed loop reads slider 1.0 as; slider x this
+                      # = target. Upstream's value: the NeoRacer's /drive 1.0
+                      # is 6.0 m/s (max_speed_mps in controller.yaml). Unused
+                      # while speed_kp and speed_kd are 0.
+  lookahead: 3.0      # meters. Distances are capped here, so an open side
+                      # reads as lookahead, not as 12 m of empty room.
+  width: 80.0         # search this many degrees left and right of the nose
+  side_weight: 0.0    # score bonus (m per degree) toward the right. Negative
+                      # prefers left.
+
+# --- car following: pure pursuit on /edgetpu/inference (pursuit.yaml) ---
+car:
+  speed: 0.0          # top throttle 0..1. Ships at 0.0 for the same reason as
+                      # wall.speed above.
+  speed_kp: 0.2       # throttle ramp toward the target speed. This is the
+                      # stopping gain: higher brakes and accelerates harder.
+  safety_area: 0.15   # bbox area as a fraction of the image (0..1) where the
+                      # car fully stops. Braking starts as the box grows
+                      # toward this size.
+  angle_kp: 1.0       # steering strength on the target's horizontal offset
+  angle_kd: 0.1       # steering damper. Raise this if the car wobbles.
+  score_threshold: 0.5  # ignore detections scored below this (0..1)
+  max_detections: 5   # keep only this many best-scoring detections
+
+# Which topics to read. Latest driver: /camera/color. Older cars: /camera.
+camera_topic: /camera/color
+detections_topic: /edgetpu/inference
+
+preview_width: 320    # live view width sent to the browser, pixels
+preview_quality: 45   # live view jpeg quality 1..100

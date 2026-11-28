@@ -11,7 +11,9 @@ JUPYTER_WS="$USER_HOME/jupyter_ws"
 # is only needed on PEP 668 images (Pi-OS bookworm/noble, where this script
 # came from); Jammy's pip 22.0.2 errors on it. Probe instead of assuming.
 PIP_FLAGS=(--user)
-if pip3 install --help 2>/dev/null | grep -q -- '--break-system-packages'; then
+# The help text is read whole. Under pipefail, a pipe into `grep -q` can
+# fail pip on a closed pipe although the flag was found.
+if [[ "$(pip3 install --help 2>/dev/null)" == *--break-system-packages* ]]; then
     PIP_FLAGS+=(--break-system-packages)
 fi
 
@@ -99,41 +101,131 @@ EOF
     echo "Created $JUPYTER_WS"
 fi
 
+# The data root (neoracer_ros2_driver/data_root.py) and its saved maps, linked
+# into the JupyterLab file browser, which is rooted at ~/jupyter_ws. The links
+# are made here because neoracer-installer removes ~/jupyter_ws.
+if [ -r /run/racecar/data_root ]; then
+    DATA_ROOT="$(cat /run/racecar/data_root)"
+else
+    DATA_ROOT="$USER_HOME/neoracer_data"
+fi
+MAP_ROOT="$DATA_ROOT/maps"
+mkdir -p "$MAP_ROOT"
+for link in data maps; do
+    target="$DATA_ROOT"
+    [ "$link" = maps ] && target="$MAP_ROOT"
+    if [ -L "$JUPYTER_WS/$link" ] || [ ! -e "$JUPYTER_WS/$link" ]; then
+        ln -sfn "$target" "$JUPYTER_WS/$link"
+        echo "Linked $JUPYTER_WS/$link -> $target"
+    fi
+done
+
 # ---------------------------------------------------------------------------
 # Student library + labs.
 # ---------------------------------------------------------------------------
-# Two Neobotics repos supply the student side. The racecar-neo library fork
-# tracks main, which carries the FlySky auto-start fix (go() enters user program
-# mode without a START button - the FlySky RC has none, unlike the Xbox pad the
-# upstream MIT library assumes) plus rc.slam and rc.nav. That work landed on
-# main in v0.3.2; the old neobotics-slam-nav branch it used to name is gone.
-# The labs come from neoracer-labs. Assemble both into
+# Two Neobotics repos supply the student side. The racecar-neo library fork is
+# pinned to the tag made for this driver release, so a car set up later gets
+# the library this driver was tested with. The fork carries the NeoRacer
+# changes, such as the FlySky auto-start (go() enters the user program with no
+# START button, because the FlySky handset has none), the JPEG camera decode
+# and the 1,440-point lidar. Override LIB_REPO/LIB_PIN to test an unreleased
+# library revision on a car. LIB_PIN names a tag or a branch; `git clone
+# --branch` does not take a commit hash. LIB_REPO can be a local clone.
+# The labs come from neoracer-labs, pinned the same way to the tag made for
+# this driver release, so `racecar update --labs` gets the labs written for
+# this library. Override LABS_REPO/LABS_PIN to test unreleased labs on a car.
+# A labs change that cars should get takes a new labs tag and a new LABS_PIN
+# here, as a library change does. Assemble both into
 # ~/jupyter_ws/neoracer-os/{library,labs} and point the student .pth at the
-# library so notebooks can `import racecar_core`. Re-running refreshes both; a
-# fetch failure aborts setup rather than leaving a half-installed library.
-LIB_REPO="https://github.com/Neobotics-Foundation-Inc/racecar-neo-library"
-LIB_BRANCH="main"
-LABS_REPO="https://github.com/Neobotics-Foundation-Inc/neoracer-labs"
+# library so notebooks can `import racecar_core`.
+# Every run replaces the library, so it matches this driver. The labs folder
+# is the student's workspace. The first run copies the labs in. A later run
+# leaves the labs as they are and does not fetch them, unless
+# RACECAR_LABS_REFRESH is 1. `racecar update --labs` sets it to 1, and
+# `racecar update` sets it to 0. With it at 1, the run copies the labs folder
+# to labs-backup-YYYYMMDD-HHMMSS beside it, then overlays the shipped files.
+# Files a student added stay in place. To refresh the labs with no git reset,
+# run `RACECAR_LABS_REFRESH=1 racecar setup all`. A fetch failure stops setup
+# and leaves the library and the labs as they were.
+LIB_REPO="${LIB_REPO:-https://github.com/Neobotics-Foundation-Inc/racecar-neo-library}"
+LIB_PIN="${LIB_PIN:-v0.9.0-neobotics}"
+LABS_REPO="${LABS_REPO:-https://github.com/Neobotics-Foundation-Inc/neoracer-labs}"
+LABS_PIN="${LABS_PIN:-v0.9.0-neobotics}"
 NEO_OS="$JUPYTER_WS/neoracer-os"
+LABS="$NEO_OS/labs"
 
-echo "Fetching student library ($LIB_BRANCH) + labs..."
+FETCH_LABS=1
+if [ -d "$LABS" ] && [ "${RACECAR_LABS_REFRESH:-0}" != 1 ]; then
+    FETCH_LABS=0
+fi
+
+echo "Fetching student library ($LIB_PIN)..."
 TMP="$(mktemp -d)"
-git clone --depth 1 --branch "$LIB_BRANCH" "$LIB_REPO" "$TMP/lib"
-git clone --depth 1 "$LABS_REPO" "$TMP/labs"
+# An EXIT trap removes the temp folder on any exit, so a failed backup or
+# copy leaves none behind.
+trap 'rm -rf "$TMP"' EXIT
+if ! git clone --depth 1 --branch "$LIB_PIN" "$LIB_REPO" "$TMP/lib"; then
+    rm -rf "$TMP"
+    echo "Could not fetch the student library at $LIB_PIN from $LIB_REPO." >&2
+    echo "Check the network. If that tag or branch does not exist, set LIB_PIN" >&2
+    echo "(and LIB_REPO) to one that does." >&2
+    echo "The library and the labs on the car are unchanged." >&2
+    exit 1
+fi
+if [ "$FETCH_LABS" = 1 ]; then
+    echo "Fetching labs ($LABS_PIN)..."
+    if ! git clone --depth 1 --branch "$LABS_PIN" "$LABS_REPO" "$TMP/labs"; then
+        rm -rf "$TMP"
+        echo "Could not fetch the labs at $LABS_PIN from $LABS_REPO." >&2
+        echo "Check the network. If that tag or branch does not exist, set LABS_PIN" >&2
+        echo "(and LABS_REPO) to one that does." >&2
+        echo "The library and the labs on the car are unchanged." >&2
+        exit 1
+    fi
+fi
 mkdir -p "$NEO_OS"
-# The library is ours to replace wholesale. The labs folder is the student's
-# workspace: overlay the shipped files but never delete what they saved there.
+# A refresh copies the labs folder before anything changes. mkdir fails on a
+# folder that exists, so a backup never lands inside an older one.
+if [ "$FETCH_LABS" = 1 ] && [ -d "$LABS" ]; then
+    BACKUP="$NEO_OS/labs-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir "$BACKUP"
+    cp -a "$LABS/." "$BACKUP/"
+    echo "Labs backed up to $BACKUP"
+fi
+# The library is replaced wholesale. The labs are copied only on a first
+# install or a refresh. The copy overlays the shipped files and deletes
+# nothing a student saved.
 rm -rf "$NEO_OS/library"
 cp -r "$TMP/lib/library" "$NEO_OS/library"
-rm -rf "$TMP/labs/.git"
-mkdir -p "$NEO_OS/labs"
-cp -r "$TMP/labs/." "$NEO_OS/labs/"
+if [ "$FETCH_LABS" = 1 ]; then
+    rm -rf "$TMP/labs/.git"
+    mkdir -p "$LABS"
+    cp -r "$TMP/labs/." "$LABS/"
+    echo "Labs ready: $LABS"
+else
+    echo "Labs left unchanged. Run 'racecar update --labs' to refresh them."
+fi
 rm -rf "$TMP"
 
 # Select this library by writing the same racecar_student.pth that
 # `racecar library --select neoracer-os` manages, so a fresh shell can
-# `import racecar_core` with no extra step.
+# `import racecar_core` with no extra step. A student who selected another
+# library keeps that choice. The .pth is kept when its first line names a
+# folder other than this library and that folder holds racecar_core.py.
+# `racecar library --select` and `--list` apply the same test to a folder.
 SITE="$(python3 -c 'import site; print(site.getusersitepackages())')"
-mkdir -p "$SITE"
-echo "$NEO_OS/library" > "$SITE/racecar_student.pth"
-echo "Student library ready: $NEO_OS/library (selected via $SITE/racecar_student.pth)"
+PTH="$SITE/racecar_student.pth"
+SELECTED=""
+if [ -f "$PTH" ]; then
+    SELECTED="$(head -n 1 "$PTH")"
+fi
+if [ -n "$SELECTED" ] && [ "$SELECTED" != "$NEO_OS/library" ] \
+    && [ -f "$SELECTED/racecar_core.py" ]; then
+    echo "Library selection kept: $SELECTED"
+    echo "Student library ready: $NEO_OS/library"
+    echo "Run 'racecar library --select neoracer-os' to use it."
+else
+    mkdir -p "$SITE"
+    echo "$NEO_OS/library" > "$PTH"
+    echo "Student library ready: $NEO_OS/library (selected via $PTH)"
+fi
